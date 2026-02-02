@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/ui-elements/toasts/page": []
+    "[project]/app/(components)/(contentlayout)/ui-elements/toasts/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

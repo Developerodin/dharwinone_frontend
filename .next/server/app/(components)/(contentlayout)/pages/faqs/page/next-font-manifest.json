@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/pages/faqs/page": []
+    "[project]/app/(components)/(contentlayout)/pages/faqs/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

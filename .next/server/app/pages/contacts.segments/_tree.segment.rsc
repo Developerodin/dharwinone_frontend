@@ -1,4 +1,4 @@
-:HL["/_next/static/chunks/b2fc5cdb1c883d93.css","style"]
+:HL["/_next/static/chunks/2e98cf7f69ae27dd.css","style"]
 :HC["/",""]
 :HL["../../assets/images/faces/4.jpg","image"]
 :HL["../../assets/images/faces/15.jpg","image"]
@@ -21,4 +21,4 @@
 :HL["../../assets/images/media/media-34.jpg","image"]
 :HL["../../assets/images/media/media-21.jpg","image"]
 :HL["../../assets/images/faces/6.jpg","image"]
-0:{"buildId":"a9hfVsIggm11we3_Vkn1t","tree":{"name":"","paramType":null,"paramKey":"","hasRuntimePrefetch":false,"slots":{"children":{"name":"(components)","paramType":null,"paramKey":"(components)","hasRuntimePrefetch":false,"slots":{"children":{"name":"(contentlayout)","paramType":null,"paramKey":"(contentlayout)","hasRuntimePrefetch":false,"slots":{"children":{"name":"pages","paramType":null,"paramKey":"pages","hasRuntimePrefetch":false,"slots":{"children":{"name":"contacts","paramType":null,"paramKey":"contacts","hasRuntimePrefetch":false,"slots":{"children":{"name":"__PAGE__","paramType":null,"paramKey":"__PAGE__","hasRuntimePrefetch":false,"slots":null,"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":true},"staleTime":300}
+0:{"buildId":"gyTUJfhaMx2_BMRgn-o4v","tree":{"name":"","paramType":null,"paramKey":"","hasRuntimePrefetch":false,"slots":{"children":{"name":"(components)","paramType":null,"paramKey":"(components)","hasRuntimePrefetch":false,"slots":{"children":{"name":"(contentlayout)","paramType":null,"paramKey":"(contentlayout)","hasRuntimePrefetch":false,"slots":{"children":{"name":"pages","paramType":null,"paramKey":"pages","hasRuntimePrefetch":false,"slots":{"children":{"name":"contacts","paramType":null,"paramKey":"contacts","hasRuntimePrefetch":false,"slots":{"children":{"name":"__PAGE__","paramType":null,"paramKey":"__PAGE__","hasRuntimePrefetch":false,"slots":null,"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":true},"staleTime":300}

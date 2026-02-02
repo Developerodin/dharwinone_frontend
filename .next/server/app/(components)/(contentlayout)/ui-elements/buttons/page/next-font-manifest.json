@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/ui-elements/buttons/page": []
+    "[project]/app/(components)/(contentlayout)/ui-elements/buttons/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

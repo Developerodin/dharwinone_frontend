@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/apps/nft/live-auction/page": []
+    "[project]/app/(components)/(contentlayout)/apps/nft/live-auction/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

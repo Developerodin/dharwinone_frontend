@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/pages/notifications/page": []
+    "[project]/app/(components)/(contentlayout)/pages/notifications/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

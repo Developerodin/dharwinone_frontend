@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(authenticationlayout)/authentication/lock-screen/screen-cover/page": []
+    "[project]/app/(components)/(authenticationlayout)/authentication/lock-screen/screen-cover/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

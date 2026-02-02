@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/advanced-ui/offcanvas/page": []
+    "[project]/app/(components)/(contentlayout)/advanced-ui/offcanvas/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

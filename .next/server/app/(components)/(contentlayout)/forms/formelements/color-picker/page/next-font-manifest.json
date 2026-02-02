@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/forms/formelements/color-picker/page": []
+    "[project]/app/(components)/(contentlayout)/forms/formelements/color-picker/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

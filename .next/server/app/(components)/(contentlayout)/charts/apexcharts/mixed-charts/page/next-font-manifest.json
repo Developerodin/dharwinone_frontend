@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/charts/apexcharts/mixed-charts/page": []
+    "[project]/app/(components)/(contentlayout)/charts/apexcharts/mixed-charts/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(authenticationlayout)/authentication/sign-in/signin-cover/page": []
+    "[project]/app/(components)/(authenticationlayout)/authentication/sign-in/signin-cover/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

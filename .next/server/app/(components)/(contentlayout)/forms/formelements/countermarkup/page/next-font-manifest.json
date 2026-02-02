@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/forms/formelements/countermarkup/page": []
+    "[project]/app/(components)/(contentlayout)/forms/formelements/countermarkup/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

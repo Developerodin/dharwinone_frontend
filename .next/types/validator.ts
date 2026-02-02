@@ -540,6 +540,15 @@ type LayoutConfig<Route extends LayoutRoutes = LayoutRoutes> = {
   type __Unused = __Check
 }
 
+// Validate ../../app/(components)/(contentlayout)/ats/jobs/create/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/ats/jobs/create">> = Specific
+  const handler = {} as typeof import("../../app/(components)/(contentlayout)/ats/jobs/create/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../app/(components)/(contentlayout)/ats/jobs/page.tsx
 {
   type __IsExpected<Specific extends AppPageConfig<"/ats/jobs">> = Specific
@@ -1219,6 +1228,15 @@ type LayoutConfig<Route extends LayoutRoutes = LayoutRoutes> = {
 {
   type __IsExpected<Specific extends AppPageConfig<"/pages/email/mail-app">> = Specific
   const handler = {} as typeof import("../../app/(components)/(contentlayout)/pages/email/mail-app/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../app/(components)/(contentlayout)/pages/email/mail-settings/create-role/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/pages/email/mail-settings/create-role">> = Specific
+  const handler = {} as typeof import("../../app/(components)/(contentlayout)/pages/email/mail-settings/create-role/page.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check

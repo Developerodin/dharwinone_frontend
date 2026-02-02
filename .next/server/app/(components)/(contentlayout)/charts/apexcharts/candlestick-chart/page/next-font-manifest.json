@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/charts/apexcharts/candlestick-chart/page": []
+    "[project]/app/(components)/(contentlayout)/charts/apexcharts/candlestick-chart/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

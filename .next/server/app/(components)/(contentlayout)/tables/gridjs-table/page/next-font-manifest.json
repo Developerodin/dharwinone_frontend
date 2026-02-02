@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/tables/gridjs-table/page": []
+    "[project]/app/(components)/(contentlayout)/tables/gridjs-table/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

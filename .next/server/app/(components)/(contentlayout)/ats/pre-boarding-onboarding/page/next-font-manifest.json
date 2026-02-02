@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/ats/pre-boarding-onboarding/page": []
+    "[project]/app/(components)/(contentlayout)/ats/pre-boarding-onboarding/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

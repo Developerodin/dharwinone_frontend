@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/apps/nft/market-place/page": []
+    "[project]/app/(components)/(contentlayout)/apps/nft/market-place/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

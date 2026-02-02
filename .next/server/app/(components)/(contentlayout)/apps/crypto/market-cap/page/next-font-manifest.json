@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/apps/crypto/market-cap/page": []
+    "[project]/app/(components)/(contentlayout)/apps/crypto/market-cap/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

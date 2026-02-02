@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/forms/formelements/input-group/page": []
+    "[project]/app/(components)/(contentlayout)/forms/formelements/input-group/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

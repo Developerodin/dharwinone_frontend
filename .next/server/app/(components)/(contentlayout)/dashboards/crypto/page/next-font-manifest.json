@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/dashboards/crypto/page": []
+    "[project]/app/(components)/(contentlayout)/dashboards/crypto/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

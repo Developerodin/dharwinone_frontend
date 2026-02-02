@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(authenticationlayout)/authentication/coming-soon/page": []
+    "[project]/app/(components)/(authenticationlayout)/authentication/coming-soon/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

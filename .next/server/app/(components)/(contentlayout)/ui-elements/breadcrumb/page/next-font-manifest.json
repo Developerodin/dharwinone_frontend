@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/ui-elements/breadcrumb/page": []
+    "[project]/app/(components)/(contentlayout)/ui-elements/breadcrumb/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

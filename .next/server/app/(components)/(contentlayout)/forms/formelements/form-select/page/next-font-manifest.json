@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/forms/formelements/form-select/page": []
+    "[project]/app/(components)/(contentlayout)/forms/formelements/form-select/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/charts/apexcharts/pie-chart/page": []
+    "[project]/app/(components)/(contentlayout)/charts/apexcharts/pie-chart/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

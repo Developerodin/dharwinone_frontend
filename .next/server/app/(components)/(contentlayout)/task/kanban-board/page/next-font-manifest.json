@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/task/kanban-board/page": []
+    "[project]/app/(components)/(contentlayout)/task/kanban-board/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

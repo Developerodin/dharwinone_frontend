@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(landingpagelayout)/jobs-landing/page": []
+    "[project]/app/(components)/(landingpagelayout)/jobs-landing/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(authenticationlayout)/error/error-401/page": []
+    "[project]/app/(components)/(authenticationlayout)/error/error-401/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

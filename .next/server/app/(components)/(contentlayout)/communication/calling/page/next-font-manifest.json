@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/communication/calling/page": []
+    "[project]/app/(components)/(contentlayout)/communication/calling/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

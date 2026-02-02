@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/apps/jobs/candidate-details/page": []
+    "[project]/app/(components)/(contentlayout)/apps/jobs/candidate-details/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

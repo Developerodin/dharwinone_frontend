@@ -1,6 +1,7 @@
 {
   "version": 3,
   "pages404": true,
+  "appType": "app",
   "caseSensitive": false,
   "basePath": "",
   "redirects": [
@@ -292,6 +293,12 @@
       "regex": "^/ats/jobs(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/ats/jobs(?:/)?$"
+    },
+    {
+      "page": "/ats/jobs/create",
+      "regex": "^/ats/jobs/create(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/ats/jobs/create(?:/)?$"
     },
     {
       "page": "/ats/offers-placement",
@@ -870,6 +877,12 @@
       "namedRegex": "^/pages/email/mail\\-settings(?:/)?$"
     },
     {
+      "page": "/pages/email/mail-settings/create-role",
+      "regex": "^/pages/email/mail\\-settings/create\\-role(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/pages/email/mail\\-settings/create\\-role(?:/)?$"
+    },
+    {
       "page": "/pages/empty",
       "regex": "^/pages/empty(?:/)?$",
       "routeKeys": {},
@@ -1208,7 +1221,6 @@
     "didPostponeHeader": "x-nextjs-postponed",
     "contentTypeHeader": "text/x-component",
     "suffix": ".rsc",
-    "prefetchSuffix": ".prefetch.rsc",
     "prefetchSegmentHeader": "next-router-segment-prefetch",
     "prefetchSegmentSuffix": ".segment.rsc",
     "prefetchSegmentDirSuffix": ".segments",

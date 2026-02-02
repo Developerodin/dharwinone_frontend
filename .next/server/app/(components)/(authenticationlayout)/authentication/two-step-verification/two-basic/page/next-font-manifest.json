@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(authenticationlayout)/authentication/two-step-verification/two-basic/page": []
+    "[project]/app/(components)/(authenticationlayout)/authentication/two-step-verification/two-basic/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

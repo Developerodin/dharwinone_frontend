@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/apps/full-calendar/page": []
+    "[project]/app/(components)/(contentlayout)/apps/full-calendar/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

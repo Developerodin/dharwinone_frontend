@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/pages/ecommerce/order-details/page": []
+    "[project]/app/(components)/(contentlayout)/pages/ecommerce/order-details/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

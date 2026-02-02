@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/advanced-ui/scrollspy/page": []
+    "[project]/app/(components)/(contentlayout)/advanced-ui/scrollspy/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

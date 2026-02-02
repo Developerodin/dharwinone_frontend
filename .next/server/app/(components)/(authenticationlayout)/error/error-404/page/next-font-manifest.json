@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(authenticationlayout)/error/error-404/page": []
+    "[project]/app/(components)/(authenticationlayout)/error/error-404/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/utilities/typography/page": []
+    "[project]/app/(components)/(contentlayout)/utilities/typography/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

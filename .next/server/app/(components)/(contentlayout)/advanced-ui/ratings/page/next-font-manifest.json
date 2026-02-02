@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/advanced-ui/ratings/page": []
+    "[project]/app/(components)/(contentlayout)/advanced-ui/ratings/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

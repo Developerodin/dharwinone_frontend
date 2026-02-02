@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/maps/leaflet-map/page": []
+    "[project]/app/(components)/(contentlayout)/maps/leaflet-map/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false

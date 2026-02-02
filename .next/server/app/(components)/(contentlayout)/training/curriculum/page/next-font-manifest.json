@@ -1,7 +1,7 @@
 {
   "pages": {},
   "app": {
-    "[project]/Desktop/dharwin_boilerplate/app/(components)/(contentlayout)/training/curriculum/page": []
+    "[project]/app/(components)/(contentlayout)/training/curriculum/page": []
   },
   "appUsingSizeAdjust": true,
   "pagesUsingSizeAdjust": false
