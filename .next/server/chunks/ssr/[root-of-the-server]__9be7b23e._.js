@@ -1,0 +1,3 @@
+module.exports=[823880,(a,b,c)=>{"use strict";b.exports=a.r(550562).vendored["react-ssr"].ReactServerDOMTurbopackClient},224361,(a,b,c)=>{b.exports=a.x("util",()=>require("util"))},814747,(a,b,c)=>{b.exports=a.x("path",()=>require("path"))},491032,(a,b,c)=>{b.exports={output:"export",reactStrictMode:!0,trailingSlash:!0,basePath:"",assetPrefix:"",images:{loader:"imgix",path:"/"},typescript:{ignoreBuildErrors:!0}}}];
+
+//# sourceMappingURL=%5Broot-of-the-server%5D__9be7b23e._.js.map

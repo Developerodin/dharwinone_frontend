@@ -1,0 +1,3 @@
+module.exports=[823880,(a,b,c)=>{"use strict";b.exports=a.r(550562).vendored["react-ssr"].ReactServerDOMTurbopackClient},932448,a=>{"use strict";var b=a.i(273404),c=a.i(215388);a.s(["default",0,()=>((0,c.useEffect)(()=>{let a=()=>{let a=document.getElementsByClassName("scrollToTop")[0];a&&(window.scrollY>100?a.style.display="flex":a.style.display="none")};return window.addEventListener("scroll",a),()=>{window.removeEventListener("scroll",a)}},[]),(0,b.jsx)("div",{className:"scrollToTop",onClick:()=>{window.scrollTo(0,0)},children:(0,b.jsx)("span",{className:"arrow",children:(0,b.jsx)("i",{className:"ri-arrow-up-s-fill text-xl"})})}))])}];
+
+//# sourceMappingURL=Desktop_dharwin_boilerplate_f2ad3ed4._.js.map

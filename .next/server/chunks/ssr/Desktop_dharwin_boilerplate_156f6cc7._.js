@@ -1,0 +1,3 @@
+module.exports=[502806,a=>{"use strict";var b=a.i(273404),c=a.i(215388);a.s(["default",0,({title:a})=>((0,c.useEffect)(()=>{document.title=`Dharwin Business Solutions - ${a}`},[]),(0,b.jsx)(b.Fragment,{}))])},395942,a=>{"use strict";var b=a.i(449084);a.s(["Autoplay",()=>b.default])},638308,a=>{"use strict";var b=a.i(587269);a.s(["EffectFade",()=>b.default])}];
+
+//# sourceMappingURL=Desktop_dharwin_boilerplate_156f6cc7._.js.map

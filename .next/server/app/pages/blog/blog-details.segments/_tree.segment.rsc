@@ -1,0 +1,10 @@
+:HL["/_next/static/chunks/b2fc5cdb1c883d93.css","style"]
+:HC["/",""]
+:HL["../../../assets/images/faces/15.jpg","image"]
+:HL["../../../assets/images/media/media-23.jpg","image"]
+:HL["../../../assets/images/faces/2.jpg","image"]
+:HL["../../../assets/images/media/media-39.jpg","image"]
+:HL["../../../assets/images/media/media-56.jpg","image"]
+:HL["../../../assets/images/media/media-54.jpg","image"]
+:HL["../../../assets/images/media/media-52.jpg","image"]
+0:{"buildId":"a9hfVsIggm11we3_Vkn1t","tree":{"name":"","paramType":null,"paramKey":"","hasRuntimePrefetch":false,"slots":{"children":{"name":"(components)","paramType":null,"paramKey":"(components)","hasRuntimePrefetch":false,"slots":{"children":{"name":"(contentlayout)","paramType":null,"paramKey":"(contentlayout)","hasRuntimePrefetch":false,"slots":{"children":{"name":"pages","paramType":null,"paramKey":"pages","hasRuntimePrefetch":false,"slots":{"children":{"name":"blog","paramType":null,"paramKey":"blog","hasRuntimePrefetch":false,"slots":{"children":{"name":"blog-details","paramType":null,"paramKey":"blog-details","hasRuntimePrefetch":false,"slots":{"children":{"name":"__PAGE__","paramType":null,"paramKey":"__PAGE__","hasRuntimePrefetch":false,"slots":null,"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":true},"staleTime":300}

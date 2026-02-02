@@ -1,0 +1,3 @@
+module.exports=[823880,(a,b,c)=>{"use strict";b.exports=a.r(550562).vendored["react-ssr"].ReactServerDOMTurbopackClient},502806,a=>{"use strict";var b=a.i(273404),c=a.i(215388);a.s(["default",0,({title:a})=>((0,c.useEffect)(()=>{document.title=`Dharwin Business Solutions - ${a}`},[]),(0,b.jsx)(b.Fragment,{}))])},395942,a=>{"use strict";var b=a.i(449084);a.s(["Autoplay",()=>b.default])},995303,a=>{"use strict";var b=a.i(48570);a.s(["Pagination",()=>b.default])}];
+
+//# sourceMappingURL=Desktop_dharwin_boilerplate_1461f468._.js.map
