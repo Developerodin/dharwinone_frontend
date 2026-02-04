@@ -199,7 +199,7 @@ const MenuItems = [
         icon: DashboardIcon,
         title: "Dashboard",
         type: "link",
-        path: "/dashboards/projects",
+        path: "/dashboard",
         active: false,
         selected: false,
         dirchange: false
@@ -286,7 +286,7 @@ const MenuItems = [
         icon: EmailIcon,
         title: "Email",
         type: "link",
-        path: "/pages/email/mail-app",
+        path: "/communication/email",
         active: false,
         selected: false,
         dirchange: false
@@ -295,7 +295,7 @@ const MenuItems = [
         icon: ChatsIcon,
         title: "Chats",
         type: "link",
-        path: "/pages/chat",
+        path: "/communication/chats",
         active: false,
         selected: false,
         dirchange: false
@@ -313,7 +313,7 @@ const MenuItems = [
         icon: FilesStorageIcon,
         title: "Files Storage",
         type: "link",
-        path: "/pages/filemanager",
+        path: "/communication/filemanager",
         active: false,
         selected: false,
         dirchange: false
