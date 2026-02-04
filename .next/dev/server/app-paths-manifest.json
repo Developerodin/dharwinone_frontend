@@ -1,14 +1,9 @@
 {
   "/(components)/(authenticationlayout)/authentication/sign-in/page": "app/(components)/(authenticationlayout)/authentication/sign-in/page.js",
   "/(components)/(contentlayout)/dashboards/crm/page": "app/(components)/(contentlayout)/dashboards/crm/page.js",
-  "/(components)/(contentlayout)/dashboards/projects/page": "app/(components)/(contentlayout)/dashboards/projects/page.js",
-  "/(components)/(contentlayout)/pages/email/mail-settings/page": "app/(components)/(contentlayout)/pages/email/mail-settings/page.js",
   "/(components)/(contentlayout)/settings/page": "app/(components)/(contentlayout)/settings/page.js",
   "/(components)/(contentlayout)/settings/personal-information/page": "app/(components)/(contentlayout)/settings/personal-information/page.js",
-  "/(components)/(contentlayout)/settings/roles/add/page": "app/(components)/(contentlayout)/settings/roles/add/page.js",
-  "/(components)/(contentlayout)/settings/roles/edit/page": "app/(components)/(contentlayout)/settings/roles/edit/page.js",
   "/(components)/(contentlayout)/settings/roles/page": "app/(components)/(contentlayout)/settings/roles/page.js",
-  "/(components)/(contentlayout)/settings/users/page": "app/(components)/(contentlayout)/settings/users/page.js",
-  "/_not-found/page": "app/_not-found/page.js",
-  "/page": "app/page.js"
+  "/(components)/(contentlayout)/settings/users/edit/page": "app/(components)/(contentlayout)/settings/users/edit/page.js",
+  "/(components)/(contentlayout)/settings/users/page": "app/(components)/(contentlayout)/settings/users/page.js"
 }

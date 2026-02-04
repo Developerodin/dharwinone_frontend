@@ -2,16 +2,11 @@
   "app": {
     "[project]/app/(components)/(authenticationlayout)/authentication/sign-in/page": [],
     "[project]/app/(components)/(contentlayout)/dashboards/crm/page": [],
-    "[project]/app/(components)/(contentlayout)/dashboards/projects/page": [],
-    "[project]/app/(components)/(contentlayout)/pages/email/mail-settings/page": [],
     "[project]/app/(components)/(contentlayout)/settings/page": [],
     "[project]/app/(components)/(contentlayout)/settings/personal-information/page": [],
-    "[project]/app/(components)/(contentlayout)/settings/roles/add/page": [],
-    "[project]/app/(components)/(contentlayout)/settings/roles/edit/page": [],
     "[project]/app/(components)/(contentlayout)/settings/roles/page": [],
-    "[project]/app/(components)/(contentlayout)/settings/users/page": [],
-    "[project]/app/_not-found/page": [],
-    "[project]/app/page": []
+    "[project]/app/(components)/(contentlayout)/settings/users/edit/page": [],
+    "[project]/app/(components)/(contentlayout)/settings/users/page": []
   },
   "appUsingSizeAdjust": true,
   "pages": {},
