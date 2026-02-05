@@ -43299,6 +43299,10 @@ h5 {
   min-height: 38px;
 }
 
+.min-h-\[40vh\] {
+  min-height: 40vh;
+}
+
 .min-h-\[44px\] {
   min-height: 44px;
 }
@@ -43315,8 +43319,8 @@ h5 {
   min-height: calc(100% - 3.5rem);
 }
 
-.min-h-\[40vh\] {
-  min-height: 40vh;
+.\!min-h-\[2rem\] {
+  min-height: 2rem !important;
 }
 
 .\!w-11 {
@@ -43793,6 +43797,10 @@ h5 {
 
 .min-w-full {
   min-width: 100%;
+}
+
+.\!min-w-\[2rem\] {
+  min-width: 2rem !important;
 }
 
 .\!max-w-\[25rem\] {
