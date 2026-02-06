@@ -2,13 +2,9 @@
   "app": {
     "[project]/app/(components)/(authenticationlayout)/authentication/sign-in/page": [],
     "[project]/app/(components)/(contentlayout)/ats/candidates/page": [],
-    "[project]/app/(components)/(contentlayout)/ats/jobs/create/page": [],
     "[project]/app/(components)/(contentlayout)/ats/jobs/page": [],
-    "[project]/app/(components)/(contentlayout)/dashboard/page": [],
-    "[project]/app/(components)/(contentlayout)/settings/page": [],
-    "[project]/app/(components)/(contentlayout)/settings/roles/edit/page": [],
-    "[project]/app/(components)/(contentlayout)/settings/roles/page": [],
-    "[project]/app/page": []
+    "[project]/app/(components)/(contentlayout)/ats/recruiters/page": [],
+    "[project]/app/(components)/(contentlayout)/dashboard/page": []
   },
   "appUsingSizeAdjust": true,
   "pages": {},

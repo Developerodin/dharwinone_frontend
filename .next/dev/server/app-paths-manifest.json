@@ -1,11 +1,7 @@
 {
   "/(components)/(authenticationlayout)/authentication/sign-in/page": "app/(components)/(authenticationlayout)/authentication/sign-in/page.js",
   "/(components)/(contentlayout)/ats/candidates/page": "app/(components)/(contentlayout)/ats/candidates/page.js",
-  "/(components)/(contentlayout)/ats/jobs/create/page": "app/(components)/(contentlayout)/ats/jobs/create/page.js",
   "/(components)/(contentlayout)/ats/jobs/page": "app/(components)/(contentlayout)/ats/jobs/page.js",
-  "/(components)/(contentlayout)/dashboard/page": "app/(components)/(contentlayout)/dashboard/page.js",
-  "/(components)/(contentlayout)/settings/page": "app/(components)/(contentlayout)/settings/page.js",
-  "/(components)/(contentlayout)/settings/roles/edit/page": "app/(components)/(contentlayout)/settings/roles/edit/page.js",
-  "/(components)/(contentlayout)/settings/roles/page": "app/(components)/(contentlayout)/settings/roles/page.js",
-  "/page": "app/page.js"
+  "/(components)/(contentlayout)/ats/recruiters/page": "app/(components)/(contentlayout)/ats/recruiters/page.js",
+  "/(components)/(contentlayout)/dashboard/page": "app/(components)/(contentlayout)/dashboard/page.js"
 }
