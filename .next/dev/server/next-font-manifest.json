@@ -1,9 +1,16 @@
 {
   "app": {
     "[project]/app/(components)/(authenticationlayout)/authentication/sign-in/page": [],
-    "[project]/app/(components)/(contentlayout)/training/curriculum/categories/page": [],
-    "[project]/app/(components)/(contentlayout)/training/curriculum/modules/edit/page": [],
-    "[project]/app/(components)/(contentlayout)/training/curriculum/modules/page": []
+    "[project]/app/(components)/(contentlayout)/dashboard/page": [],
+    "[project]/app/(components)/(contentlayout)/settings/page": [],
+    "[project]/app/(components)/(contentlayout)/settings/roles/page": [],
+    "[project]/app/(components)/(contentlayout)/settings/users/page": [],
+    "[project]/app/(components)/(contentlayout)/training/curriculum/modules/create/page": [],
+    "[project]/app/(components)/(contentlayout)/training/curriculum/modules/page": [],
+    "[project]/app/(components)/(contentlayout)/training/mentors/page": [],
+    "[project]/app/(components)/(contentlayout)/training/students/edit/page": [],
+    "[project]/app/(components)/(contentlayout)/training/students/page": [],
+    "[project]/app/page": []
   },
   "appUsingSizeAdjust": true,
   "pages": {},
