@@ -161,22 +161,18 @@ export default function SettingsUsersPage() {
     return `From ${names.length} roles: ${names.join(" + ")}`;
   };
 
-  // Filter users in memory by search (name, email), roleIds, and status
+  // search/status are sent to the API (see fetchUsers) so the result set is never
+  // truncated by the fetch cap. roleFilter stays client-side: the backend's `role`
+  // param only special-cases recruiter/referral_eligible/sales_agent, not arbitrary
+  // roleId matching, so it can't be wired server-side without a backend change.
   const filteredUsers = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
     const filtered = users.filter((user) => {
-      if (q) {
-        const name = (user.name ?? "").toLowerCase();
-        const email = (user.email ?? "").toLowerCase();
-        if (!name.includes(q) && !email.includes(q)) return false;
-      }
       if (roleFilter === "__unassigned__") {
         // Show only users with no roles assigned
         if ((user.roleIds ?? []).length > 0) return false;
       } else if (roleFilter && !(user.roleIds ?? []).includes(roleFilter)) {
         return false;
       }
-      if (statusFilter && (user.status ?? "") !== statusFilter) return false;
       return true;
     });
     
@@ -194,7 +190,7 @@ export default function SettingsUsersPage() {
       const bDate = new Date(b.createdAt ?? 0).getTime();
       return bDate - aDate; // Newer first
     });
-  }, [users, searchQuery, roleFilter, statusFilter]);
+  }, [users, roleFilter]);
 
   const totalResults = filteredUsers.length;
   const totalPages = Math.max(1, Math.ceil(totalResults / limit));
@@ -208,7 +204,11 @@ export default function SettingsUsersPage() {
     setError("");
     try {
       const [usersRes, rolesRes] = await Promise.all([
-        usersApi.listUsers({ limit: 500 }),
+        usersApi.listUsers({
+          search: searchQuery.trim() || undefined,
+          status: statusFilter || undefined,
+          limit: 500,
+        }),
         rolesApi.listRoles({ limit: 100 }),
       ]);
       setUsers(usersRes.results ?? []);
@@ -225,9 +225,16 @@ export default function SettingsUsersPage() {
     }
   };
 
+  // Debounced: search/status are sent to the API, so re-fetch (not just re-filter)
+  // whenever they change. roleFilter doesn't trigger a re-fetch — it's applied
+  // client-side in filteredUsers above.
   useEffect(() => {
-    fetchUsers();
-  }, []);
+    const t = setTimeout(() => {
+      fetchUsers();
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, statusFilter]);
 
   // Reset to page 1 when filters change
   useEffect(() => {

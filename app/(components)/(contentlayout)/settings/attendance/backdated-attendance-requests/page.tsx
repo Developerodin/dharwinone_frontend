@@ -134,9 +134,12 @@ export default function SettingsAttendanceBackdatedPage() {
   const fetchStudents = useCallback(async () => {
     if (!isAdmin) return;
     try {
+      // stopgap: "select all" below depends on the full list being loaded client-side;
+      // a real fix needs a matching-filter-IDs endpoint so select-all doesn't require
+      // fetching every record. 1500 covers current headcount with headroom.
       const [stuRes, candRes] = await Promise.all([
-        listStudents({ limit: 1000, sortBy: "user.name:asc" }),
-        listCandidates({ limit: 1000, employmentStatus: "all", sortBy: "fullName:asc" }),
+        listStudents({ limit: 1500, sortBy: "user.name:asc" }),
+        listCandidates({ limit: 1500, employmentStatus: "all", sortBy: "fullName:asc" }),
       ]);
       const list = stuRes.results ?? [];
       setStudents(list);

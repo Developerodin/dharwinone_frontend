@@ -44,6 +44,7 @@ import TeamExcelDropdown from "./components/TeamExcelDropdown";
 import TeamImportHistory from "./components/TeamImportHistory";
 
 const Select = dynamic(() => import("react-select"), { ssr: false });
+const AsyncSelect = dynamic(() => import("react-select/async"), { ssr: false });
 
 /** Paginate until the API reports no more pages (see TEAM_MEMBERS_API_MAX_LIMIT per request). */
 const SIDEBAR_ROSTER_MAX_PAGES = 500;
@@ -573,9 +574,48 @@ function TeamMemberFormModal({
 }: TeamMemberFormModalProps) {
   const { menuPortalTarget: selectMenuPortalTarget, styles: selectMenuLayerStyles } =
     usePmReactSelectStyles();
+
+  /** Candidates surfaced by live search but outside the parent's capped `candidates`
+   *  prop — merged in so a searched-and-picked candidate still resolves to a full
+   *  record (id, profilePictureUrl) for the photo-management flow below. */
+  const [searchedCandidates, setSearchedCandidates] = useState<
+    TeamMemberFormModalProps["candidates"]
+  >([]);
+  const allCandidates = useMemo(() => {
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    searchedCandidates.forEach((c) => byId.set(c.id, c));
+    return Array.from(byId.values());
+  }, [candidates, searchedCandidates]);
+
+  const loadCandidateOptions = useCallback(
+    (inputValue: string, callback: (options: { value: string; label: string }[]) => void) => {
+      listCandidates({ search: inputValue || undefined, limit: 20 })
+        .then((res) => {
+          const mapped = (res.results ?? []).map((c: CandidateListItem) => {
+            const raw = (c.profilePicture?.url || "").trim();
+            const profilePictureUrl = raw ? resolvePublicImageUrl(raw, "") || undefined : undefined;
+            return {
+              id: (c.id ?? c._id) as string,
+              name: c.fullName,
+              email: c.email,
+              profilePictureUrl,
+            };
+          });
+          setSearchedCandidates((prev) => {
+            const byId = new Map(prev.map((c) => [c.id, c]));
+            mapped.forEach((c) => byId.set(c.id, c));
+            return Array.from(byId.values());
+          });
+          callback(mapped.map((c) => ({ value: c.id, label: `${c.name} (${c.email})` })));
+        })
+        .catch(() => callback([]));
+    },
+    []
+  );
+
   const matchedCandidate = useMemo(
-    () => (form.email.trim() ? findCandidateByFormEmail(candidates, form.email) : undefined),
-    [candidates, form.email]
+    () => (form.email.trim() ? findCandidateByFormEmail(allCandidates, form.email) : undefined),
+    [allCandidates, form.email]
   );
 
   const avatarPreview = useMemo(() => {
@@ -755,19 +795,18 @@ function TeamMemberFormModal({
                 <label htmlFor="member-candidate" className="form-label">
                   Candidate (ATS)
                 </label>
-                <Select
+                <AsyncSelect
                   inputId="member-candidate"
                   classNamePrefix="Select2"
                   className="basic-single-select"
                   menuPlacement="auto"
-                  options={candidates.map((c) => ({
-                    value: c.id,
-                    label: `${c.name} (${c.email})`,
-                  }))}
+                  cacheOptions
+                  defaultOptions
+                  loadOptions={loadCandidateOptions}
                   value={
                     form.email
                       ? (() => {
-                          const match = findCandidateByFormEmail(candidates, form.email);
+                          const match = findCandidateByFormEmail(allCandidates, form.email);
                           if (match) {
                             return {
                               value: match.id,
@@ -778,16 +817,14 @@ function TeamMemberFormModal({
                         })()
                       : null
                   }
-                  placeholder={
-                    candidates.length ? "Search or pick candidate" : "No candidates available"
-                  }
+                  placeholder="Search or pick candidate"
                   onChange={(opt) => {
                     const option = opt as { value: string; label: string } | null;
                     if (!option) {
                       onChange({ name: "", email: "" });
                       return;
                     }
-                    const cand = candidates.find((c) => c.id === option.value);
+                    const cand = allCandidates.find((c) => c.id === option.value);
                     onChange({
                       name: cand?.name ?? form.name,
                       email: cand?.email ?? form.email,

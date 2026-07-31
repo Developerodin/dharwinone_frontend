@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Seo from "@/shared/layout-components/seo/seo";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { hasPermission } from "@/shared/lib/permissions";
@@ -10,11 +11,28 @@ import {
   updateCompanyPhoneNumber,
   type CompanyPhoneNumberRow,
 } from "@/shared/lib/api/companyPhoneNumbers";
-import { listUsers, type User } from "@/shared/lib/api/users";
+import { listUsers } from "@/shared/lib/api/users";
 import { listDepartments } from "@/shared/lib/api/departments";
 import { listTeamGroups } from "@/shared/lib/api/projectTeams";
 import CompanyWorkNumberPanel from "@/app/(components)/(contentlayout)/settings/company-email/_components/CompanyWorkNumberPanel";
 import { AxiosError } from "axios";
+
+const AsyncSelect = dynamic(() => import("react-select/async"), { ssr: false });
+
+type AssigneeOption = { value: string; label: string };
+
+function loadAssigneeOptions(inputValue: string, callback: (options: AssigneeOption[]) => void) {
+  listUsers({ search: inputValue || undefined, limit: 20, status: "active" })
+    .then((res) => {
+      callback(
+        (res.results ?? []).map((u) => ({
+          value: u.id ?? u._id ?? "",
+          label: u.name || u.email,
+        }))
+      );
+    })
+    .catch(() => callback([]));
+}
 
 function apiErr(e: unknown, fallback: string): string {
   if (e instanceof AxiosError) {
@@ -61,7 +79,6 @@ export default function CompanyWorkNumbersPage() {
   const [filterTeamId, setFilterTeamId] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<{ _id: string; name: string }[]>([]);
   const [teams, setTeams] = useState<{ _id: string; name: string }[]>([]);
 
@@ -101,18 +118,6 @@ export default function CompanyWorkNumbersPage() {
       }
     })();
   }, [canView]);
-
-  useEffect(() => {
-    if (!canManage) return;
-    (async () => {
-      try {
-        const u = await listUsers({ limit: 200, status: "active" });
-        setUsers(u.results || []);
-      } catch {
-        /* assignee dropdown optional */
-      }
-    })();
-  }, [canManage]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -295,25 +300,26 @@ export default function CompanyWorkNumbersPage() {
                           {canManage ? (
                             <td className="text-end">
                               <div className="flex flex-wrap justify-end gap-2 items-center">
-                                <select
-                                  className="form-select !py-1 !text-xs !w-40"
-                                  value={assigneeId(row)}
-                                  disabled={savingId === id}
-                                  onChange={(e) => {
-                                    const v = e.target.value;
-                                    void patchRow(id, { assignedTo: v || null });
-                                  }}
-                                >
-                                  <option value="">Unassigned</option>
-                                  {users.map((u) => {
-                                    const uid = u._id || u.id || "";
-                                    return (
-                                      <option key={uid} value={uid}>
-                                        {u.name || u.email} ({u.email})
-                                      </option>
-                                    );
-                                  })}
-                                </select>
+                                <div className="!w-40">
+                                  <AsyncSelect
+                                    classNamePrefix="Select2"
+                                    cacheOptions
+                                    defaultOptions
+                                    loadOptions={loadAssigneeOptions}
+                                    placeholder="Unassigned"
+                                    isClearable
+                                    isDisabled={savingId === id}
+                                    value={
+                                      assigneeId(row)
+                                        ? { value: assigneeId(row), label: assigneeLabel(row) }
+                                        : null
+                                    }
+                                    onChange={(opt: unknown) => {
+                                      const option = opt as AssigneeOption | null;
+                                      void patchRow(id, { assignedTo: option?.value || null });
+                                    }}
+                                  />
+                                </div>
                                 <select
                                   className="form-select !py-1 !text-xs !w-32"
                                   value={refId(row.departmentId)}

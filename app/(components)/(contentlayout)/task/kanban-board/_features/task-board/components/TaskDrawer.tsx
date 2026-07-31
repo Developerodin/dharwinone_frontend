@@ -21,10 +21,14 @@ import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { trackTaskBoard } from "../lib/telemetry";
 import { TaskCommentsSection } from "../../../../TaskCommentsSection";
 import { usePmReactSelectStyles } from "@/shared/hooks/usePmReactSelectStyles";
+import { listUsers } from "@/shared/lib/api/users";
 import styles from "../../../kanban-board.module.css";
 
 const Select = dynamic(() => import("react-select"), { ssr: false });
+const AsyncSelect = dynamic(() => import("react-select/async"), { ssr: false });
 const DatePicker = dynamic(() => import("react-datepicker"), { ssr: false });
+
+type AssigneeOption = { value: string; label: string };
 
 export interface TaskDrawerProps {
   open: boolean;
@@ -32,6 +36,7 @@ export interface TaskDrawerProps {
   task: Task | null;
   createStatus?: TaskStatus | null;
   projects: Array<{ id: string; name: string }>;
+  /** Board-wide user cache (capped) — kept for filter dropdowns; Assignees searches the API live instead. */
   users: Array<{ id: string; name: string; email: string }>;
   canDelete?: boolean;
   onDelete?: () => void;
@@ -65,7 +70,6 @@ export function TaskDrawer({
   task,
   createStatus,
   projects,
-  users,
   canDelete,
   onDelete,
   onClose,
@@ -79,7 +83,30 @@ export function TaskDrawer({
   const [projectId, setProjectId] = useState("");
   const [tagsText, setTagsText] = useState("");
   const [assignedIds, setAssignedIds] = useState<string[]>([]);
+  const [assigneeLabels, setAssigneeLabels] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+
+  const loadAssigneeOptions = useCallback(
+    (inputValue: string, callback: (options: AssigneeOption[]) => void) => {
+      listUsers({ search: inputValue || undefined, limit: 20 })
+        .then((res) => {
+          const opts = (res.results ?? []).map((u) => ({
+            value: u.id ?? u._id ?? "",
+            label: u.name || u.email,
+          }));
+          setAssigneeLabels((prev) => {
+            const next = { ...prev };
+            opts.forEach((o) => {
+              if (o.value) next[o.value] = o.label;
+            });
+            return next;
+          });
+          callback(opts);
+        })
+        .catch(() => callback([]));
+    },
+    []
+  );
 
   const baselineKey =
     open && mode === "create"
@@ -129,6 +156,12 @@ export function TaskDrawer({
       setProjectId(projectIdFromTask(task));
       setTagsText((task.tags ?? []).join(", "));
       setAssignedIds(assignedIdsFromTask(task));
+      const labels: Record<string, string> = {};
+      (task.assignedTo ?? []).forEach((u) => {
+        const id = u.id ?? u._id;
+        if (id) labels[id] = u.name || u.email || id;
+      });
+      setAssigneeLabels((prev) => ({ ...prev, ...labels }));
     }
   }, [open, mode, task, createStatus]);
 
@@ -385,22 +418,27 @@ export function TaskDrawer({
 
               <div className={styles.kbDrawerPropRow}>
                 <span className={styles.kbDrawerPropLabel}>Assignees</span>
-                <Select
+                <AsyncSelect
                   isMulti
+                  cacheOptions
+                  defaultOptions
+                  loadOptions={loadAssigneeOptions}
                   placeholder="Unassigned"
-                  options={users.map((c) => ({
-                    value: c.id,
-                    label: c.name || c.email,
+                  value={assignedIds.map((id) => ({
+                    value: id,
+                    label: assigneeLabels[id] ?? id,
                   }))}
-                  value={assignedIds.map((id) => {
-                    const c = users.find((x) => x.id === id);
-                    return c
-                      ? { value: c.id, label: c.name || c.email }
-                      : { value: id, label: id };
-                  })}
-                  onChange={(opts) =>
-                    setAssignedIds(((opts ?? []) as { value: string }[]).map((o) => o.value))
-                  }
+                  onChange={(opts) => {
+                    const list = (opts ?? []) as AssigneeOption[];
+                    setAssignedIds(list.map((o) => o.value));
+                    setAssigneeLabels((prev) => {
+                      const next = { ...prev };
+                      list.forEach((o) => {
+                        if (o.value) next[o.value] = o.label;
+                      });
+                      return next;
+                    });
+                  }}
                   classNamePrefix="kb-drawer-select"
                   menuPortalTarget={selectMenuPortalTarget}
                   styles={selectMenuLayerStyles}

@@ -16,6 +16,7 @@ import {
 import { multiselectdata } from "@/shared/data/apps/projects/createprojectdata";
 import Swal from "sweetalert2";
 import { enhanceProjectBrief } from "@/shared/lib/api/pmAssistant";
+import { listUsers } from "@/shared/lib/api/users";
 import {
   BriefEnhancedReviewModal,
   type BriefRegenerateInput,
@@ -23,6 +24,25 @@ import {
 
 const DatePicker = dynamic(() => import("react-datepicker"), { ssr: false });
 const Select = dynamic(() => import("react-select"), { ssr: false });
+const AsyncSelect = dynamic(() => import("react-select/async"), { ssr: false });
+
+/** Server-searched — org can exceed any client-side prefetch cap (see TASK_LIMIT truncation
+ *  bug in the task-board Assignees picker), so assignable users are never fully loaded up front. */
+function loadAssignedUserOptions(
+  inputValue: string,
+  callback: (options: SelectOption[]) => void
+) {
+  listUsers({ search: inputValue || undefined, limit: 20, status: "active" })
+    .then((res) => {
+      callback(
+        (res.results ?? []).map((u) => ({
+          value: u.id ?? u._id ?? "",
+          label: u.name || u.email,
+        }))
+      );
+    })
+    .catch(() => callback([]));
+}
 
 export type ProjectFormValues = Record<
   string,
@@ -586,25 +606,49 @@ export function DynamicProjectForm({
           {field.helpText ? (
             <p className="text-[0.75rem] text-[#8c9097] dark:text-white/45 mb-1">{field.helpText}</p>
           ) : null}
-          <Select
-            isMulti
-            name={field.name}
-            options={options}
-            className={`js-states ${error ? "is-invalid" : ""}`}
-            classNamePrefix="Select2"
-            value={multiValue}
-            onChange={(opt) => handleChange(field.name)(Array.isArray(opt) ? opt : [])}
-            isDisabled={disabled}
-            menuPlacement="auto"
-            {...selectPortalTargetProps}
-            styles={
-              projectFormSelectStyles(true) as StylesConfig<
-                unknown,
-                boolean,
-                GroupBase<unknown>
-              >
-            }
-          />
+          {field.name === "assignedUsers" ? (
+            <AsyncSelect
+              isMulti
+              name={field.name}
+              cacheOptions
+              defaultOptions
+              loadOptions={loadAssignedUserOptions}
+              className={`js-states ${error ? "is-invalid" : ""}`}
+              classNamePrefix="Select2"
+              value={multiValue}
+              onChange={(opt) => handleChange(field.name)(Array.isArray(opt) ? opt : [])}
+              isDisabled={disabled}
+              menuPlacement="auto"
+              {...selectPortalTargetProps}
+              styles={
+                projectFormSelectStyles(true) as StylesConfig<
+                  unknown,
+                  boolean,
+                  GroupBase<unknown>
+                >
+              }
+            />
+          ) : (
+            <Select
+              isMulti
+              name={field.name}
+              options={options}
+              className={`js-states ${error ? "is-invalid" : ""}`}
+              classNamePrefix="Select2"
+              value={multiValue}
+              onChange={(opt) => handleChange(field.name)(Array.isArray(opt) ? opt : [])}
+              isDisabled={disabled}
+              menuPlacement="auto"
+              {...selectPortalTargetProps}
+              styles={
+                projectFormSelectStyles(true) as StylesConfig<
+                  unknown,
+                  boolean,
+                  GroupBase<unknown>
+                >
+              }
+            />
+          )}
           {error && <div className="invalid-feedback d-block">{error}</div>}
           {field.name === "assignedTeams" && onCreateTeamGroup && !disabled ? (
             <div className="mt-2 space-y-2">

@@ -1,6 +1,7 @@
 "use client"
 import Seo from '@/shared/layout-components/seo/seo'
-import React, { Fragment, useMemo, useState, useEffect, useRef } from 'react'
+import React, { Fragment, useMemo, useState, useEffect, useRef, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { useSearchParams } from 'next/navigation'
 import { useTable, useSortBy, useGlobalFilter, usePagination } from 'react-table'
 import Link from 'next/link'
@@ -36,6 +37,10 @@ import {
   formatJobDescriptionForDisplay,
   JOB_DESCRIPTION_PROSE_CLASS,
 } from '@/shared/lib/ats/jobDescriptionHtml'
+
+const AsyncSelect = dynamic(() => import('react-select/async'), { ssr: false })
+
+type ApplyCandidateOption = { value: string; label: string }
 
 // Default ranges for filters when no data
 const DEFAULT_SALARY_RANGE = { min: 0, max: 200000 }
@@ -241,8 +246,8 @@ const Jobs = () => {
   // Apply candidate to job
   const [applyModalOpen, setApplyModalOpen] = useState(false)
   const [applyJob, setApplyJob] = useState<any>(null)
-  const [candidatesList, setCandidatesList] = useState<{ id: string; fullName: string }[]>([])
   const [selectedCandidateId, setSelectedCandidateId] = useState('')
+  const [applyCandidateOption, setApplyCandidateOption] = useState<ApplyCandidateOption | null>(null)
   const [applySubmitting, setApplySubmitting] = useState(false)
   const [callingJobId, setCallingJobId] = useState<string | null>(null)
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
@@ -296,11 +301,25 @@ const Jobs = () => {
   const handleApplyClick = (job: any) => {
     setApplyJob(job)
     setSelectedCandidateId('')
-    listCandidates({ limit: 500, ownerUserRole: 'jobSeeker' })
-      .then((res) => setCandidatesList((res.results ?? []).map((c: any) => ({ id: c._id ?? c.id, fullName: c.fullName ?? c.name ?? '' }))))
-      .catch(() => setCandidatesList([]))
+    setApplyCandidateOption(null)
     setApplyModalOpen(true)
   }
+
+  const loadApplyCandidateOptions = useCallback(
+    (inputValue: string, callback: (options: ApplyCandidateOption[]) => void) => {
+      listCandidates({ search: inputValue || undefined, limit: 20, ownerUserRole: 'jobSeeker' })
+        .then((res) => {
+          callback(
+            (res.results ?? []).map((c: any) => ({
+              value: c._id ?? c.id,
+              label: c.fullName ?? c.name ?? '',
+            }))
+          )
+        })
+        .catch(() => callback([]))
+    },
+    []
+  )
   const handleApplySubmit = async () => {
     if (!applyJob?.id || !selectedCandidateId) {
       alert('Please select a candidate')
@@ -2288,16 +2307,19 @@ const Jobs = () => {
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
                 Select a candidate to apply for <strong>{applyJob.jobTitle}</strong>
               </p>
-              <select
-                className="form-control"
-                value={selectedCandidateId}
-                onChange={(e) => setSelectedCandidateId(e.target.value)}
-              >
-                <option value="">-- Select Candidate --</option>
-                {candidatesList.map((c) => (
-                  <option key={c.id} value={c.id}>{c.fullName}</option>
-                ))}
-              </select>
+              <AsyncSelect
+                isClearable
+                cacheOptions
+                defaultOptions
+                loadOptions={loadApplyCandidateOptions}
+                placeholder="-- Select Candidate --"
+                value={applyCandidateOption}
+                onChange={(opt) => {
+                  const option = opt as ApplyCandidateOption | null
+                  setApplyCandidateOption(option)
+                  setSelectedCandidateId(option?.value ?? '')
+                }}
+              />
             </div>
             <div className="ti-modal-footer">
               <button type="button" className="ti-btn ti-btn-light" onClick={() => { setApplyModalOpen(false); setApplyJob(null); }}>

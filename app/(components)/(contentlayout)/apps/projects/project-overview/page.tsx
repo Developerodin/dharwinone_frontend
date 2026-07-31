@@ -590,21 +590,34 @@ const Projectoverview = (): JSX.Element => {
 
   useEffect(() => {
     let cancelled = false;
-    listCandidates({ limit: 1000, employmentStatus: "all", sortBy: "fullName:asc" })
-      .then((res) => {
+    /** Paginated (not capped) — a hardcoded limit here silently drops assignee
+     *  avatars once candidate count exceeds it, same failure mode as the task-board
+     *  Assignees dropdown truncation bug. */
+    (async () => {
+      const next = new Map<string, string>();
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const res = await listCandidates({
+          limit: 500,
+          page,
+          employmentStatus: "all",
+          sortBy: "fullName:asc",
+        });
         if (cancelled) return;
-        const next = new Map<string, string>();
         for (const c of (res.results ?? []) as CandidateListItem[]) {
           const raw = (c.profilePicture?.url || "").trim();
           if (!raw) continue;
           const email = normalizeAssigneeEmail(c.email);
           if (email) next.set(email, raw);
         }
-        setCandidateAvatars(next);
-      })
-      .catch(() => {
-        if (!cancelled) setCandidateAvatars(new Map());
-      });
+        totalPages = Math.max(1, res.totalPages ?? 1);
+        page += 1;
+      } while (page <= totalPages);
+      if (!cancelled) setCandidateAvatars(next);
+    })().catch(() => {
+      if (!cancelled) setCandidateAvatars(new Map());
+    });
     return () => {
       cancelled = true;
     };

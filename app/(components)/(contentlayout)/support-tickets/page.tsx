@@ -25,7 +25,9 @@ import { usePmReactSelectStyles } from "@/shared/hooks/usePmReactSelectStyles";
 import Swal from "sweetalert2";
 import dynamic from "next/dynamic";
 
-const Select = dynamic(() => import("react-select"), { ssr: false });
+const AsyncSelect = dynamic(() => import("react-select/async"), { ssr: false });
+
+type PickerOption = { value: string; label: string };
 
 /* ─── status / priority maps ─── */
 const STATUS_CONFIG: Record<string, { dot: string; badge: string; icon: string }> = {
@@ -78,10 +80,8 @@ const SupportTicketsPage = () => {
   const [creatingTicket, setCreatingTicket] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [candidatesList, setCandidatesList] = useState<{ id: string; fullName: string; email?: string }[]>([]);
-  const [loadingCandidates, setLoadingCandidates] = useState(false);
-  const [adminUsersList, setAdminUsersList] = useState<{ id: string; name?: string; email: string; subRole?: string }[]>([]);
-  const [loadingAdminUsers, setLoadingAdminUsers] = useState(false);
+  const [createCandidateOption, setCreateCandidateOption] = useState<PickerOption | null>(null);
+  const [adminAssigneeOption, setAdminAssigneeOption] = useState<PickerOption | null>(null);
   const [candidateId, setCandidateId] = useState<string>("");
 
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -146,78 +146,83 @@ const SupportTicketsPage = () => {
 
   useEffect(() => {
     if (user?.role !== "user" || !user?.id) return;
-    listCandidates({ page: 1, limit: 1000 })
-      .then((res) => {
-        const list = res?.results ?? [];
-        const match = list.find((c) => {
-          const ownerId =
-            typeof (c as { owner?: string | { id?: string; _id?: string } }).owner === "string"
-              ? (c as { owner: string }).owner
-              : (c as { owner?: { id?: string; _id?: string } }).owner?.id ??
-                (c as { owner?: { id?: string; _id?: string } }).owner?._id;
-          return (
-            String(ownerId) === String(user.id) ||
-            (c.email ?? "").toLowerCase() === (user.email ?? "").toLowerCase()
-          );
-        });
+    let cancelled = false;
+    (async () => {
+      try {
+        const byOwner = await listCandidates({ owner: String(user.id), limit: 1 });
+        let match = byOwner?.results?.[0];
+        if (!match && user.email) {
+          const byEmail = await listCandidates({ email: user.email, limit: 1 });
+          match = byEmail?.results?.[0];
+        }
+        if (cancelled) return;
         const id = match?.id ?? match?._id;
         if (id) setCandidateId(String(id));
-      })
-      .catch(() => {});
+      } catch {
+        /* self-lookup optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.role, user?.id, user?.email]);
 
-  const fetchCandidates = useCallback(async () => {
-    if (!canCreateTicketOnBehalf) return;
-    setLoadingCandidates(true);
-    try {
-      const res = await listCandidates({
-        page: 1,
-        limit: 1000,
+  const loadCandidateOptions = useCallback(
+    (inputValue: string, callback: (options: PickerOption[]) => void) => {
+      if (!canCreateTicketOnBehalf) {
+        callback([]);
+        return;
+      }
+      listCandidates({
+        search: inputValue || undefined,
+        limit: 20,
         sortBy: "fullName:asc",
         ...(!isAdmin && isAgent && user?.id ? { agentIds: String(user.id) } : {}),
-      });
-      const list = res?.results ?? [];
-      setCandidatesList(list.map((c) => ({ id: c.id ?? c._id ?? "", fullName: c.fullName ?? "", email: c.email })));
-    } catch {
-      setCandidatesList([]);
-    } finally {
-      setLoadingCandidates(false);
-    }
-  }, [canCreateTicketOnBehalf, isAdmin, isAgent, user?.id]);
+      })
+        .then((res) => {
+          const list = res?.results ?? [];
+          callback(
+            list.map((c) => ({
+              value: c.id ?? c._id ?? "",
+              label: c.fullName + (c.email ? ` (${c.email})` : ""),
+            }))
+          );
+        })
+        .catch(() => callback([]));
+    },
+    [canCreateTicketOnBehalf, isAdmin, isAgent, user?.id]
+  );
 
-  const fetchAdminUsers = useCallback(async () => {
-    if (!isAdmin) return;
-    setLoadingAdminUsers(true);
-    try {
-      const res = await listUsers({ page: 1, limit: 1000, role: "admin" });
-      let list = res?.results ?? [];
-      if (userSubRole) list = list.filter((u) => (u as { subRole?: string }).subRole?.trim());
-      list = list.filter((u) => {
-        const sr = String((u as { subRole?: string }).subRole ?? "").trim().toLowerCase();
-        return sr !== "admin";
-      });
-      setAdminUsersList(
-        list.map((u) => ({
-          id: u.id ?? "",
-          name: u.name,
-          email: u.email ?? "",
-          subRole: (u as { subRole?: string }).subRole,
-        }))
-      );
-    } catch {
-      setAdminUsersList([]);
-    } finally {
-      setLoadingAdminUsers(false);
-    }
-  }, [isAdmin, userSubRole]);
+  /** subRole !== 'admin' excludes admin-flavored accounts from the assignee list;
+   *  when the current user has their own subRole, only teammates sharing it show. */
+  const loadAdminUserOptions = useCallback(
+    (inputValue: string, callback: (options: PickerOption[]) => void) => {
+      if (!isAdmin) {
+        callback([]);
+        return;
+      }
+      listUsers({ search: inputValue || undefined, limit: 20, role: "admin" })
+        .then((res) => {
+          let list = res?.results ?? [];
+          if (userSubRole) list = list.filter((u) => (u as { subRole?: string }).subRole?.trim());
+          list = list.filter((u) => {
+            const sr = String((u as { subRole?: string }).subRole ?? "").trim().toLowerCase();
+            return sr !== "admin";
+          });
+          callback(list.map((u) => ({ value: u.id ?? "", label: u.name || u.email || "" })));
+        })
+        .catch(() => callback([]));
+    },
+    [isAdmin, userSubRole]
+  );
 
   /* ─── modal open/close ─── */
   const openCreateModal = () => {
     setCreateForm({ title: "", description: "", priority: "Medium", category: "General", candidateId: "" });
+    setCreateCandidateOption(null);
     setAttachments([]);
     setAttachmentErrors([]);
     setShowCreateModal(true);
-    if (canCreateTicketOnBehalf) fetchCandidates();
   };
 
   const closeCreateModal = () => {
@@ -555,8 +560,12 @@ const SupportTicketsPage = () => {
     const cur = latest.assignedTo?.id ?? latest.assignedTo?._id ?? "";
     setAssignTicket(latest);
     setAssignSelectedUserId(cur);
+    setAdminAssigneeOption(
+      cur
+        ? { value: cur, label: latest.assignedTo?.name || latest.assignedTo?.email || cur }
+        : null
+    );
     setShowAssignModal(true);
-    if (isAdmin) fetchAdminUsers();
   };
 
   const closeAssignModal = () => {
@@ -1073,32 +1082,23 @@ const SupportTicketsPage = () => {
                       Choose any candidate to file on their behalf, or leave empty for a ticket for yourself (staff).
                     </p>
                   )}
-                  {loadingCandidates ? (
-                    <div className="flex items-center gap-2 rounded-md border border-defaultborder px-3 py-2 text-[0.8125rem] text-[#8c9097]">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                      Loading candidates...
-                    </div>
-                  ) : (
-                    <Select
-                      isClearable
-                      isSearchable
-                      placeholder={isAdmin ? "Optional — select candidate or leave empty for yourself" : "Select candidate..."}
-                      value={
-                        createForm.candidateId
-                          ? {
-                              value: createForm.candidateId,
-                              label: candidatesList.find((c) => c.id === createForm.candidateId)?.fullName ?? "Unknown",
-                            }
-                          : null
-                      }
-                      onChange={(opt) => setCreateForm((f) => ({ ...f, candidateId: opt?.value ?? "" }))}
-                      options={candidatesList.map((c) => ({ value: c.id, label: c.fullName + (c.email ? " (" + c.email + ")" : "") }))}
-                      className="react-select-container"
-                      classNamePrefix="react-select"
-                      menuPortalTarget={selectMenuPortalTarget}
-                      styles={selectMenuLayerStyles}
-                    />
-                  )}
+                  <AsyncSelect
+                    isClearable
+                    cacheOptions
+                    defaultOptions
+                    loadOptions={loadCandidateOptions}
+                    placeholder={isAdmin ? "Optional — select candidate or leave empty for yourself" : "Select candidate..."}
+                    value={createCandidateOption}
+                    onChange={(opt) => {
+                      const option = opt as PickerOption | null;
+                      setCreateCandidateOption(option);
+                      setCreateForm((f) => ({ ...f, candidateId: option?.value ?? "" }));
+                    }}
+                    className="react-select-container"
+                    classNamePrefix="react-select"
+                    menuPortalTarget={selectMenuPortalTarget}
+                    styles={selectMenuLayerStyles}
+                  />
                 </div>
               )}
 
@@ -1906,43 +1906,19 @@ const SupportTicketsPage = () => {
 
             <div className="p-5">
               <label className="form-label mb-2 text-[0.8125rem] font-semibold text-defaulttextcolor dark:text-white">Select team member</label>
-              {loadingAdminUsers ? (
-                <div className="flex items-center gap-2 rounded-md border border-defaultborder px-3 py-6 justify-center text-[0.8125rem] text-[#8c9097]">
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  Loading team members...
-                </div>
-              ) : (
-                <div className="max-h-64 overflow-y-auto space-y-1 rounded-md border border-defaultborder p-2">
-                  <button
-                    type="button"
-                    onClick={() => setAssignSelectedUserId("")}
-                    className={"flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-[0.8125rem] transition-colors " + (assignSelectedUserId === "" ? "bg-primary/10 text-primary font-medium" : "text-defaulttextcolor dark:text-white hover:bg-gray-50 dark:hover:bg-black/10")}
-                  >
-                    <span className="avatar avatar-xs avatar-rounded bg-gray-200 dark:bg-white/10 text-gray-500 text-[0.55rem]">
-                      <i className="ri-user-unfollow-line text-[0.65rem]" />
-                    </span>
-                    Unassigned
-                    {assignSelectedUserId === "" && <i className="ri-check-line ms-auto text-primary" />}
-                  </button>
-                  {adminUsersList.map((u) => (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => setAssignSelectedUserId(u.id)}
-                      className={"flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-[0.8125rem] transition-colors " + (assignSelectedUserId === u.id ? "bg-primary/10 text-primary font-medium" : "text-defaulttextcolor dark:text-white hover:bg-gray-50 dark:hover:bg-black/10")}
-                    >
-                      <span className="avatar avatar-xs avatar-rounded bg-primary/10 text-primary text-[0.55rem] font-bold">
-                        {((u.name || u.email)[0] || "?").toUpperCase()}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="mb-0 truncate">{u.name || u.email}</p>
-                        {u.subRole && <p className="mb-0 text-[0.6875rem] text-[#8c9097] dark:text-white/50">{u.subRole}</p>}
-                      </div>
-                      {assignSelectedUserId === u.id && <i className="ri-check-line ms-auto text-primary" />}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <AsyncSelect
+                isClearable
+                cacheOptions
+                defaultOptions
+                loadOptions={loadAdminUserOptions}
+                placeholder="Unassigned"
+                value={adminAssigneeOption}
+                onChange={(opt) => {
+                  const option = opt as PickerOption | null;
+                  setAdminAssigneeOption(option);
+                  setAssignSelectedUserId(option?.value ?? "");
+                }}
+              />
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-defaultborder px-5 py-4">
@@ -1955,7 +1931,7 @@ const SupportTicketsPage = () => {
                   await handleQuickAssign(assignTicket, assignSelectedUserId);
                   closeAssignModal();
                 }}
-                disabled={assigningTicket || loadingAdminUsers || assignSelectedUserId === (assignTicket.assignedTo?.id ?? assignTicket.assignedTo?._id ?? "")}
+                disabled={assigningTicket || assignSelectedUserId === (assignTicket.assignedTo?.id ?? assignTicket.assignedTo?._id ?? "")}
                 className="ti-btn ti-btn-primary ti-btn-wave"
               >
                 {assigningTicket ? (

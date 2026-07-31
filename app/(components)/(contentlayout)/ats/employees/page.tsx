@@ -47,7 +47,6 @@ import {
   type AgentOption,
 } from '@/shared/lib/api/candidates'
 import { resolveDownloadUrlForBrowser } from '@/shared/lib/api/client'
-import { listUsers } from '@/shared/lib/api/users'
 import { getAllShifts } from '@/shared/lib/api/shifts'
 import { displayApplicantEmail } from '@/shared/lib/ats/applicant-email'
 import { buildEmployeesListQueryParams } from '@/shared/lib/ats/employee-list-query'
@@ -946,7 +945,6 @@ const Candidates = () => {
   const [sharedPublicUrl, setSharedPublicUrl] = useState<string | null>(null)
   const [sharedPublicUrlForId, setSharedPublicUrlForId] = useState<string | null>(null)
   const [assignRecruiterCandidate, setAssignRecruiterCandidate] = useState<CandidateDisplay | null>(null)
-  const [recruitersList, setRecruitersList] = useState<{ id: string; name: string; email?: string }[]>([])
   const [assignRecruiterId, setAssignRecruiterId] = useState('')
   const [assignRecruiterSubmitting, setAssignRecruiterSubmitting] = useState(false)
   const [joiningDateCandidate, setJoiningDateCandidate] = useState<CandidateDisplay | null>(null)
@@ -1433,9 +1431,6 @@ const Candidates = () => {
     setAssignRecruiterCandidate(candidate)
     setAssignRecruiterId('')
     setActionError(null)
-    listUsers({ limit: 200 })
-      .then((res) => setRecruitersList((res.results ?? []).map((u: any) => ({ id: u.id ?? u._id, name: u.name, email: u.email }))))
-      .catch(() => setRecruitersList([]))
     queueMicrotask(() => openHsOverlay('#assign-recruiter-modal'))
   }
   const handleAssignRecruiterSubmit = async () => {
@@ -3858,7 +3853,6 @@ const Candidates = () => {
         selectedExportCount={selectedRows.size}
         assignRecruiterCandidate={assignRecruiterCandidate}
         setAssignRecruiterCandidate={setAssignRecruiterCandidate}
-        recruitersList={recruitersList}
         assignRecruiterId={assignRecruiterId}
         setAssignRecruiterId={setAssignRecruiterId}
         assignRecruiterSubmitting={assignRecruiterSubmitting}

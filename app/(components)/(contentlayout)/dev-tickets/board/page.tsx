@@ -25,7 +25,6 @@ import {
   updateStatus,
   type DevTicket,
 } from "@/shared/lib/api/devTickets";
-import { listUsers } from "@/shared/lib/api/users";
 import { useAuth } from "@/shared/contexts/auth-context";
 import React, { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -52,7 +51,6 @@ export default function DevTicketsBoardPage() {
   const [dragOverCol, setDragOverCol] = useState<BoardColumn | null>(null);
   const [drawerTicket, setDrawerTicket] = useState<DevTicket | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [usersList, setUsersList] = useState<{ id: string; name?: string; email: string }[]>([]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -78,11 +76,6 @@ export default function DevTicketsBoardPage() {
     fetchBoard();
   }, [fetchBoard]);
 
-  useEffect(() => {
-    listUsers({ page: 1, limit: 500 })
-      .then((res) => setUsersList((res.results ?? []).map((u) => ({ id: u.id ?? "", name: u.name, email: u.email ?? "" }))))
-      .catch(() => {});
-  }, []);
 
   const columns = useMemo(() => {
     const map: Record<BoardColumn, DevTicket[]> = {
@@ -355,7 +348,6 @@ export default function DevTicketsBoardPage() {
         currentUserId={userId ?? ""}
         isAdmin={isAdmin}
         canEdit={drawerTicket ? canEditDevTicket(drawerTicket, userId, isAdmin) : false}
-        usersList={usersList}
       />
     </Fragment>
   );

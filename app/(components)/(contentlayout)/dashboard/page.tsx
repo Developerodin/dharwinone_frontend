@@ -824,7 +824,7 @@ export default function DashboardPage() {
           const res = await listJobs({ status: "Active", limit: 100 });
           if (!cancelled) setStatBoxList(res.results ?? []);
         } else if (statBoxModal === "candidates") {
-          const res = await listCandidates({ limit: 100 });
+          const res = await listCandidates({ limit: 100, sortBy: "createdAt:desc" });
           if (!cancelled) setStatBoxList(res.results ?? []);
         }
       } catch {

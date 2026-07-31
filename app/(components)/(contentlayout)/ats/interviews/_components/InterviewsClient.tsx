@@ -13,13 +13,12 @@ import Swal from 'sweetalert2'
 import { listJobs, type Job } from '@/shared/lib/api/jobs'
 import { type CandidateListItem } from '@/shared/lib/api/candidates'
 import { listReferralLeads, type ReferralLeadRow } from '@/shared/lib/api/referralLeads'
-import { listRecruiters, listUsers } from '@/shared/lib/api/users'
+import { listUsers } from '@/shared/lib/api/users'
 import ParticipantInvitesField, { type ParticipantUser } from '@/shared/components/meeting/ParticipantInvitesField'
 import MeetingReadOnlyView from '@/shared/components/meeting/MeetingReadOnlyView'
 import { useConfirm } from '@/shared/components/ui/useConfirm'
 import { getCandidateFilterAgents, type AgentOption } from '@/shared/lib/api/employees'
 import { getJobApplicationById, type JobApplication } from '@/shared/lib/api/jobApplications'
-import type { User } from '@/shared/lib/types'
 import { isPublicEmail, pickPublicEmail } from '@/shared/lib/ats/applicant-email'
 import { wallClockToUtc, formatDualZone, getViewerTimezone, utcInstantToWallClock, listTimezones, normalizeTimezone } from '@/shared/lib/timezone'
 import CreateInterviewModal, { type SchedulePrefill } from './CreateInterviewModal'
@@ -281,7 +280,6 @@ export default function InterviewsClient() {
   // Dynamic dropdown data for Schedule Interview modal
   const [jobs, setJobs] = useState<Job[]>([])
   const [candidates, setCandidates] = useState<CandidateListItem[]>([])
-  const [recruiters, setRecruiters] = useState<User[]>([])
   const [agents, setAgents] = useState<AgentOption[]>([])
   const [agentsError, setAgentsError] = useState<string | null>(null)
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
@@ -467,22 +465,19 @@ export default function InterviewsClient() {
     const p = Promise.allSettled([
       listJobs({ limit: 100, status: 'Active' }).then((r) => r.results),
       fetchReferralLeadsForSchedule(),
-      listRecruiters({ limit: 100 }).then((r) => r.results),
       getCandidateFilterAgents().then((r) => r.agents),
     ])
       .then((results) => {
         if (scheduleDropdownsLoadId.current !== id) return
         const jobList = results[0].status === 'fulfilled' ? results[0].value || [] : []
         const candidateList = results[1].status === 'fulfilled' ? results[1].value || [] : []
-        const recruiterList = results[2].status === 'fulfilled' ? results[2].value || [] : []
-        const agentList = results[3].status === 'fulfilled' ? results[3].value || [] : []
+        const agentList = results[2].status === 'fulfilled' ? results[2].value || [] : []
         setJobs(jobList)
         setCandidates(candidateList)
-        setRecruiters(recruiterList)
         setAgents(agentList)
-        setAgentsError(results[3].status === 'rejected' ? 'Failed to load agents' : null)
+        setAgentsError(results[2].status === 'rejected' ? 'Failed to load agents' : null)
         const failed = results
-          .map((r, i) => (r.status === 'rejected' ? ['Jobs', 'Referral leads', 'Recruiters', 'Agents'][i] : null))
+          .map((r, i) => (r.status === 'rejected' ? ['Jobs', 'Referral leads', 'Agents'][i] : null))
           .filter(Boolean) as string[]
         if (failed.length > 0) {
           console.warn('[Interviews] Schedule form dropdowns failed to load:', failed, results)

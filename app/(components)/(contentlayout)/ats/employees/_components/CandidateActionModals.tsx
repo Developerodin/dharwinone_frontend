@@ -1,6 +1,25 @@
 "use client"
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { mapCandidateToDisplay, getCandidateRecruiterFeedback, type CandidateDocument } from '@/shared/lib/api/candidates'
+import { listUsers } from '@/shared/lib/api/users'
+
+const AsyncSelect = dynamic(() => import('react-select/async'), { ssr: false })
+
+type RecruiterOption = { value: string; label: string }
+
+function loadRecruiterOptions(inputValue: string, callback: (options: RecruiterOption[]) => void) {
+  listUsers({ search: inputValue || undefined, limit: 20 })
+    .then((res) => {
+      callback(
+        (res.results ?? []).map((u) => ({
+          value: u.id ?? u._id ?? '',
+          label: u.name || u.email,
+        }))
+      )
+    })
+    .catch(() => callback([]))
+}
 
 type CandidateDisplay = ReturnType<typeof mapCandidateToDisplay>
 
@@ -95,7 +114,6 @@ export interface CandidateActionModalsProps {
 
   assignRecruiterCandidate: CandidateDisplay | null
   setAssignRecruiterCandidate: (c: CandidateDisplay | null) => void
-  recruitersList: { id: string; name: string; email?: string }[]
   assignRecruiterId: string
   setAssignRecruiterId: (v: string) => void
   assignRecruiterSubmitting: boolean
@@ -146,7 +164,7 @@ export default function CandidateActionModals(props: CandidateActionModalsProps)
     exportCandidate, setExportCandidate, exportEmail, setExportEmail,
     exportSubmitting, handleExportSubmit,
     exportAllEmail, setExportAllEmail, exportAllSubmitting, handleExportAllSubmit, selectedExportCount,
-    assignRecruiterCandidate, setAssignRecruiterCandidate, recruitersList,
+    assignRecruiterCandidate, setAssignRecruiterCandidate,
     assignRecruiterId, setAssignRecruiterId, assignRecruiterSubmitting, handleAssignRecruiterSubmit,
     joiningDateCandidate, setJoiningDateCandidate, joiningDateValue, setJoiningDateValue,
     joiningDateSubmitting, handleJoiningDateSubmit,
@@ -163,6 +181,14 @@ export default function CandidateActionModals(props: CandidateActionModalsProps)
   const exportAllEmailTrimmed = exportAllEmail.trim()
   const exportAllEmailInvalid = exportAllEmailTrimmed.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(exportAllEmailTrimmed)
   const exportAllWillEmail = exportAllEmailTrimmed.length > 0 && !exportAllEmailInvalid
+
+  // Recruiter picker's search results are the only source for its label — the modal
+  // always resets assignRecruiterId to '' on open, so there's no pre-selected value to
+  // resolve from elsewhere (see openAssignRecruiterModal in the parent page).
+  const [assignRecruiterOption, setAssignRecruiterOption] = useState<RecruiterOption | null>(null)
+  useEffect(() => {
+    setAssignRecruiterOption(null)
+  }, [assignRecruiterCandidate?.id])
 
   return (
     <>
@@ -515,17 +541,27 @@ export default function CandidateActionModals(props: CandidateActionModalsProps)
           <div className="ti-modal-content">
             <div className="ti-modal-header">
               <h6 className="ti-modal-title">Assign recruiter – {assignRecruiterCandidate?.name}</h6>
-              <button type="button" className="hs-dropdown-toggle ti-modal-close-btn" data-hs-overlay="#assign-recruiter-modal" onClick={() => { setAssignRecruiterCandidate(null); setAssignRecruiterId('') }}><span className="sr-only">Close</span>×</button>
+              <button type="button" className="hs-dropdown-toggle ti-modal-close-btn" data-hs-overlay="#assign-recruiter-modal" onClick={() => { setAssignRecruiterCandidate(null); setAssignRecruiterId(''); setAssignRecruiterOption(null) }}><span className="sr-only">Close</span>×</button>
             </div>
             <div className="ti-modal-body">
               <label className="form-label">Recruiter</label>
-              <select className="form-control" value={assignRecruiterId} onChange={(e) => setAssignRecruiterId(e.target.value)}>
-                <option value="">Select recruiter</option>
-                {recruitersList.map((u) => (<option key={u.id} value={u.id}>{u.name}{u.email ? ` (${u.email})` : ''}</option>))}
-              </select>
+              <AsyncSelect
+                classNamePrefix="Select2"
+                cacheOptions
+                defaultOptions
+                loadOptions={loadRecruiterOptions}
+                placeholder="Search or pick recruiter"
+                value={assignRecruiterOption}
+                onChange={(opt: unknown) => {
+                  const option = opt as RecruiterOption | null
+                  setAssignRecruiterOption(option)
+                  setAssignRecruiterId(option?.value ?? '')
+                }}
+                isClearable
+              />
             </div>
             <div className="ti-modal-footer">
-              <button type="button" className="ti-btn ti-btn-light" data-hs-overlay="#assign-recruiter-modal">Cancel</button>
+              <button type="button" className="ti-btn ti-btn-light" data-hs-overlay="#assign-recruiter-modal" onClick={() => setAssignRecruiterOption(null)}>Cancel</button>
               <button type="button" className="ti-btn ti-btn-primary" disabled={assignRecruiterSubmitting || !assignRecruiterId} onClick={handleAssignRecruiterSubmit}>
                 {assignRecruiterSubmitting ? 'Saving...' : 'Assign'}
               </button>

@@ -36,7 +36,24 @@ import { useAuth } from "@/shared/contexts/auth-context";
 import Swal from "sweetalert2";
 import { useRouter, useSearchParams } from "next/navigation";
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Select from "react-select";
+import AsyncSelect from "react-select/async";
+
+type AssigneeOption = { value: string; label: string };
+
+/** Server-searched — org can exceed any client-side prefetch cap, so assignable
+ *  users are never fully loaded up front (see TASK_LIMIT truncation bug). */
+function loadAssigneeOptions(inputValue: string, callback: (options: AssigneeOption[]) => void) {
+  listUsers({ search: inputValue || undefined, limit: 20 })
+    .then((res) => {
+      callback(
+        (res.results ?? []).map((u) => ({
+          value: u.id ?? "",
+          label: u.name ? `${u.name} — ${u.email}` : u.email ?? "",
+        }))
+      );
+    })
+    .catch(() => callback([]));
+}
 
 type ScopeFilter = DevTicketFilters["scope"];
 
@@ -94,8 +111,8 @@ export default function DevTicketsPage() {
   const [drawerTicket, setDrawerTicket] = useState<DevTicket | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const [usersList, setUsersList] = useState<{ id: string; name?: string; email: string }[]>([]);
   const [bulkAssignUser, setBulkAssignUser] = useState("");
+  const [bulkAssignOption, setBulkAssignOption] = useState<AssigneeOption | null>(null);
   const [bulkLabel, setBulkLabel] = useState<DevTicketLabel>("regression");
   const [showBulkBar, setShowBulkBar] = useState(false);
 
@@ -124,6 +141,8 @@ export default function DevTicketsPage() {
 
   const [assignModalTicket, setAssignModalTicket] = useState<DevTicket | null>(null);
   const [assignUserId, setAssignUserId] = useState("");
+  const [assignUserOption, setAssignUserOption] = useState<AssigneeOption | null>(null);
+  const [createAssigneeOption, setCreateAssigneeOption] = useState<AssigneeOption | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -276,11 +295,6 @@ export default function DevTicketsPage() {
     };
   }, [searchParams, canView, showToast]);
 
-  useEffect(() => {
-    listUsers({ page: 1, limit: 500 })
-      .then((res) => setUsersList((res.results ?? []).map((u) => ({ id: u.id ?? "", name: u.name, email: u.email ?? "" }))))
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -406,6 +420,7 @@ export default function DevTicketsPage() {
       });
       setShowCreateModal(false);
       setCreateForm({ title: "", description: "", stepsToReproduce: "", pageUrl: "", priority: "Medium", severity: "Major", module: "", environment: "Staging", labels: [], assignedTo: "" });
+      setCreateAssigneeOption(null);
       setAttachments([]);
       showToast("Ticket created successfully");
       fetchTickets();
@@ -639,7 +654,7 @@ export default function DevTicketsPage() {
             {selectedIds.size > 0 && (
               <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2">
                 <span className="text-[0.8125rem] font-medium">{selectedIds.size} selected</span>
-                <button type="button" onClick={() => setShowBulkBar(true)} className="ti-btn ti-btn-sm ti-btn-soft-primary">Assign</button>
+                <button type="button" onClick={() => { setBulkAssignUser(""); setBulkAssignOption(null); setShowBulkBar(true); }} className="ti-btn ti-btn-sm ti-btn-soft-primary">Assign</button>
                 <select
                   value={bulkLabel}
                   onChange={(e) => setBulkLabel(e.target.value as DevTicketLabel)}
@@ -749,7 +764,16 @@ export default function DevTicketsPage() {
                               <button type="button" onClick={() => openDrawer(ticket)} className="ti-btn ti-btn-icon ti-btn-sm ti-btn-soft-primary" aria-label="View"><i className="ri-eye-line" /></button>
                               {editable && (
                                 <>
-                                  <button type="button" onClick={() => { setAssignModalTicket(ticket); setAssignUserId(ticket.assignedTo?.id ?? ticket.assignedTo?._id ?? ""); }} className="ti-btn ti-btn-icon ti-btn-sm ti-btn-soft-info" aria-label="Assign"><i className="ri-user-add-line" /></button>
+                                  <button type="button" onClick={() => {
+                                    setAssignModalTicket(ticket);
+                                    const assigneeId = ticket.assignedTo?.id ?? ticket.assignedTo?._id ?? "";
+                                    setAssignUserId(assigneeId);
+                                    setAssignUserOption(
+                                      assigneeId
+                                        ? { value: assigneeId, label: ticket.assignedTo?.name || ticket.assignedTo?.email || assigneeId }
+                                        : null
+                                    );
+                                  }} className="ti-btn ti-btn-icon ti-btn-sm ti-btn-soft-info" aria-label="Assign"><i className="ri-user-add-line" /></button>
                                   <button type="button" onClick={() => handleDelete(ticket)} className="ti-btn ti-btn-icon ti-btn-sm ti-btn-soft-danger" aria-label="Delete"><i className="ri-delete-bin-5-line" /></button>
                                 </>
                               )}
@@ -791,7 +815,6 @@ export default function DevTicketsPage() {
         currentUserId={userId ?? ""}
         isAdmin={isAdmin}
         canEdit={drawerTicket ? canEditDevTicket(drawerTicket, userId, isAdmin) : false}
-        usersList={usersList}
       />
 
       {/* Create modal */}
@@ -865,15 +888,20 @@ export default function DevTicketsPage() {
               />
               <div>
                 <label className="form-label">Assign to</label>
-                <Select
+                <AsyncSelect
                   classNamePrefix="react-select"
                   className="react-select-container"
                   isClearable
-                  isSearchable
+                  cacheOptions
+                  defaultOptions
+                  loadOptions={loadAssigneeOptions}
                   placeholder="Search user…"
-                  options={usersList.map((u) => ({ value: u.id, label: u.name ? `${u.name} — ${u.email}` : u.email }))}
-                  value={usersList.filter((u) => u.id === createForm.assignedTo).map((u) => ({ value: u.id, label: u.name ? `${u.name} — ${u.email}` : u.email }))[0] ?? null}
-                  onChange={(opt) => setCreateForm((f) => ({ ...f, assignedTo: opt?.value ?? "" }))}
+                  value={createAssigneeOption}
+                  onChange={(opt) => {
+                    const option = opt as AssigneeOption | null;
+                    setCreateAssigneeOption(option);
+                    setCreateForm((f) => ({ ...f, assignedTo: option?.value ?? "" }));
+                  }}
                   menuPortalTarget={typeof document !== "undefined" ? document.body : undefined}
                   styles={{ menuPortal: (base) => ({ ...base, zIndex: 200 }) }}
                 />
@@ -905,10 +933,21 @@ export default function DevTicketsPage() {
         <div className="fixed inset-0 z-[106] flex items-center justify-center bg-black/50 p-4" onClick={() => setShowBulkBar(false)}>
           <div className="w-full max-w-sm rounded-md bg-white p-5 dark:bg-bodybg" onClick={(e) => e.stopPropagation()}>
             <h6 className="mb-3 font-semibold">Bulk assign</h6>
-            <select className="form-control mb-3" value={bulkAssignUser} onChange={(e) => setBulkAssignUser(e.target.value)}>
-              <option value="">Select user</option>
-              {usersList.map((u) => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
-            </select>
+            <AsyncSelect
+              classNamePrefix="react-select"
+              cacheOptions
+              defaultOptions
+              loadOptions={loadAssigneeOptions}
+              placeholder="Select user"
+              isClearable
+              value={bulkAssignOption}
+              onChange={(opt) => {
+                const option = opt as AssigneeOption | null;
+                setBulkAssignOption(option);
+                setBulkAssignUser(option?.value ?? "");
+              }}
+              className="mb-3"
+            />
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowBulkBar(false)} className="ti-btn ti-btn-light">Cancel</button>
               <button type="button" onClick={handleBulkAssign} className="ti-btn ti-btn-primary">Assign</button>
@@ -922,10 +961,21 @@ export default function DevTicketsPage() {
         <div className="fixed inset-0 z-[106] flex items-center justify-center bg-black/50 p-4" onClick={() => setAssignModalTicket(null)}>
           <div className="w-full max-w-sm rounded-md bg-white p-5 dark:bg-bodybg" onClick={(e) => e.stopPropagation()}>
             <h6 className="mb-3 font-semibold">Assign ticket</h6>
-            <select className="form-control mb-3" value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)}>
-              <option value="">Unassigned</option>
-              {usersList.map((u) => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
-            </select>
+            <AsyncSelect
+              classNamePrefix="react-select"
+              cacheOptions
+              defaultOptions
+              loadOptions={loadAssigneeOptions}
+              placeholder="Unassigned"
+              isClearable
+              value={assignUserOption}
+              onChange={(opt) => {
+                const option = opt as AssigneeOption | null;
+                setAssignUserOption(option);
+                setAssignUserId(option?.value ?? "");
+              }}
+              className="mb-3"
+            />
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setAssignModalTicket(null)} className="ti-btn ti-btn-light">Cancel</button>
               <button
