@@ -394,6 +394,9 @@ const Mailapp = () => {
   const [creatingLabel, setCreatingLabel] = useState(false);
   const [createLabelExpanded, setCreateLabelExpanded] = useState(false);
   const [selectedThreadIds, setSelectedThreadIds] = useState<Set<string>>(new Set());
+  const [showQuickAddModal, setShowQuickAddModal] = useState(false);
+  const [quickAddEmail, setQuickAddEmail] = useState("");
+  const [quickAddError, setQuickAddError] = useState<string | null>(null);
   const [quickRecipients, setQuickRecipients] = useState<{ email: string }[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -1698,14 +1701,37 @@ const Mailapp = () => {
   }, [threadMessages]);
 
   const handleAddQuickRecipient = useCallback(() => {
-    const email = window.prompt("Enter email address for quick mail:");
-    if (!email?.trim()) return;
-    const trimmed = email.trim();
-    setQuickRecipients((prev) => {
-      if (prev.some((r) => r.email.toLowerCase() === trimmed.toLowerCase())) return prev;
-      return [...prev, { email: trimmed }];
-    });
+    setQuickAddEmail("");
+    setQuickAddError(null);
+    setShowQuickAddModal(true);
   }, []);
+
+  const closeQuickAddModal = useCallback(() => {
+    setShowQuickAddModal(false);
+    setQuickAddEmail("");
+    setQuickAddError(null);
+  }, []);
+
+  const handleQuickAddSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const trimmed = quickAddEmail.trim();
+      if (!trimmed) {
+        setQuickAddError("Enter an email address.");
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+        setQuickAddError("That doesn't look like a valid email address.");
+        return;
+      }
+      setQuickRecipients((prev) => {
+        if (prev.some((r) => r.email.toLowerCase() === trimmed.toLowerCase())) return prev;
+        return [...prev, { email: trimmed }];
+      });
+      closeQuickAddModal();
+    },
+    [quickAddEmail, closeQuickAddModal]
+  );
 
   const handleQuickCompose = useCallback(
     (email: string) => {
@@ -1760,11 +1786,13 @@ const Mailapp = () => {
   const currentProvider = accounts.find((a) => a.id === selectedAccountId)?.provider ?? "gmail";
 
   const filteredLabels = labels.filter((l) => {
+    // Inbox is always shown via the hardcoded nav item above; exclude it here for both
+    // providers so it doesn't render twice (Gmail's INBOX system label + Outlook's inbox folder).
+    if (l.id === "INBOX") return false;
     if (currentProvider === "outlook") {
-      // For Outlook show all folders; INBOX is shown via hardcoded nav item
-      return l.id !== "INBOX";
+      return true;
     }
-    const isSystem = ["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "STARRED", "IMPORTANT"].includes(l.id);
+    const isSystem = ["SENT", "DRAFT", "TRASH", "SPAM", "STARRED", "IMPORTANT"].includes(l.id);
     const isArchive = l.id === "CATEGORY_PERSONAL";
     const isUser = l.type === "user";
     const showInSidebar = l.labelListVisibility !== "labelHide" || isSystem || isArchive;
@@ -3079,6 +3107,75 @@ const Mailapp = () => {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {showQuickAddModal && (
+          <div
+            className={`fixed inset-0 z-[9999] flex items-center justify-center overflow-auto p-4 ${mailStyles.modalBackdrop}`}
+            onClick={(e) => e.target === e.currentTarget && closeQuickAddModal()}
+          >
+            <div
+              className={`ti-modal-box bg-white dark:bg-stone-950 w-full max-w-sm overflow-hidden flex flex-col ${mailStyles.modalPanel}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <form onSubmit={handleQuickAddSubmit} className="ti-modal-content flex flex-col">
+                <div className="ti-modal-header flex-shrink-0 !p-5 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between bg-gradient-to-r from-stone-50 to-white dark:from-stone-900 dark:to-stone-950">
+                  <h6 className={`modal-title text-base font-semibold text-stone-900 dark:text-stone-100 ${mailDisplay.className}`}>
+                    Add quick contact
+                  </h6>
+                  <button
+                    type="button"
+                    onClick={closeQuickAddModal}
+                    className="ti-btn ti-btn-icon ti-btn-ghost hover:bg-black/5 dark:hover:bg-white/5"
+                    aria-label="Close"
+                  >
+                    <i className="ri-close-line text-lg"></i>
+                  </button>
+                </div>
+                <div className="ti-modal-body !p-5 bg-white dark:bg-bodydark">
+                  <label htmlFor="quick-add-email" className="form-label block mb-1">
+                    Email address<sup className="text-danger">*</sup>
+                  </label>
+                  <input
+                    id="quick-add-email"
+                    type="email"
+                    autoFocus
+                    className={`form-control w-full ${mailStyles.quickAddInput} ${quickAddError ? "!border-danger" : ""}`}
+                    placeholder="name@example.com"
+                    value={quickAddEmail}
+                    onChange={(e) => {
+                      setQuickAddEmail(e.target.value);
+                      if (quickAddError) setQuickAddError(null);
+                    }}
+                    onKeyDown={(e) => e.key === "Escape" && closeQuickAddModal()}
+                    aria-invalid={quickAddError ? true : undefined}
+                    aria-describedby={quickAddError ? "quick-add-email-error" : undefined}
+                  />
+                  {quickAddError ? (
+                    <p id="quick-add-email-error" className="text-danger text-[0.75rem] mt-1.5">
+                      {quickAddError}
+                    </p>
+                  ) : (
+                    <p className="text-[0.75rem] text-stone-500 dark:text-stone-400 mt-1.5">
+                      Saved to your rail for one-tap replies. You can remove it anytime.
+                    </p>
+                  )}
+                </div>
+                <div className="ti-modal-footer !p-5 pt-0 flex items-center justify-end gap-2">
+                  <button type="button" onClick={closeQuickAddModal} className="ti-btn ti-btn-light !mb-0">
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!quickAddEmail.trim()}
+                    className={`ti-btn px-5 !mb-0 rounded-xl text-white font-semibold disabled:opacity-50 ${mailStyles.composeCta}`}
+                  >
+                    Add contact
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

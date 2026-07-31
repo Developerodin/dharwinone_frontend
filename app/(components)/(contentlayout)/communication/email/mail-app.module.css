@@ -627,6 +627,11 @@
   border-color: rgba(255, 255, 255, 0.08);
 }
 
+.quickAddInput:focus {
+  border-color: var(--mail-accent) !important;
+  box-shadow: 0 0 0 3px var(--mail-accent-mist);
+}
+
 /* —— Empty state: full-stage onboarding (fills main body) —— */
 
 .mailEmptyStage {
