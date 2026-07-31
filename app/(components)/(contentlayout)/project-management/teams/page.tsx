@@ -78,6 +78,7 @@ function TeamRosterSkeleton() {
 interface TeamMemberFormState {
   name: string;
   email: string;
+  employeeId: string;
   memberSinceLabel: string;
   projectsCount: string;
   position: string;
@@ -91,6 +92,7 @@ interface TeamMemberFormState {
 const EMPTY_FORM: TeamMemberFormState = {
   name: "",
   email: "",
+  employeeId: "",
   memberSinceLabel: "",
   projectsCount: "",
   position: "",
@@ -106,6 +108,15 @@ function getTeamIdFromRef(teamId: string | { _id?: string; id?: string } | undef
   if (!teamId) return "";
   if (typeof teamId === "string") return teamId;
   return (teamId as { _id?: string; id?: string })._id ?? (teamId as { id?: string }).id ?? "";
+}
+
+/** Same shape as getTeamIdFromRef but for TeamMember.employeeId (string id, populated doc, or null for orphans). */
+function getEmployeeIdFromRef(
+  employeeId: string | { _id?: string; id?: string } | null | undefined
+): string {
+  if (!employeeId) return "";
+  if (typeof employeeId === "string") return employeeId;
+  return (employeeId as { _id?: string; id?: string })._id ?? (employeeId as { id?: string }).id ?? "";
 }
 
 function getTeamGroupId(team: ApiTeamGroup & { id?: string }): string {
@@ -211,6 +222,7 @@ function mapMemberToForm(member: TeamMember): TeamMemberFormState {
   return {
     name: memberDisplayName(member),
     email: memberDisplayEmail(member),
+    employeeId: getEmployeeIdFromRef(member.employeeId),
     memberSinceLabel: member.memberSinceLabel ?? "",
     projectsCount: String(member.projectsCount ?? 0),
     position: member.seniority ?? member.position ?? "",
@@ -613,10 +625,12 @@ function TeamMemberFormModal({
     []
   );
 
-  const matchedCandidate = useMemo(
-    () => (form.email.trim() ? findCandidateByFormEmail(allCandidates, form.email) : undefined),
-    [allCandidates, form.email]
-  );
+  const matchedCandidate = useMemo(() => {
+    if (form.employeeId) {
+      return allCandidates.find((c) => c.id === form.employeeId);
+    }
+    return form.email.trim() ? findCandidateByFormEmail(allCandidates, form.email) : undefined;
+  }, [allCandidates, form.email, form.employeeId]);
 
   const avatarPreview = useMemo(() => {
     const override = form.avatarImageUrl.trim();
@@ -671,6 +685,10 @@ function TeamMemberFormModal({
       };
       await updateCandidate(matchedCandidate.id, { profilePicture });
       onChange({ avatarImageUrl: "" });
+      const nextUrl = resolvePublicImageUrl(profilePicture.url, "") || undefined;
+      setSearchedCandidates((prev) =>
+        prev.map((c) => (c.id === matchedCandidate.id ? { ...c, profilePictureUrl: nextUrl } : c))
+      );
       await onRefreshCandidates();
       setPhotoHint("Photo saved to ATS and the candidate’s linked user profile.");
     } catch (err: unknown) {
@@ -700,6 +718,9 @@ function TeamMemberFormModal({
     try {
       await updateCandidate(matchedCandidate.id, { profilePicture: null });
       onChange({ avatarImageUrl: "" });
+      setSearchedCandidates((prev) =>
+        prev.map((c) => (c.id === matchedCandidate.id ? { ...c, profilePictureUrl: undefined } : c))
+      );
       await onRefreshCandidates();
       setPhotoHint("Profile photo removed from ATS and linked user.");
     } catch (err: unknown) {
@@ -804,30 +825,25 @@ function TeamMemberFormModal({
                   defaultOptions
                   loadOptions={loadCandidateOptions}
                   value={
-                    form.email
-                      ? (() => {
-                          const match = findCandidateByFormEmail(allCandidates, form.email);
-                          if (match) {
-                            return {
-                              value: match.id,
-                              label: `${match.name} (${match.email})`,
-                            };
-                          }
-                          return null;
-                        })()
+                    matchedCandidate
+                      ? {
+                          value: matchedCandidate.id,
+                          label: `${matchedCandidate.name} (${matchedCandidate.email})`,
+                        }
                       : null
                   }
                   placeholder="Search or pick candidate"
                   onChange={(opt) => {
                     const option = opt as { value: string; label: string } | null;
                     if (!option) {
-                      onChange({ name: "", email: "" });
+                      onChange({ name: "", email: "", employeeId: "" });
                       return;
                     }
                     const cand = allCandidates.find((c) => c.id === option.value);
                     onChange({
                       name: cand?.name ?? form.name,
                       email: cand?.email ?? form.email,
+                      employeeId: option.value,
                     });
                   }}
                   isClearable
@@ -1107,6 +1123,8 @@ const TeamsPage = () => {
   const auth = useAuth();
   const { user } = auth;
   const canManageTeams = hasPermission(auth, "update_team");
+  const { menuPortalTarget: createTeamSelectPortalTarget, styles: createTeamSelectStyles } =
+    usePmReactSelectStyles();
   const sessionUserAvatar = useMemo(() => {
     const url = user?.profilePicture?.url?.trim();
     if (!user?.email || !url) return null;
@@ -1138,6 +1156,9 @@ const TeamsPage = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [createTeamOpen, setCreateTeamOpen] = useState<boolean>(false);
   const [createTeamName, setCreateTeamName] = useState<string>("");
+  const [createTeamEmployees, setCreateTeamEmployees] = useState<
+    { value: string; label: string }[]
+  >([]);
   const [createTeamSubmitting, setCreateTeamSubmitting] = useState<boolean>(false);
   const [candidates, setCandidates] = useState<
     { id: string; name: string; email: string; profilePictureUrl?: string }[]
@@ -1275,6 +1296,21 @@ const TeamsPage = () => {
     void refreshCandidates();
   }, [fetchTeamGroups, refreshCandidates]);
 
+  const loadEmployeeOptionsForCreateTeam = useCallback(
+    (inputValue: string, callback: (options: { value: string; label: string }[]) => void) => {
+      listCandidates({ search: inputValue || undefined, limit: 20 })
+        .then((res) => {
+          const opts = (res.results ?? []).map((c: CandidateListItem) => ({
+            value: (c.id ?? c._id) as string,
+            label: `${c.fullName} (${c.email})`,
+          }));
+          callback(opts);
+        })
+        .catch(() => callback([]));
+    },
+    []
+  );
+
   const handleSearch = () => {
     const trimmed = searchInput.trim();
     setSearchQuery(trimmed);
@@ -1340,8 +1376,8 @@ const TeamsPage = () => {
         Swal.fire("Validation", "Select a team first.", "warning");
         return;
       }
-      if (!formState.name.trim() || !formState.email.trim()) {
-        Swal.fire("Validation", "Name and email are required.", "warning");
+      if (!formState.employeeId.trim()) {
+        Swal.fire("Validation", "Pick an employee from the list first.", "warning");
         return;
       }
     }
@@ -1353,8 +1389,7 @@ const TeamsPage = () => {
       } else {
         await createTeamMember({
           teamId: formState.teamId.trim(),
-          legacyName: formState.name.trim(),
-          legacyEmail: formState.email.trim(),
+          employeeId: formState.employeeId.trim(),
           seniority: formState.position.trim() || undefined,
         });
         await Swal.fire("Created", "Team member created successfully.", "success");
@@ -1435,11 +1470,30 @@ const TeamsPage = () => {
     }
     setCreateTeamSubmitting(true);
     try {
-      await createTeamGroup({ name });
-      await Swal.fire("Created", "Team created successfully.", "success");
+      const team = await createTeamGroup({ name });
+      const teamId = getTeamGroupId(team);
+      let failedCount = 0;
+      if (createTeamEmployees.length > 0) {
+        const results = await Promise.allSettled(
+          createTeamEmployees.map((emp) => createTeamMember({ teamId, employeeId: emp.value }))
+        );
+        failedCount = results.filter((r) => r.status === "rejected").length;
+      }
+      if (failedCount > 0) {
+        await Swal.fire(
+          "Team created",
+          `Team created, but ${failedCount} of ${createTeamEmployees.length} employee assignment(s) failed.`,
+          "warning"
+        );
+      } else {
+        await Swal.fire("Created", "Team created successfully.", "success");
+      }
       setCreateTeamOpen(false);
       setCreateTeamName("");
+      setCreateTeamEmployees([]);
       fetchTeamGroups();
+      fetchMembers({ page: 1, search: searchQuery || undefined });
+      void fetchSidebarRoster();
     } catch {
       Swal.fire("Error", "Failed to create team.", "error");
     } finally {
@@ -1960,29 +2014,60 @@ const TeamsPage = () => {
               <button
                 type="button"
                 className="ti-modal-close-btn ti-btn ti-btn-sm ti-btn-light"
-                onClick={() => !createTeamSubmitting && setCreateTeamOpen(false)}
+                onClick={() => {
+                  if (createTeamSubmitting) return;
+                  setCreateTeamOpen(false);
+                  setCreateTeamEmployees([]);
+                }}
               >
                 <i className="ri-close-line" />
               </button>
             </div>
-            <div className="ti-modal-body px-4 py-4">
-              <label htmlFor="create-team-name" className="form-label">
-                Team name
-              </label>
-              <input
-                id="create-team-name"
-                type="text"
-                className="form-control"
-                placeholder="e.g. TEAM REACT"
-                value={createTeamName}
-                onChange={(e) => setCreateTeamName(e.target.value)}
-              />
+            <div className="ti-modal-body px-4 py-4 space-y-3">
+              <div>
+                <label htmlFor="create-team-name" className="form-label">
+                  Team name
+                </label>
+                <input
+                  id="create-team-name"
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. TEAM REACT"
+                  value={createTeamName}
+                  onChange={(e) => setCreateTeamName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="create-team-employees" className="form-label">
+                  Assign employees <span className="text-muted font-normal">(optional)</span>
+                </label>
+                <AsyncSelect
+                  inputId="create-team-employees"
+                  classNamePrefix="Select2"
+                  className="basic-multi-select"
+                  menuPlacement="auto"
+                  isMulti
+                  cacheOptions
+                  defaultOptions
+                  loadOptions={loadEmployeeOptionsForCreateTeam}
+                  value={createTeamEmployees}
+                  placeholder="Search employees to add"
+                  onChange={(opts) =>
+                    setCreateTeamEmployees((opts as { value: string; label: string }[] | null) ?? [])
+                  }
+                  menuPortalTarget={createTeamSelectPortalTarget}
+                  styles={createTeamSelectStyles}
+                />
+              </div>
             </div>
             <div className="ti-modal-footer flex items-center justify-end gap-2 px-4 py-3 border-t border-defaultborder">
               <button
                 type="button"
                 className="ti-btn ti-btn-light"
-                onClick={() => setCreateTeamOpen(false)}
+                onClick={() => {
+                  setCreateTeamOpen(false);
+                  setCreateTeamEmployees([]);
+                }}
                 disabled={createTeamSubmitting}
               >
                 Cancel

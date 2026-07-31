@@ -8,7 +8,7 @@ export interface CandidateListItem {
   fullName: string;
   email: string;
   phoneNumber: string;
-  profilePicture?: { url?: string; key?: string };
+  profilePicture?: { url?: string; key?: string } | null;
   skills?: { name: string; level?: string; category?: string }[];
   qualifications?: { degree: string; institute: string }[];
   experiences?: { company: string; role: string; startDate?: string; endDate?: string; currentlyWorking?: boolean }[];
