@@ -30,6 +30,7 @@ interface InternalMeetingRow {
   id: string
   title: string
   date: string
+  dateKey: string
   time: string
   type: string
   durationMinutes: number
@@ -60,6 +61,24 @@ function formatMeetingDate(iso: string, tz?: string): string {
   } catch {
     return "—"
   }
+}
+
+/** ISO (YYYY-MM-DD) wall-clock date, for matching against weekDays keys — NOT for display. */
+function meetingDateKey(iso: string, tz?: string): string {
+  try {
+    return utcInstantToWallClock(iso, tz || getViewerTimezone()).date
+  } catch {
+    return ""
+  }
+}
+
+/** Local calendar date as YYYY-MM-DD. toISOString() would UTC-shift and misfile
+ *  meetings by a day for any positive-offset timezone (e.g. IST) — avoid it here. */
+function localDateKey(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${y}-${m}-${day}`
 }
 
 function participantsSummary(m: InternalMeeting): string {
@@ -97,6 +116,7 @@ function meetingToRow(m: InternalMeeting, index: number): InternalMeetingRow {
     id: baseId || `meeting-${index}`,
     title: m.title || "Meeting",
     date: formatMeetingDate(m.scheduledAt, m.timezone),
+    dateKey: meetingDateKey(m.scheduledAt, m.timezone),
     time: formatMeetingTime(m.scheduledAt),
     type: m.meetingType || "Video",
     durationMinutes: Number.isFinite(Number(m.durationMinutes)) ? Math.max(1, Number(m.durationMinutes)) : 60,
@@ -795,7 +815,7 @@ export default function InternalMeetingsClient() {
       d.setDate(weekStart.getDate() + i)
       days.push({
         date: d,
-        key: d.toISOString().slice(0, 10),
+        key: localDateKey(d),
         label: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
       })
     }
@@ -808,7 +828,7 @@ export default function InternalMeetingsClient() {
       map[day.key] = []
     })
     data.forEach((row) => {
-      if (map[row.date]) map[row.date].push(row)
+      if (map[row.dateKey]) map[row.dateKey].push(row)
     })
     return map
   }, [data, weekDays])
