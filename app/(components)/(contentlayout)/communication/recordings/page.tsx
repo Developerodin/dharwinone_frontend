@@ -182,7 +182,15 @@ export default function RecordingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState<number>(() => {
+    if (typeof window === "undefined") return 100;
+    try {
+      const stored = Number(localStorage.getItem("recordings-page-size"));
+      return PAGE_SIZES.includes(stored) ? stored : 100;
+    } catch {
+      return 100;
+    }
+  });
   const [totalResults, setTotalResults] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -431,8 +439,8 @@ export default function RecordingsPage() {
     <Fragment>
       <Seo title="Recordings" />
       <div className="mt-5 grid grid-cols-12 gap-6 h-[calc(100vh-8rem)] sm:mt-6">
-        <div className="xl:col-span-12 col-span-12 h-full flex flex-col">
-          <div className="box custom-box h-full flex flex-col">
+        <div className="xl:col-span-12 col-span-12 h-full min-h-0 flex flex-col">
+          <div className="box custom-box h-full min-h-0 flex flex-col overflow-hidden">
             {/* Header — title + count + control cluster matching meetings page */}
             <div className="box-header relative z-20 flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-3 flex-wrap">
@@ -525,8 +533,14 @@ export default function RecordingsPage() {
                     className="rounded-md border border-defaultborder bg-white dark:bg-black/20 dark:border-white/10 !py-1 !pl-7 !pr-7 !text-[0.75rem] font-medium text-defaulttextcolor focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 hover:border-primary/40 transition-colors cursor-pointer"
                     value={pageSize}
                     onChange={(e) => {
+                      const n = Number(e.target.value);
                       setPage(1);
-                      setPageSize(Number(e.target.value));
+                      setPageSize(n);
+                      try {
+                        localStorage.setItem("recordings-page-size", String(n));
+                      } catch {
+                        /* noop */
+                      }
                     }}
                   >
                     {PAGE_SIZES.map((n) => (
@@ -602,7 +616,7 @@ export default function RecordingsPage() {
             </div>
 
             {/* Body */}
-            <div className="box-body relative z-0 !p-0 flex-1 flex flex-col overflow-hidden">
+            <div className="box-body relative z-0 !p-0 flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Banners */}
               {(error || syncMessage) && (
                 <div className="px-4 pt-3 space-y-2">
@@ -685,16 +699,16 @@ export default function RecordingsPage() {
                 </div>
               ) : viewMode === "table" ? (
                 <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="min-h-0 flex-1 overflow-auto">
-                    <div className="table-responsive">
+                  <div className="min-h-0 flex-1 overflow-auto" style={{ minHeight: 0 }}>
+                    <div className="table-responsive" style={{ minHeight: 0 }}>
                       <table className="table table-hover whitespace-nowrap min-w-full">
                         <thead>
                           <tr>
-                            <th className="!text-[0.75rem]">Recording</th>
-                            <th className="!text-[0.75rem]">Started</th>
-                            <th className="!text-[0.75rem]">Duration</th>
-                            <th className="!text-[0.75rem]">Status</th>
-                            <th className="!text-[0.75rem] text-center">Actions</th>
+                            <th className="sticky top-0 z-10 !text-[0.75rem] border-b border-defaultborder/80 bg-gray-50/95 shadow-[0_1px_0_0_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/10 dark:bg-bodybg/95 dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]" style={{ position: "sticky", top: 0, zIndex: 10 }}>Recording</th>
+                            <th className="sticky top-0 z-10 !text-[0.75rem] border-b border-defaultborder/80 bg-gray-50/95 shadow-[0_1px_0_0_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/10 dark:bg-bodybg/95 dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]" style={{ position: "sticky", top: 0, zIndex: 10 }}>Started</th>
+                            <th className="sticky top-0 z-10 !text-[0.75rem] border-b border-defaultborder/80 bg-gray-50/95 shadow-[0_1px_0_0_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/10 dark:bg-bodybg/95 dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]" style={{ position: "sticky", top: 0, zIndex: 10 }}>Duration</th>
+                            <th className="sticky top-0 z-10 !text-[0.75rem] border-b border-defaultborder/80 bg-gray-50/95 shadow-[0_1px_0_0_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/10 dark:bg-bodybg/95 dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]" style={{ position: "sticky", top: 0, zIndex: 10 }}>Status</th>
+                            <th className="sticky top-0 z-10 !text-[0.75rem] text-center border-b border-defaultborder/80 bg-gray-50/95 shadow-[0_1px_0_0_rgba(15,23,42,0.06)] backdrop-blur-sm dark:border-white/10 dark:bg-bodybg/95 dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]" style={{ position: "sticky", top: 0, zIndex: 10 }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -771,7 +785,7 @@ export default function RecordingsPage() {
                 </div>
               ) : (
                 <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="min-h-0 flex-1 overflow-auto p-4">
+                  <div className="min-h-0 flex-1 overflow-auto p-4" style={{ minHeight: 0 }}>
                     <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                       {filtered.map((rec) => {
                         const isLive = LIVE_STATUSES.has(rec.status);
