@@ -21,7 +21,7 @@ import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { trackTaskBoard } from "../lib/telemetry";
 import { TaskCommentsSection } from "../../../../TaskCommentsSection";
 import { usePmReactSelectStyles } from "@/shared/hooks/usePmReactSelectStyles";
-import { listUsers } from "@/shared/lib/api/users";
+import { getUser, listUsers } from "@/shared/lib/api/users";
 import styles from "../../../kanban-board.module.css";
 
 const Select = dynamic(() => import("react-select"), { ssr: false });
@@ -155,13 +155,29 @@ export function TaskDrawer({
       setDueDate(task.dueDate ? new Date(task.dueDate) : null);
       setProjectId(projectIdFromTask(task));
       setTagsText((task.tags ?? []).join(", "));
-      setAssignedIds(assignedIdsFromTask(task));
+      const ids = assignedIdsFromTask(task);
+      setAssignedIds(ids);
       const labels: Record<string, string> = {};
+      // assignedTo entries are sometimes bare id strings (e.g. tasks reassigned via
+      // the exit SOP), not populated user objects — skip those here and resolve below.
       (task.assignedTo ?? []).forEach((u) => {
+        if (!u || typeof u === "string") return;
         const id = u.id ?? u._id;
         if (id) labels[id] = u.name || u.email || id;
       });
       setAssigneeLabels((prev) => ({ ...prev, ...labels }));
+      const unresolved = ids.filter((id) => !labels[id]);
+      if (unresolved.length) {
+        Promise.all(unresolved.map((id) => getUser(id).catch(() => null))).then((fetched) => {
+          const resolved: Record<string, string> = {};
+          fetched.forEach((u, i) => {
+            if (u) resolved[unresolved[i]] = u.name || u.email || unresolved[i];
+          });
+          if (Object.keys(resolved).length) {
+            setAssigneeLabels((prev) => ({ ...prev, ...resolved }));
+          }
+        });
+      }
     }
   }, [open, mode, task, createStatus]);
 
