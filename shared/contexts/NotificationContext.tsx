@@ -113,12 +113,57 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       })
       .catch(() => {});
 
+    const baseURL = apiClient.defaults.baseURL || "/api/v1";
+    const url = `${baseURL}/notifications/sse`;
+
+    function applyPayload(payload: { type: string; count?: number; notification?: Notification; connected?: boolean }) {
+      if (!mountedRef.current) return;
+      if (payload.type === "__status") {
+        setIsConnected(!!payload.connected);
+        if (payload.connected) setError(null);
+      } else if (payload.type === "unread_count" && typeof payload.count === "number") {
+        setUnreadCount(payload.count);
+      } else if (payload.type === "notification" && payload.notification) {
+        const n = payload.notification;
+        // Dedupe: server emits both `notification` and `unread_count`
+        // and reconnects can replay; prefer the authoritative count
+        // event for the badge instead of incrementing here.
+        setNotifications((prev) => {
+          if (prev.some((p) => p._id === n._id)) return prev;
+          return [n, ...prev].slice(0, 50);
+        });
+        setLatestNotification(n);
+      }
+    }
+
+    // SharedWorker holds a single SSE connection for the whole browser (all tabs of this
+    // origin), avoiding the per-tab HTTP/1.1 connection-per-origin cap. Falls back to a
+    // direct per-tab stream on browsers without SharedWorker (Safari).
+    if (typeof window !== "undefined" && "SharedWorker" in window) {
+      let worker: SharedWorker | null = null;
+      try {
+        worker = new SharedWorker("/notification-worker.js");
+      } catch {
+        worker = null;
+      }
+
+      if (worker) {
+        const port = worker.port;
+        port.onmessage = (e: MessageEvent) => applyPayload(e.data || {});
+        port.start();
+        port.postMessage({ type: "start", url, userId: user.id });
+
+        return () => {
+          port.postMessage({ type: "stop" });
+          port.close();
+          setIsConnected(false);
+        };
+      }
+    }
+
     const controller = new AbortController();
     retriesRef.current = 0;
     consecutiveFailuresRef.current = 0;
-
-    const baseURL = apiClient.defaults.baseURL || "/api/v1";
-    const url = `${baseURL}/notifications/sse`;
 
     function scheduleReconnect() {
       if (controller.signal.aborted || !mountedRef.current) return;
@@ -156,20 +201,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               for (const chunk of lines) {
                 if (!chunk.startsWith("data: ")) continue;
                 try {
-                  const payload = JSON.parse(chunk.slice(6));
-                  if (payload.type === "unread_count") {
-                    setUnreadCount(payload.count);
-                  } else if (payload.type === "notification") {
-                    const n = payload.notification as Notification;
-                    // Dedupe: server emits both `notification` and `unread_count`
-                    // and reconnects can replay; prefer the authoritative count
-                    // event for the badge instead of incrementing here.
-                    setNotifications((prev) => {
-                      if (prev.some((p) => p._id === n._id)) return prev;
-                      return [n, ...prev].slice(0, 50);
-                    });
-                    setLatestNotification(n);
-                  }
+                  applyPayload(JSON.parse(chunk.slice(6)));
                 } catch (_) {}
               }
               return read();
