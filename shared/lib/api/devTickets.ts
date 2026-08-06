@@ -15,6 +15,10 @@ export const DEV_TICKET_LABELS = [
 
 export type DevTicketLabel = (typeof DEV_TICKET_LABELS)[number];
 
+export const DEV_TICKET_CATEGORIES = ["Bug", "New Feature", "Improvement"] as const;
+
+export type DevTicketCategory = (typeof DEV_TICKET_CATEGORIES)[number];
+
 export const DEV_TICKET_LINK_RELS = [
   "blocks",
   "blocked-by",
@@ -31,6 +35,7 @@ export interface CreateDevTicketData {
   pageUrl?: string;
   priority?: "Low" | "Medium" | "High" | "Urgent";
   severity?: "Minor" | "Major" | "Critical" | "Blocker";
+  category?: DevTicketCategory;
   module?: string;
   environment?: "Staging" | "Production";
   labels?: DevTicketLabel[];
@@ -51,6 +56,7 @@ export interface UpdateDevTicketData {
   status?: "Open" | "In Progress" | "Resolved" | "Closed";
   priority?: "Low" | "Medium" | "High" | "Urgent";
   severity?: "Minor" | "Major" | "Critical" | "Blocker";
+  category?: DevTicketCategory;
   module?: string;
   environment?: "Staging" | "Production";
   labels?: DevTicketLabel[];
@@ -66,6 +72,7 @@ export interface DevTicketFilters {
   status?: "Open" | "In Progress" | "Resolved" | "Closed";
   priority?: "Low" | "Medium" | "High" | "Urgent";
   severity?: "Minor" | "Major" | "Critical" | "Blocker";
+  category?: DevTicketCategory;
   module?: string;
   environment?: "Staging" | "Production";
   label?: DevTicketLabel;
@@ -143,6 +150,7 @@ export interface DevTicket {
   status: "Open" | "In Progress" | "Resolved" | "Closed";
   priority: "Low" | "Medium" | "High" | "Urgent";
   severity: "Minor" | "Major" | "Critical" | "Blocker";
+  category?: DevTicketCategory;
   module?: string;
   environment?: "Staging" | "Production";
   labels?: DevTicketLabel[];
@@ -211,6 +219,7 @@ function appendFilters(params: URLSearchParams, filters?: DevTicketFilters) {
   if (filters.status) params.append("status", filters.status);
   if (filters.priority) params.append("priority", filters.priority);
   if (filters.severity) params.append("severity", filters.severity);
+  if (filters.category) params.append("category", filters.category);
   if (filters.module) params.append("module", filters.module);
   if (filters.environment) params.append("environment", filters.environment);
   if (filters.label) params.append("label", filters.label);
@@ -247,6 +256,7 @@ export async function createDevTicket(ticketData: CreateDevTicketData): Promise<
     if (ticketData.pageUrl) formData.append("pageUrl", ticketData.pageUrl);
     if (ticketData.priority) formData.append("priority", ticketData.priority);
     if (ticketData.severity) formData.append("severity", ticketData.severity);
+    if (ticketData.category) formData.append("category", ticketData.category);
     if (ticketData.module) formData.append("module", ticketData.module);
     if (ticketData.environment) formData.append("environment", ticketData.environment);
     if (ticketData.assignedTo) formData.append("assignedTo", ticketData.assignedTo);
@@ -263,6 +273,22 @@ export async function createDevTicket(ticketData: CreateDevTicketData): Promise<
 
 export async function updateDevTicket(id: string, body: UpdateDevTicketData): Promise<DevTicket> {
   const { data } = await apiClient.patch<DevTicket>(`${BASE}/${id}`, body);
+  return data;
+}
+
+export async function addTicketAttachments(id: string, files: File[]): Promise<DevTicket> {
+  const formData = new FormData();
+  files.forEach((file) => formData.append("attachments", file));
+  const { data } = await apiClient.post<DevTicket>(`${BASE}/${id}/attachments`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function deleteTicketAttachment(id: string, key: string): Promise<DevTicket> {
+  const { data } = await apiClient.delete<DevTicket>(
+    `${BASE}/${id}/attachments?key=${encodeURIComponent(key)}`
+  );
   return data;
 }
 

@@ -20,13 +20,14 @@ import { backfillTwilioDialerCalls } from "@/shared/lib/api/telephony";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { hasPermission } from "@/shared/lib/permissions";
 import { useChatSocket, type CallUpdateData } from "@/shared/contexts/ChatSocketContext";
+import { normalizeCallTs } from "@/shared/lib/call-record-order";
 
 type SourceFilter = "all" | "telephony" | "in_app";
 type PurposeFilter = "all" | "job_recruiter" | "student_candidate";
 
 type UnifiedCall =
-  | { source: "telephony"; data: CallRecord }
-  | { source: "in_app"; data: ChatCall };
+  | { source: "telephony"; data: CallRecord; ts: number }
+  | { source: "in_app"; data: ChatCall; ts: number };
 
 const STATUS_OPTIONS = [
   { value: "all", label: "All Status" },
@@ -204,10 +205,6 @@ const Calling = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
-  const [telephonyTotal, setTelephonyTotal] = useState(0);
-  const [telephonyPages, setTelephonyPages] = useState(0);
-  const [chatTotal, setChatTotal] = useState(0);
-  const [chatPages, setChatPages] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [settingUpExtractions, setSettingUpExtractions] = useState(false);
@@ -294,17 +291,30 @@ const Calling = () => {
     clearPendingRecordingPlay();
   }, [pendingRecordingPlayId, selectedCall, detailsPanelOpen, clearPendingRecordingPlay]);
 
+  // Fetch every telephony page: the table merges telephony + in-app rows and paginates
+  // that merged list client-side, so pulling only the current server page double-paginated
+  // and scrambled the date order past page 1.
   const fetchTelephony = useCallback(async () => {
-    const data = await getBolnaCallRecords({
-      page,
-      limit: pageSize,
-      search: searchSubmitted || undefined,
-      status: statusFilter !== "all" ? statusFilter : undefined,
-      sortBy: "createdAt",
-      order: "desc",
-    });
-    return { records: data.records || [], total: data.total ?? 0, totalPages: data.totalPages ?? 1 };
-  }, [page, pageSize, searchSubmitted, statusFilter]);
+    const records: CallRecord[] = [];
+    let total = 0;
+    let p = 1;
+    for (;;) {
+      const data = await getBolnaCallRecords({
+        page: p,
+        limit: 500,
+        search: searchSubmitted || undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        sortBy: "createdAt",
+        order: "desc",
+      });
+      const batch = data.records || [];
+      records.push(...batch);
+      total = data.total ?? records.length;
+      if (p >= (data.totalPages ?? 1) || !batch.length) break;
+      p += 1;
+    }
+    return { records, total, totalPages: 1 };
+  }, [searchSubmitted, statusFilter]);
 
   const fetchChatCalls = useCallback(async () => {
     const data = await listChatCalls({ page: 1, limit: 500 });
@@ -327,25 +337,9 @@ const Calling = () => {
         fetchChatNeeded ? fetchChatCalls() : Promise.resolve(null),
       ]);
 
-      if (telephonyRes) {
-        setTelephonyRecords(telephonyRes.records);
-        setTelephonyTotal(telephonyRes.total);
-        setTelephonyPages(telephonyRes.totalPages);
-      } else {
-        setTelephonyRecords([]);
-        setTelephonyTotal(0);
-        setTelephonyPages(0);
-      }
-
-      if (chatRes) {
-        setChatCalls(chatRes.results);
-        setChatTotal(chatRes.total);
-        setChatPages(chatRes.totalPages);
-      } else {
-        setChatCalls([]);
-        setChatTotal(0);
-        setChatPages(0);
-      }
+      // Counts/pages come off the merged list now (totalMerged), so only the rows matter.
+      setTelephonyRecords(telephonyRes?.records || []);
+      setChatCalls(chatRes?.results || []);
     } catch (e) {
       const msg =
         e && typeof e === "object" && "response" in e
@@ -405,10 +399,14 @@ const Calling = () => {
   const mergedCalls = useMemo((): UnifiedCall[] => {
     const list: UnifiedCall[] = [];
     if (sourceFilter === "telephony" || sourceFilter === "all") {
-      telephonyRecords.forEach((r) => list.push({ source: "telephony", data: r }));
+      telephonyRecords.forEach((r) =>
+        list.push({ source: "telephony", data: r, ts: normalizeCallTs("telephony", r) })
+      );
     }
     if (sourceFilter === "in_app" || sourceFilter === "all") {
-      chatCalls.forEach((c) => list.push({ source: "in_app", data: c }));
+      chatCalls.forEach((c) =>
+        list.push({ source: "in_app", data: c, ts: normalizeCallTs("in_app", c) })
+      );
     }
     let filtered = list;
     if (statusFilter !== "all") {
@@ -425,11 +423,7 @@ const Calling = () => {
         return categoryMatchesPurposeFilter(cat, purposeFilter);
       });
     }
-    filtered.sort((a, b) => {
-      const da = new Date(a.data.createdAt || 0).getTime();
-      const db = new Date(b.data.createdAt || 0).getTime();
-      return db - da;
-    });
+    filtered.sort((a, b) => b.ts - a.ts);
     return filtered;
   }, [sourceFilter, telephonyRecords, chatCalls, statusFilter, isAdministrator, purposeFilter]);
 
@@ -447,16 +441,10 @@ const Calling = () => {
     [page, totalPagesMerged]
   );
 
-  const formatDate = (iso?: string) => {
-    if (!iso) return "–";
-    try {
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return "–";
-      // Pinned locale: browser-locale formatting made the same table read differently per user.
-      return d.toLocaleString("en-US", { dateStyle: "short", timeStyle: "medium" });
-    } catch {
-      return "–";
-    }
+  const formatTs = (ms: number) => {
+    if (!ms) return "–";
+    // Pinned locale: browser-locale formatting made the same table read differently per user.
+    return new Date(ms).toLocaleString("en-US", { dateStyle: "short", timeStyle: "medium" });
   };
 
   const handleSync = async () => {
@@ -886,7 +874,7 @@ const Calling = () => {
                                   <div className="flex flex-col gap-0.5">
                                     <span className="text-xs text-gray-700 dark:text-gray-300 flex items-center gap-1">
                                       <i className="ri-calendar-line text-primary text-[0.85rem]" />
-                                      {formatDate(u.data.createdAt)}
+                                      {formatTs(u.ts)}
                                     </span>
                                   </div>
                                 </td>

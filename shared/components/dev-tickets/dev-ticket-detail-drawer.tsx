@@ -12,12 +12,15 @@ import {
   removeReaction,
   unlinkTicket,
   updateDevTicket,
+  addTicketAttachments,
+  deleteTicketAttachment,
   watch,
   unwatch,
   type DevTicket,
   type DevTicketLabel,
   type DevTicketLinkRel,
   DEV_TICKET_LABELS,
+  DEV_TICKET_CATEGORIES,
   DEV_TICKET_LINK_RELS,
 } from "@/shared/lib/api/devTickets";
 import {
@@ -92,6 +95,7 @@ export function DevTicketDetailDrawer({
   const [detail, setDetail] = useState<DevTicket | null>(ticket);
   const [commentText, setCommentText] = useState("");
   const [commentAttachments, setCommentAttachments] = useState<File[]>([]);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [addingComment, setAddingComment] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [updateForm, setUpdateForm] = useState({
@@ -101,6 +105,7 @@ export function DevTicketDetailDrawer({
     status: "",
     priority: "",
     severity: "",
+    category: "",
     module: "",
     pageUrl: "",
     environment: "",
@@ -115,6 +120,7 @@ export function DevTicketDetailDrawer({
   const [linking, setLinking] = useState(false);
   const [watching, setWatching] = useState(false);
   const commentFileRef = useRef<HTMLInputElement>(null);
+  const ticketFileRef = useRef<HTMLInputElement>(null);
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
@@ -137,6 +143,7 @@ export function DevTicketDetailDrawer({
       status: t.status ?? "Open",
       priority: t.priority ?? "Medium",
       severity: t.severity ?? "Major",
+      category: t.category ?? "Bug",
       module: t.module ?? "",
       pageUrl: t.pageUrl ?? "",
       environment: t.environment ?? "Staging",
@@ -247,6 +254,7 @@ export function DevTicketDetailDrawer({
         status: updateForm.status as DevTicket["status"],
         priority: updateForm.priority as DevTicket["priority"],
         severity: updateForm.severity as DevTicket["severity"],
+        category: updateForm.category as DevTicket["category"],
         module: updateForm.module.trim() || undefined,
         pageUrl: updateForm.pageUrl.trim() || undefined,
         environment: updateForm.environment as DevTicket["environment"],
@@ -262,6 +270,46 @@ export function DevTicketDetailDrawer({
       await Swal.fire({ icon: "error", title: "Failed", text: e?.response?.data?.message ?? e?.message ?? "Could not update ticket." });
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const applyTicketUpdate = (latest: DevTicket) => {
+    setDetail(latest);
+    onTicketUpdated(latest);
+  };
+
+  const handleAddAttachments = async (files: File[]) => {
+    if (!ticketId || !files.length) return;
+    try {
+      setAttachmentBusy(true);
+      applyTicketUpdate(await addTicketAttachments(ticketId, files));
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      await Swal.fire({ icon: "error", title: "Upload failed", text: e?.response?.data?.message ?? e?.message ?? "Could not add attachments." });
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+
+  const handleRemoveAttachment = async (key: string, name: string) => {
+    if (!ticketId) return;
+    const result = await Swal.fire({
+      title: "Remove attachment?",
+      text: name,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#d33",
+      confirmButtonText: "Remove",
+    });
+    if (!result.isConfirmed) return;
+    try {
+      setAttachmentBusy(true);
+      applyTicketUpdate(await deleteTicketAttachment(ticketId, key));
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      await Swal.fire({ icon: "error", title: "Failed", text: e?.response?.data?.message ?? e?.message ?? "Could not remove attachment." });
+    } finally {
+      setAttachmentBusy(false);
     }
   };
 
@@ -334,6 +382,8 @@ export function DevTicketDetailDrawer({
   const watcherIds = (detail.watchers ?? []).map((w) => w.id ?? w._id);
   const isWatching = Boolean(currentUserId && watcherIds.some((id) => String(id) === String(currentUserId)));
   const allAttachments = getAllTicketAttachments(detail);
+  // Only ticket-level files can be removed here; comment files belong to their comment.
+  const ticketAttachmentKeys = new Set((detail.attachments ?? []).map((a) => a.key));
 
   return (
     <>
@@ -453,6 +503,7 @@ export function DevTicketDetailDrawer({
           {/* Meta grid */}
           <section className="mb-5 grid grid-cols-2 gap-3 rounded-lg border border-defaultborder/60 bg-slate-50/50 p-3 dark:border-white/10 dark:bg-black/10 sm:grid-cols-3">
             {[
+              { label: "Category", value: detail.category || "—" },
               { label: "Module", value: detail.module ? formatDevTicketModuleLabel(detail.module) : "—" },
               { label: "Environment", value: detail.environment || "—" },
               { label: "Priority", value: detail.priority },
@@ -528,6 +579,14 @@ export function DevTicketDetailDrawer({
                     <select className={EDIT_FIELD} value={updateForm.severity} onChange={(e) => setUpdateForm((f) => ({ ...f, severity: e.target.value }))}>
                       {Object.keys(SEVERITY_CONFIG).map((s) => (
                         <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="min-w-0">
+                    <label className={EDIT_LABEL}>Category</label>
+                    <select className={EDIT_FIELD} value={updateForm.category} onChange={(e) => setUpdateForm((f) => ({ ...f, category: e.target.value }))}>
+                      {DEV_TICKET_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
                   </div>
@@ -696,18 +755,56 @@ export function DevTicketDetailDrawer({
 
           {/* Attachments gallery */}
           <section className="mb-5">
-            <h3 className="mb-2.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">
-              Attachments{allAttachments.length > 0 ? ` (${allAttachments.length})` : ""}
-            </h3>
+            <div className="mb-2.5 flex items-center justify-between gap-2">
+              <h3 className="text-[0.6875rem] font-semibold uppercase tracking-wider text-slate-500 dark:text-white/50">
+                Attachments{allAttachments.length > 0 ? ` (${allAttachments.length})` : ""}
+              </h3>
+              {canEdit && (
+                <>
+                  <button
+                    type="button"
+                    disabled={attachmentBusy}
+                    onClick={() => ticketFileRef.current?.click()}
+                    className="inline-flex items-center gap-1 rounded-lg border border-defaultborder/70 px-2.5 py-1 text-[0.6875rem] font-medium text-primary transition-colors hover:bg-primary/5 disabled:opacity-50 dark:border-white/10"
+                  >
+                    <i className={attachmentBusy ? "ri-loader-4-line animate-spin" : "ri-add-line"} aria-hidden />
+                    {attachmentBusy ? "Working…" : "Add files"}
+                  </button>
+                  <input
+                    ref={ticketFileRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    accept="image/*,video/*,.pdf,.log,.txt"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      e.target.value = "";
+                      handleAddAttachments(files);
+                    }}
+                  />
+                </>
+              )}
+            </div>
             {allAttachments.length === 0 ? (
               <p className="rounded-lg border border-dashed border-defaultborder/70 px-3 py-4 text-center text-[0.75rem] text-slate-400 dark:border-white/10 dark:text-white/40">
-                Files attached to comments will appear here
+                {canEdit ? "No files yet — use Add files to attach one" : "Files attached to comments will appear here"}
               </p>
             ) : (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {allAttachments.map((att, i) => (
+                  <div key={att.key ?? i} className="relative">
+                  {canEdit && ticketAttachmentKeys.has(att.key) && (
+                    <button
+                      type="button"
+                      disabled={attachmentBusy}
+                      onClick={() => handleRemoveAttachment(att.key, att.originalName)}
+                      aria-label={`Remove ${att.originalName}`}
+                      className="absolute right-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-danger shadow-sm transition hover:bg-danger hover:text-white disabled:opacity-40 dark:bg-black/60"
+                    >
+                      <i className="ri-delete-bin-line text-[0.8125rem]" />
+                    </button>
+                  )}
                   <a
-                    key={att.key ?? i}
                     href={att.url}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -737,6 +834,7 @@ export function DevTicketDetailDrawer({
                       {att.size > 0 && <p className="mb-0 text-[0.625rem] tabular-nums text-slate-400">{formatFileSize(att.size)}</p>}
                     </div>
                   </a>
+                  </div>
                 ))}
               </div>
             )}

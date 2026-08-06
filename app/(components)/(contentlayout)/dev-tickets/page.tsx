@@ -27,7 +27,9 @@ import {
   listDevTickets,
   updateDevTicket,
   DEV_TICKET_LABELS,
+  DEV_TICKET_CATEGORIES,
   type DevTicket,
+  type DevTicketCategory,
   type DevTicketFilters,
   type DevTicketLabel,
 } from "@/shared/lib/api/devTickets";
@@ -123,6 +125,7 @@ export default function DevTicketsPage() {
     pageUrl: "",
     priority: "Medium" as DevTicket["priority"],
     severity: "Major" as DevTicket["severity"],
+    category: "Bug" as DevTicketCategory,
     module: "",
     environment: "Staging" as DevTicket["environment"],
     labels: [] as DevTicketLabel[],
@@ -419,7 +422,7 @@ export default function DevTicketsPage() {
         attachments: attachments.length ? attachments : undefined,
       });
       setShowCreateModal(false);
-      setCreateForm({ title: "", description: "", stepsToReproduce: "", pageUrl: "", priority: "Medium", severity: "Major", module: "", environment: "Staging", labels: [], assignedTo: "" });
+      setCreateForm({ title: "", description: "", stepsToReproduce: "", pageUrl: "", priority: "Medium", severity: "Major", category: "Bug", module: "", environment: "Staging", labels: [], assignedTo: "" });
       setCreateAssigneeOption(null);
       setAttachments([]);
       showToast("Ticket created successfully");
@@ -860,6 +863,12 @@ export default function DevTicketsPage() {
                 </div>
               ))}
               <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
+                <div>
+                  <label className="form-label">Category</label>
+                  <select className="form-control form-control-block" value={createForm.category} onChange={(e) => setCreateForm((f) => ({ ...f, category: e.target.value as DevTicketCategory }))}>
+                    {DEV_TICKET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
                 <div>
                   <label className="form-label">Severity</label>
                   <select className="form-control form-control-block" value={createForm.severity} onChange={(e) => setCreateForm((f) => ({ ...f, severity: e.target.value as DevTicket["severity"] }))}>
