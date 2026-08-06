@@ -98,3 +98,126 @@ describe("payload.toSelfServicePayload (PATCH)", () => {
     expect(payload.sevisId).toBeNull();
   });
 });
+
+// The PATCH /auth/me/with-candidate Joi schema rejects "" on these keys
+// ("... is not allowed to be empty" / "must be a valid date") -> 400.
+// The normalizer emits "" for every absent string, so they must be dropped here,
+// exactly like toCandidatePayload already does for the admin route.
+describe("payload.toSelfServicePayload — backend Joi contract", () => {
+  it("drops empty address subfields", () => {
+    const payload = toSelfServicePayload(normalize(makeFormState()), {
+      "personal-info": true,
+    }) as Record<string, unknown>;
+    const address = payload.address as Record<string, unknown> | undefined;
+    expect(Object.values(address ?? {})).not.toContain("");
+  });
+
+  it("drops empty experience dates", () => {
+    const payload = toSelfServicePayload(normalize(baseState()), {
+      "work-experience": true,
+    }) as Record<string, unknown>;
+    const exp = (payload.experiences as Record<string, unknown>[])[0];
+    expect(exp).not.toHaveProperty("endDate");
+    expect(exp.currentlyWorking).toBe(true);
+  });
+
+  it("drops an empty salary slip month", () => {
+    const state = makeFormState({
+      salary: {
+        salarySlips: [
+          {
+            id: "s1",
+            month: "",
+            year: "2024",
+            resource: {
+              tempId: "t1",
+              status: "uploaded",
+              progress: 100,
+              label: "Slip",
+              retryCount: 0,
+              metadata: {
+                url: "https://cdn.example.com/s.pdf",
+                key: "uploads/s.pdf",
+                originalName: "s.pdf",
+                size: 10,
+                mimeType: "application/pdf",
+              },
+            },
+          },
+        ],
+      },
+    });
+    const payload = toSelfServicePayload(normalize(state), {
+      salary: true,
+    }) as Record<string, unknown>;
+    expect((payload.salarySlips as Record<string, unknown>[])[0]).not.toHaveProperty("month");
+  });
+
+  // profilePicture.url is validated with Joi .uri(). A stored relative path is
+  // server-origin data, so echoing it back is a no-op -> drop it, don't 400.
+  it("drops a profile picture whose url is not absolute", () => {
+    const state = makeFormState({
+      personalInfo: {
+        ...makeFormState().personalInfo,
+        profilePicture: {
+          url: "/uploads/pic.png",
+          key: "uploads/pic.png",
+          originalName: "pic.png",
+          size: 10,
+          mimeType: "image/png",
+        },
+      },
+    });
+    const payload = toSelfServicePayload(normalize(state), {
+      "personal-info": true,
+    }) as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("profilePicture");
+  });
+
+  it("keeps a profile picture with an absolute url", () => {
+    const state = makeFormState({
+      personalInfo: {
+        ...makeFormState().personalInfo,
+        profilePicture: {
+          url: "https://cdn.example.com/pic.png",
+          key: "uploads/pic.png",
+          originalName: "pic.png",
+          size: 10,
+          mimeType: "image/png",
+        },
+      },
+    });
+    const payload = toSelfServicePayload(normalize(state), {
+      "personal-info": true,
+    }) as Record<string, unknown>;
+    expect(payload).toHaveProperty("profilePicture");
+  });
+
+  it("drops an empty document label", () => {
+    const state = makeFormState({
+      documents: {
+        documents: [
+          {
+            tempId: "d1",
+            status: "uploaded",
+            progress: 100,
+            label: "",
+            type: "CV/Resume",
+            retryCount: 0,
+            metadata: {
+              url: "https://cdn.example.com/r.pdf",
+              key: "uploads/r.pdf",
+              originalName: "r.pdf",
+              size: 10,
+              mimeType: "application/pdf",
+            },
+          },
+        ],
+      },
+    });
+    const payload = toSelfServicePayload(normalize(state), {
+      documents: true,
+    }) as Record<string, unknown>;
+    expect((payload.documents as Record<string, unknown>[])[0]).not.toHaveProperty("label");
+  });
+});

@@ -13,6 +13,7 @@ export default defineConfig({
       "shared/lib/__tests__/**/*.{test,spec}.{ts,tsx}",
       "shared/components/pm/**/__tests__/**/*.{test,spec}.{ts,tsx}",
       "shared/components/__tests__/**/*.{test,spec}.{ts,tsx}",
+      "shared/workforce-profile/testing/**/*.{test,spec}.{ts,tsx}",
       "app/**/*.{test,spec}.{ts,tsx}",
     ],
     coverage: {

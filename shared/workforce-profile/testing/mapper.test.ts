@@ -20,6 +20,25 @@ describe("mapper.mapToFormState", () => {
     expect(state.personalInfo.address.city).toBe("Bengaluru");
   });
 
+  // Stored phones are E.164 / formatted ("+91 90000 00000"), but
+  // PATCH /auth/me/with-candidate demands ^\d{6,15}$. Hydrating the raw value
+  // straight into the field means "open profile -> save" answers 400.
+  it("splits a stored E.164 phone into national digits + country", () => {
+    const state = mapToFormState(sampleApiCandidate as never);
+    expect(state.personalInfo.phoneNumber).toBe("9000000000");
+    expect(state.personalInfo.countryCode).toBe("IN");
+  });
+
+  it("keeps clean local digits untouched", () => {
+    const state = mapToFormState({
+      ...sampleApiCandidate,
+      phoneNumber: "9876543210",
+      countryCode: "IN",
+    } as never);
+    expect(state.personalInfo.phoneNumber).toBe("9876543210");
+    expect(state.personalInfo.countryCode).toBe("IN");
+  });
+
   it("assigns synthetic ids to nested rows", () => {
     const state = mapToFormState(sampleApiCandidate as never);
     expect(state.qualification.educations).toHaveLength(1);

@@ -16,6 +16,27 @@ describe("normalizer.normalize", () => {
     expect(n.email).toBe("a@b.co");
   });
 
+  // Both candidate routes validate socialLinks[].url with Joi .uri(), which
+  // rejects a bare domain -> "Social link URL must be a valid URL" (400).
+  it("adds a scheme to social links that lack one", () => {
+    const state = makeFormState({
+      personalInfo: {
+        ...makeFormState().personalInfo,
+        socialLinks: [
+          { id: "1", platform: "LinkedIn", url: "linkedin.com/in/test" },
+          { id: "2", platform: "GitHub", url: "https://github.com/test" },
+          { id: "3", platform: "Site", url: "  www.example.com  " },
+        ],
+      },
+    });
+    const n = normalize(state);
+    expect(n.socialLinks.map((l) => l.url)).toEqual([
+      "https://linkedin.com/in/test",
+      "https://github.com/test",
+      "https://www.example.com",
+    ]);
+  });
+
   it("drops empty education rows", () => {
     const state = makeFormState({
       qualification: {
