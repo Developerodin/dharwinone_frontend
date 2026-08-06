@@ -6,7 +6,9 @@ import {
 
 describe("services/compatibility", () => {
   it("aliases backend `qualifications` to ui `educations`", () => {
-    const out = applyBackendAliases({ qualifications: [{ degree: "X" }] });
+    const out = applyBackendAliases({
+      qualifications: [{ degree: "X" }],
+    }) as Record<string, unknown>;
     expect(out.educations).toEqual([{ degree: "X" }]);
     expect(out.qualifications).toEqual([{ degree: "X" }]);
   });
@@ -15,12 +17,14 @@ describe("services/compatibility", () => {
     const out = applyBackendAliases({
       qualifications: [{ degree: "X" }],
       educations: [{ degree: "Y" }],
-    });
+    }) as Record<string, unknown>;
     expect(out.educations).toEqual([{ degree: "Y" }]);
   });
 
   it("aliases ui `educations` to backend `qualifications`", () => {
-    const out = applyUiAliases({ educations: [{ degree: "Z" }] });
+    const out = applyUiAliases({
+      educations: [{ degree: "Z" }],
+    }) as Record<string, unknown>;
     expect(out.qualifications).toEqual([{ degree: "Z" }]);
   });
 });

@@ -50,6 +50,7 @@ function makeCtx(over: Partial<WizardContextValue> = {}): WizardContextValue {
     isSaving: false,
     loadError: null,
     saveError: null,
+    clearSaveError: vi.fn(),
     isDirty: false,
     dirtySections: {},
     resetDirty: vi.fn(),

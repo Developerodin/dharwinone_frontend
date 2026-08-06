@@ -2,6 +2,7 @@
 
 import React, { useEffect, useId, useRef } from "react";
 import { useWorkforceStore } from "../state/workforce.store";
+import { uploadDocument } from "@/shared/lib/api/employees";
 import { useWizardContext } from "../engine/WizardContext";
 import { getPhoneCountry } from "@/shared/lib/phoneCountries";
 import { PhoneCountrySelect } from "@/shared/components/PhoneCountrySelect";
@@ -184,13 +185,18 @@ export function PersonalInfoStep() {
   // untouched form doesn't open covered in red.
   const [touched, setTouched] = React.useState<Record<string, boolean>>({});
   const [pictureError, setPictureError] = React.useState<string | null>(null);
+  const [pictureUploading, setPictureUploading] = React.useState(false);
   const [showPassword, setShowPassword] = React.useState(false);
 
   const showCompanyEmail =
     hasPermission(auth, "create_employee") || hasPermission(auth, "update_employee");
   const showPasswordField = mode === "create-admin";
-  const emailReadOnly =
+  const isSelfService =
     mode === "self-service-employee" || mode === "self-service-candidate";
+  const emailReadOnly = isSelfService;
+  // Job title and the company mailbox are admin-owned: the self-service PATCH
+  // carries no field for them, so an editable input discards the edit silently.
+  const adminOwnedReadOnly = isSelfService;
 
   const fieldErr = (key: string): string | null => {
     if (!submitAttempted && !touched[key]) return null;
@@ -211,7 +217,7 @@ export function PersonalInfoStep() {
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setPersonalInfo({ address: { ...pi.address, [key]: e.target.value } });
 
-  const onProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onProfilePictureChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     setPictureError(null);
     if (!file) {
@@ -232,7 +238,20 @@ export function PersonalInfoStep() {
       setPictureError(`That image is ${mb} MB. Choose one under 5 MB.`);
       return;
     }
+    // Hold the File only for the local preview; the save payload needs uploaded
+    // metadata, so upload now (same endpoint the legacy avatar picker uses).
     setPersonalInfo({ profilePictureFile: file, profilePictureRemoved: false });
+    setPictureUploading(true);
+    try {
+      const meta = await uploadDocument(file, file.name);
+      setPersonalInfo({ profilePicture: meta, profilePictureFile: null });
+    } catch {
+      setPersonalInfo({ profilePictureFile: null });
+      setPictureError("Couldn't upload that photo. Check your connection and try again.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } finally {
+      setPictureUploading(false);
+    }
   };
 
   const removeProfilePicture = () => {
@@ -328,11 +347,19 @@ export function PersonalInfoStep() {
                 type="button"
                 className={styles.uploadBtn}
                 onClick={() => fileInputRef.current?.click()}
+                disabled={pictureUploading}
               >
-                <i className="ri-upload-2-line" aria-hidden="true" />
-                {previewUrl ? "Change photo" : "Upload photo"}
+                <i
+                  className={pictureUploading ? "ri-loader-4-line" : "ri-upload-2-line"}
+                  aria-hidden="true"
+                />
+                {pictureUploading
+                  ? "Uploading…"
+                  : previewUrl
+                    ? "Change photo"
+                    : "Upload photo"}
               </button>
-              {previewUrl ? (
+              {previewUrl && !pictureUploading ? (
                 <button type="button" className={styles.removeBtn} onClick={removeProfilePicture}>
                   <i className="ri-delete-bin-line" aria-hidden="true" />
                   Remove
@@ -419,13 +446,18 @@ export function PersonalInfoStep() {
               id="companyAssignedEmail"
               label="Company / work email"
               optional
-              hint="Google Workspace or Microsoft 365 mailbox — separate from login email."
+              hint={
+                adminOwnedReadOnly
+                  ? "Your work mailbox is managed by your administrator."
+                  : "Google Workspace or Microsoft 365 mailbox — separate from login email."
+              }
             >
               <input
                 type="email"
                 value={pi.companyAssignedEmail}
                 onChange={onText("companyAssignedEmail")}
-                className={styles.input}
+                readOnly={adminOwnedReadOnly}
+                className={inputClass(false, adminOwnedReadOnly)}
                 placeholder="name@yourcompany.com"
                 autoComplete="email"
               />
@@ -438,6 +470,7 @@ export function PersonalInfoStep() {
                     companyEmailProvider: e.target.value as typeof pi.companyEmailProvider,
                   })
                 }
+                disabled={adminOwnedReadOnly}
                 className={styles.select}
               >
                 <option value="">Auto-detect from address</option>
@@ -456,12 +489,20 @@ export function PersonalInfoStep() {
         hint="Role details, visa status, and compensation range."
       >
         <div className={styles.grid}>
-          <Field id="designation" label="Position / job title" optional>
+          <Field
+            id="designation"
+            label="Position / job title"
+            optional
+            hint={
+              adminOwnedReadOnly ? "Your job title is set by your administrator." : undefined
+            }
+          >
             <input
               type="text"
               value={pi.designation}
               onChange={onText("designation")}
-              className={styles.input}
+              readOnly={adminOwnedReadOnly}
+              className={inputClass(false, adminOwnedReadOnly)}
               placeholder="e.g. Software Engineer"
               autoComplete="organization-title"
             />

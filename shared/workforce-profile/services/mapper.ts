@@ -138,6 +138,7 @@ export function mapToFormState(source: WorkforceSource): WorkforceFormState {
       country: asString(migrated.address?.country),
     },
     profilePicture: migrated.profilePicture ?? undefined,
+    profilePictureRemoved: false,
     socialLinks: (migrated.socialLinks ?? []).map((l) => ({
       id: nextId(),
       platform: asString(l?.platform),

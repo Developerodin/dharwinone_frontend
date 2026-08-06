@@ -50,6 +50,7 @@ export function normalize(state: WorkforceFormState): NormalizedWorkforce {
       : undefined,
     address: dropEmptyStrings(pi.address),
     profilePicture: pi.profilePictureRemoved ? undefined : pi.profilePicture,
+    profilePictureRemoved: pi.profilePictureRemoved,
 
     socialLinks: pi.socialLinks
       .filter((l) => trimString(l.platform) && trimString(l.url))

@@ -138,4 +138,20 @@ describe("normalizer.normalize", () => {
       { platform: "linkedin", url: "https://x" },
     ]);
   });
+
+  it("carries profilePictureRemoved and drops profilePicture when cleared", () => {
+    const state = makeFormState({
+      personalInfo: {
+        ...makeFormState().personalInfo,
+        profilePicture: {
+          url: "https://cdn.example.com/old.png",
+          key: "uploads/old.png",
+        },
+        profilePictureRemoved: true,
+      },
+    });
+    const n = normalize(state);
+    expect(n.profilePictureRemoved).toBe(true);
+    expect(n.profilePicture).toBeUndefined();
+  });
 });

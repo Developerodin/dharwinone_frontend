@@ -103,6 +103,19 @@ export function useWorkforceForm(
     [nav],
   );
 
+  const handleSubmitSuccess = useCallback(
+    (result: StrategyResult) => {
+      // Re-hydrate from the server response so flags like profilePictureRemoved
+      // reset and the store matches what PATCH returned (avatar, name, etc.).
+      if (result.candidate) {
+        hydrate(mapToFormState(result.candidate as WorkforceSource));
+        useWorkforceStore.getState().commitSnapshot();
+      }
+      onSubmitSuccess?.(result);
+    },
+    [hydrate, onSubmitSuccess],
+  );
+
   const submitter = useWorkforceSubmit({
     mode,
     role,
@@ -110,7 +123,7 @@ export function useWorkforceForm(
     dirty: dirty.dirtySections,
     validate: validation.validateAll,
     analytics,
-    onSuccess: onSubmitSuccess,
+    onSuccess: handleSubmitSuccess,
     onValidationError: handleValidationError,
   });
 

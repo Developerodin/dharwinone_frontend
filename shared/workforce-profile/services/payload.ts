@@ -33,7 +33,7 @@ export function toCandidatePayload(
     fullName: n.fullName,
     email: n.email,
     phoneNumber: n.phoneNumber,
-    profilePicture: n.profilePicture,
+    profilePicture: n.profilePictureRemoved ? null : n.profilePicture,
     skills: n.skills.map(({ name, level, category }) => ({ name, level, category })),
     qualifications: n.qualifications.map((q) => ({
       degree: q.degree,
@@ -109,10 +109,14 @@ export function toSelfServicePayload(
     if (n.salaryRange) out.salaryRange = n.salaryRange;
     if (n.address) out.address = compact(n.address);
     if (n.socialLinks) out.socialLinks = n.socialLinks;
-    // profilePicture.url is validated with Joi .uri(). A relative path is
-    // server-origin data, so echoing it back changes nothing — drop it rather
-    // than trade a no-op for a 400.
-    if (n.profilePicture && isAbsoluteUrl(n.profilePicture.url)) {
+    // A cleared photo must reach the server as an explicit null; omitting it
+    // left the old picture in place.
+    if (n.profilePictureRemoved) {
+      out.profilePicture = null;
+    } else if (n.profilePicture && isAbsoluteUrl(n.profilePicture.url)) {
+      // profilePicture.url is validated with Joi .uri(). A relative path is
+      // server-origin data, so echoing it back changes nothing — drop it rather
+      // than trade a no-op for a 400.
       out.profilePicture = n.profilePicture;
     }
   }

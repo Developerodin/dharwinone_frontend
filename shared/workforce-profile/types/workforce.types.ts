@@ -121,6 +121,8 @@ export type NormalizedWorkforce = {
   companyEmailProvider?: string;
   address: Address;
   profilePicture?: PersonalInfoSlice["profilePicture"];
+  /** Distinguishes "cleared the photo" (send null) from "never had one" (omit). */
+  profilePictureRemoved: boolean;
   socialLinks: Array<{ platform: string; url: string }>;
   qualifications: Array<Omit<Education, "id">>;
   experiences: Array<Omit<Experience, "id">>;
