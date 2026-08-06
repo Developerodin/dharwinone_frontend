@@ -71,6 +71,10 @@ export const ACTIVITY_LOG_ACTIONS: string[] = [
   "department.delete",
   "orgStructure.export",
   "employee.departmentAssign",
+  "employee.joiningDate.update",
+  "employee.resignDate.update",
+  "employee.document.upload",
+  "employee.salarySlip.add",
   "org.mutate.denied",
 ];
 
@@ -98,6 +102,95 @@ export const ACTIVITY_LOG_ENTITY_TYPES: string[] = [
 ];
 
 export type ActivityLogLabel = { title: string; description: string };
+
+export type ActivityLogSelectOption = { value: string; label: string; description: string };
+export type ActivityLogSelectGroup = { label: string; options: ActivityLogSelectOption[] };
+
+/** Category buckets for the searchable/grouped filter dropdowns (Log Audit, Platform Audit). */
+const FILTER_GROUP_ORDER = [
+  "Employee",
+  "Jobs & hiring",
+  "Referrals",
+  "Support tickets",
+  "Organization",
+  "Users & roles",
+  "Training",
+  "Attendance",
+  "System & settings",
+  "Other",
+];
+
+const ACTION_GROUP_RULES: { label: string; test: (key: string) => boolean }[] = [
+  { label: "Employee", test: (k) => k.startsWith("candidate.") || k.startsWith("employee.") },
+  { label: "Jobs & hiring", test: (k) => k.startsWith("job.") || k.startsWith("jobApplication.") },
+  { label: "Referrals", test: (k) => k.startsWith("referral") },
+  { label: "Support tickets", test: (k) => k.startsWith("ticket.") },
+  { label: "Organization", test: (k) => k.startsWith("org") || k.startsWith("department.") },
+  {
+    label: "Training",
+    test: (k) =>
+      k.startsWith("student.") || k.startsWith("mentor.") || k.startsWith("category.") || k.startsWith("certificate."),
+  },
+  { label: "Attendance", test: (k) => k.startsWith("attendance.") },
+  {
+    label: "Users & roles",
+    test: (k) => k.startsWith("role.") || k.startsWith("user.") || k.startsWith("impersonation.") || k.startsWith("supportCamera."),
+  },
+  { label: "System & settings", test: (k) => k.startsWith("settings.") || k.startsWith("phoneNumber.") },
+];
+
+function groupOptionsByLabel(
+  keys: string[],
+  getDisplay: (key: string) => ActivityLogLabel,
+  labelForKey: (key: string) => string
+): ActivityLogSelectGroup[] {
+  const byGroup = new Map<string, ActivityLogSelectOption[]>();
+  for (const key of keys) {
+    const display = getDisplay(key);
+    const groupLabel = labelForKey(key);
+    if (!byGroup.has(groupLabel)) byGroup.set(groupLabel, []);
+    byGroup.get(groupLabel)!.push({ value: key, label: display.title, description: display.description });
+  }
+  return FILTER_GROUP_ORDER.filter((label) => byGroup.has(label)).map((label) => ({
+    label,
+    options: byGroup.get(label)!,
+  }));
+}
+
+const ENTITY_TYPE_GROUP: Record<string, string> = {
+  Role: "Users & roles",
+  User: "Users & roles",
+  Impersonation: "Users & roles",
+  Candidate: "Employee",
+  Employee: "Employee",
+  Job: "Jobs & hiring",
+  JobApplication: "Jobs & hiring",
+  Referral: "Referrals",
+  SupportTicket: "Support tickets",
+  OrgUnit: "Organization",
+  Department: "Organization",
+  OrgStructure: "Organization",
+  OrgScenario: "Organization",
+  OrgSlot: "Organization",
+  Category: "Training",
+  Student: "Training",
+  Mentor: "Training",
+  StudentCourseProgress: "Training",
+  StudentQuizAttempt: "Training",
+  Certificate: "Training",
+  Attendance: "Attendance",
+  BolnaCandidateAgentSettings: "System & settings",
+};
+
+/** Groups the flat action catalog by entity/category for the Action filter dropdown. */
+export function getGroupedActionOptions(): ActivityLogSelectGroup[] {
+  return groupOptionsByLabel(ACTIVITY_LOG_ACTIONS, getActionDisplay, (k) => ACTION_GROUP_RULES.find((r) => r.test(k))?.label ?? "Other");
+}
+
+/** Groups the flat entity-type catalog by the same categories for the Entity type filter dropdown. */
+export function getGroupedEntityTypeOptions(): ActivityLogSelectGroup[] {
+  return groupOptionsByLabel(ACTIVITY_LOG_ENTITY_TYPES, getEntityTypeDisplay, (k) => ENTITY_TYPE_GROUP[k] ?? "Other");
+}
 
 /** Human-readable action labels for admins (tooltip shows description + raw key). */
 export const ACTION_LABELS: Record<string, ActivityLogLabel> = {
@@ -186,6 +279,22 @@ export const ACTION_LABELS: Record<string, ActivityLogLabel> = {
     title: "Employee department assigned",
     description: "An employee was assigned to a different department.",
   },
+  "employee.joiningDate.update": {
+    title: "Joining date assigned",
+    description: "An employee's joining date was set or changed.",
+  },
+  "employee.resignDate.update": {
+    title: "Resignation date assigned",
+    description: "An employee's resignation date was set or cleared.",
+  },
+  "employee.document.upload": {
+    title: "Document uploaded",
+    description: "A document was uploaded to an employee's profile.",
+  },
+  "employee.salarySlip.add": {
+    title: "Pay slip uploaded",
+    description: "A salary slip was added to an employee's profile.",
+  },
   "org.mutate.denied": {
     title: "Org change denied",
     description: "An unauthorized organization mutation or export was blocked.",
@@ -203,7 +312,10 @@ export const ENTITY_TYPE_LABELS: Record<string, ActivityLogLabel> = {
   StudentQuizAttempt: { title: "Quiz attempt", description: "Student quiz submission." },
   Certificate: { title: "Certificate", description: "Issued certificate." },
   Attendance: { title: "Attendance", description: "Punch or attendance record." },
-  Candidate: { title: "Employee (ATS)", description: "ATS employee / people record." },
+  Candidate: {
+    title: "Candidate",
+    description: "ATS candidate record — covers the full candidate-to-employee lifecycle (profile, documents, salary slips, joining/resign dates).",
+  },
   Job: { title: "Job", description: "Job posting." },
   JobApplication: { title: "Job application", description: "Application to a job." },
   BolnaCandidateAgentSettings: {
@@ -217,7 +329,10 @@ export const ENTITY_TYPE_LABELS: Record<string, ActivityLogLabel> = {
   OrgStructure: { title: "Org structure", description: "Organization structure export or aggregate surface." },
   OrgScenario: { title: "Org scenario", description: "Sandbox reorganization scenario." },
   OrgSlot: { title: "Org slot", description: "Vacant position slot on the org chart." },
-  Employee: { title: "Employee", description: "Employee / people record." },
+  Employee: {
+    title: "Employee",
+    description: "Post-hire employee record — compensation overrides and org/department assignment.",
+  },
 };
 
 export function getActionDisplay(action: string): ActivityLogLabel {

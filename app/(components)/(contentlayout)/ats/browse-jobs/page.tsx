@@ -241,7 +241,7 @@ export default function BrowseJobsPage() {
                       </div>
                       {job.skillTags && job.skillTags.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 pt-1">
-                          {job.skillTags.slice(0, 4).map((tag) => (
+                          {[...new Set(job.skillTags)].slice(0, 4).map((tag) => (
                             <span
                               key={tag}
                               className="badge bg-primary/10 text-primary !rounded-md !px-2 !py-0.5 text-[0.7rem] font-medium"

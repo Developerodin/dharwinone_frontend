@@ -9,14 +9,14 @@ import type { ActivityLog } from "@/shared/lib/types";
 import * as activityLogsApi from "@/shared/lib/api/activity-logs";
 import { AxiosError } from "axios";
 import {
-  ACTIVITY_LOG_ACTIONS,
-  ACTIVITY_LOG_ENTITY_TYPES,
   getActionDisplay,
   getActivityActionDisplayForRow,
   getCandidateActivityEntitySummary,
   getDepartmentActivityEntitySummary,
   getEmployeeOrgActivityEntitySummary,
   getEntityTypeDisplay,
+  getGroupedActionOptions,
+  getGroupedEntityTypeOptions,
   getImpersonationEntitySummary,
   getJobActivityEntitySummary,
   getOrgMutateDeniedEntitySummary,
@@ -25,6 +25,7 @@ import {
   getRoleActivityEntitySummary,
   getUserActivityEntitySummary,
 } from "@/shared/lib/activity-log-catalog";
+import { ActivityLogFilterSelect } from "@/shared/components/activity-log-filter-select";
 import { ActivityLogLocationCell } from "@/shared/components/activity-log-location-cell";
 import { getActivityLogDisplayIp } from "@/shared/lib/activity-log-location-display";
 import {
@@ -428,53 +429,35 @@ export default function LogsActivityPage() {
                 </div>
 
                 <div className="flex flex-wrap items-end gap-3">
-                  <div className="w-full sm:min-w-[12rem] sm:w-auto sm:flex-1">
+                  <div className="w-full sm:min-w-[14rem] sm:w-auto sm:flex-1">
                     <label htmlFor="logs-action" className="form-label !text-[0.75rem] mb-1">
                       Action
                     </label>
-                    <select
-                      id="logs-action"
-                      className="form-control !py-1.5 !text-[0.8125rem]"
+                    <ActivityLogFilterSelect
+                      inputId="logs-action"
+                      groups={getGroupedActionOptions()}
                       value={action}
-                      onChange={(e) => {
-                        setAction(e.target.value);
+                      onChange={(next) => {
+                        setAction(next);
                         setPage(1);
                       }}
-                    >
-                      <option value="">Any action</option>
-                      {ACTIVITY_LOG_ACTIONS.map((actionKey) => {
-                        const display = getActionDisplay(actionKey);
-                        return (
-                          <option key={actionKey} value={actionKey} title={`${display.description} (${actionKey})`}>
-                            {display.title}
-                          </option>
-                        );
-                      })}
-                    </select>
+                      placeholder="Any action"
+                    />
                   </div>
-                  <div className="w-full sm:min-w-[12rem] sm:w-auto sm:flex-1">
+                  <div className="w-full sm:min-w-[14rem] sm:w-auto sm:flex-1">
                     <label htmlFor="logs-entity-type" className="form-label !text-[0.75rem] mb-1">
                       Entity type
                     </label>
-                    <select
-                      id="logs-entity-type"
-                      className="form-control !py-1.5 !text-[0.8125rem]"
+                    <ActivityLogFilterSelect
+                      inputId="logs-entity-type"
+                      groups={getGroupedEntityTypeOptions()}
                       value={entityType}
-                      onChange={(e) => {
-                        setEntityType(e.target.value);
+                      onChange={(next) => {
+                        setEntityType(next);
                         setPage(1);
                       }}
-                    >
-                      <option value="">Any entity</option>
-                      {ACTIVITY_LOG_ENTITY_TYPES.map((typeKey) => {
-                        const display = getEntityTypeDisplay(typeKey);
-                        return (
-                          <option key={typeKey} value={typeKey} title={`${display.description} (${typeKey})`}>
-                            {display.title}
-                          </option>
-                        );
-                      })}
-                    </select>
+                      placeholder="Any entity"
+                    />
                   </div>
 
                   {datePreset === "custom" && (

@@ -2,7 +2,7 @@ import type { StylesConfig, GroupBase } from 'react-select';
 
 /**
  * react-select styles tuned to the ATS Preline look: 8px radius, defaultborder,
- * primary focus ring. Generic over option type so both selects can reuse it.
+ * primary focus ring. Generic over option type so any select can reuse it.
  */
 export function atsSelectStyles<
   Option,

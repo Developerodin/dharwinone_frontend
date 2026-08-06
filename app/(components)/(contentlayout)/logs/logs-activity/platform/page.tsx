@@ -1,10 +1,12 @@
 "use client";
 
-// Platform audit console — designated-platform-account only. This is intentionally NOT the
-// search-first consumer filter bar used on /logs/logs-activity. It is raw forensic tooling:
-// exact actor-id / entity-id / IP-prefix lookups, UTC-precise presets, attendance toggle, and
-// density controls a platform auditor relies on. The plan's "search-first" redesign (Task 3)
-// deliberately does not apply here (Task 4, branch B: raw audit tooling left unchanged).
+// Platform audit console — designated-platform-account only. Still intentionally NOT the
+// search-first consumer filter bar used on /logs/logs-activity: exact actor-id / entity-id /
+// IP-prefix lookups, UTC-precise presets, attendance toggle, and density controls a platform
+// auditor relies on stay raw (Task 4, branch B). The Action/Entity type dropdowns are the one
+// exception (2026-08-04): the flat catalog select buried entries (e.g. joining/resignation date)
+// past the visible viewport, so those two controls now share the grouped, searchable
+// ActivityLogFilterSelect used on the consumer page — a findability fix, not the full redesign.
 
 import React, { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -15,12 +17,13 @@ import * as activityLogsApi from "@/shared/lib/api/activity-logs";
 import {
   ACTIVITY_LOG_ACTIONS,
   ACTIVITY_LOG_ENTITY_TYPES,
-  getActionDisplay,
   getActivityActionDisplayForRow,
   getCandidateActivityEntitySummary,
   getDepartmentActivityEntitySummary,
   getEmployeeOrgActivityEntitySummary,
   getEntityTypeDisplay,
+  getGroupedActionOptions,
+  getGroupedEntityTypeOptions,
   getRoleActivityEntitySummary,
   getUserActivityEntitySummary,
   getImpersonationEntitySummary,
@@ -29,6 +32,7 @@ import {
   getOrgStructureActivityEntitySummary,
   getOrgUnitActivityEntitySummary,
 } from "@/shared/lib/activity-log-catalog";
+import { ActivityLogFilterSelect } from "@/shared/components/activity-log-filter-select";
 import {
   canOpenActivityLogEntity,
   getActivityLogEntityHref,
@@ -617,10 +621,12 @@ export default function PlatformAuditLogsPage() {
           </div>
         ) : (
           !forbidden && (
-            <>
+            <div className="flex flex-col min-h-[calc(100vh-9rem)]">
               {/* Geolocation permission banner */}
-              <GeoLocationBanner geoStatus={geoStatus} storedGeo={storedGeo} requestGeo={requestGeo} />
-              <div className="mb-4 p-4 rounded-lg border border-defaultborder bg-gray-50/50 dark:bg-gray-800/30 flex flex-col gap-3">
+              <div className="shrink-0">
+                <GeoLocationBanner geoStatus={geoStatus} storedGeo={storedGeo} requestGeo={requestGeo} />
+              </div>
+              <div className="mb-4 p-4 rounded-lg border border-defaultborder bg-gray-50/50 dark:bg-gray-800/30 flex flex-col gap-3 shrink-0">
                 <div className="flex flex-wrap items-end gap-3">
                   <div className="flex items-center gap-2 text-defaulttextcolor/80">
                     <i className="ri-filter-3-line text-[1.25rem]" aria-hidden />
@@ -628,13 +634,13 @@ export default function PlatformAuditLogsPage() {
                   </div>
                   <div className="min-w-[10rem]">
                     <label htmlFor="logs-actor" className="form-label !text-[0.75rem] mb-1">
-                      Actor user ID
+                      Actor
                     </label>
                     <input
                       id="logs-actor"
                       type="text"
                       className="form-control !py-1.5 !text-[0.8125rem]"
-                      placeholder="Actor id..."
+                      placeholder="Actor name..."
                       value={actorId}
                       onChange={(e) => {
                         setActorId(e.target.value);
@@ -642,63 +648,48 @@ export default function PlatformAuditLogsPage() {
                       }}
                     />
                   </div>
-                  <div className="min-w-[12rem]">
+                  <div className="min-w-[13rem]">
                     <label htmlFor="logs-action" className="form-label !text-[0.75rem] mb-1">
                       Action
                     </label>
-                    <select
-                      id="logs-action"
-                      className="form-control !py-1.5 !text-[0.8125rem]"
+                    <ActivityLogFilterSelect
+                      inputId="logs-action"
+                      groups={getGroupedActionOptions()}
                       value={action}
-                      onChange={(e) => {
-                        setAction(e.target.value);
+                      onChange={(next) => {
+                        setAction(next);
                         setPage(1);
                       }}
-                    >
-                      <option value="">Any</option>
-                      {ACTIVITY_LOG_ACTIONS.map((a) => {
-                        const d = getActionDisplay(a);
-                        return (
-                          <option key={a} value={a} title={`${d.description} (${a})`}>
-                            {d.title} ({a})
-                          </option>
-                        );
-                      })}
-                    </select>
+                      placeholder="Any"
+                      showKeyInValue
+                    />
                   </div>
-                  <div className="min-w-[11rem]">
+                  <div className="min-w-[12rem]">
                     <label htmlFor="logs-entity-type" className="form-label !text-[0.75rem] mb-1">
                       Entity type
                     </label>
-                    <select
-                      id="logs-entity-type"
-                      className="form-control !py-1.5 !text-[0.8125rem]"
+                    <ActivityLogFilterSelect
+                      inputId="logs-entity-type"
+                      groups={getGroupedEntityTypeOptions()}
                       value={entityType}
-                      onChange={(e) => {
-                        setEntityType(e.target.value);
+                      onChange={(next) => {
+                        setEntityType(next);
                         setPage(1);
                       }}
-                    >
-                      <option value="">Any</option>
-                      {ACTIVITY_LOG_ENTITY_TYPES.map((t) => {
-                        const d = getEntityTypeDisplay(t);
-                        return (
-                          <option key={t} value={t} title={`${d.description} (${t})`}>
-                            {d.title} ({t})
-                          </option>
-                        );
-                      })}
-                    </select>
+                      placeholder="Any"
+                      showKeyInValue
+                    />
                   </div>
                   <div className="min-w-[10rem]">
                     <label htmlFor="logs-entity-id" className="form-label !text-[0.75rem] mb-1">
-                      Entity ID
+                      Entity
                     </label>
                     <input
                       id="logs-entity-id"
                       type="text"
                       className="form-control !py-1.5 !text-[0.8125rem]"
-                      placeholder="Entity id..."
+                      placeholder="Name or ID (set Entity type)..."
+                      title="Name search needs an Entity type selected; otherwise this matches the raw ID."
                       value={entityId}
                       onChange={(e) => {
                         setEntityId(e.target.value);
@@ -869,7 +860,7 @@ export default function PlatformAuditLogsPage() {
                 </p>
               </div>
 
-              <div className="max-h-[min(70vh,56rem)] overflow-auto rounded-md border border-defaultborder">
+              <div className="flex-1 min-h-[16rem] overflow-auto rounded-md border border-defaultborder">
                 <table className="table min-w-full table-bordered border-defaultborder mb-0">
                   <thead className="sticky top-0 z-[1] shadow-sm">
                     <tr className="bg-gray-50 dark:bg-gray-800/90">
@@ -1128,7 +1119,7 @@ export default function PlatformAuditLogsPage() {
               </div>
 
               {!loading && (logs.length > 0 || hasActiveFilters) && (
-                <div className="flex flex-wrap items-center justify-between gap-4 mt-4 pt-4 border-t border-defaultborder">
+                <div className="shrink-0 flex flex-wrap items-center justify-between gap-4 mt-4 pt-4 border-t border-defaultborder">
                   <p className="text-[0.8125rem] text-defaulttextcolor/70 mb-0">
                     Showing {start} to {end} of {totalResults} entries
                   </p>
@@ -1157,7 +1148,7 @@ export default function PlatformAuditLogsPage() {
                   </div>
                 </div>
               )}
-            </>
+            </div>
           )
         )}
       </div>

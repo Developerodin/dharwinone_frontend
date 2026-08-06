@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react'
 import Select from 'react-select'
 import { listTimezones, normalizeTimezone, getZoneOffsetLabel } from '@/shared/lib/timezone'
-import { atsSelectStyles } from './reactSelectTheme'
+import { atsSelectStyles } from '@/shared/lib/reactSelectTheme'
 
 /** Zones pinned to a "Common" group at the top of the list. */
 const PINNED = ['UTC', 'Asia/Kolkata', 'America/New_York', 'Europe/London']

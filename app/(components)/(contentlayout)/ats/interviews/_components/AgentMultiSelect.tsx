@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react'
 import Select, { components, type MultiValueGenericProps } from 'react-select'
 import type { AgentOption } from '@/shared/lib/api/employees'
-import { atsSelectStyles } from './reactSelectTheme'
+import { atsSelectStyles } from '@/shared/lib/reactSelectTheme'
 
 interface AgentSelOption { value: string; label: string; name: string; email: string }
 
