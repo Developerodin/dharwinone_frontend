@@ -2,6 +2,7 @@
 
 import Seo from "@/shared/layout-components/seo/seo";
 import DevTicketAccessDenied from "@/shared/components/dev-tickets/dev-ticket-access-denied";
+import DevTicketPageHeader from "@/shared/components/dev-tickets/dev-ticket-page-header";
 import DevTicketTabBar from "@/shared/components/dev-tickets/dev-ticket-tab-bar";
 import DevTicketDetailDrawer from "@/shared/components/dev-tickets/dev-ticket-detail-drawer";
 import {
@@ -91,6 +92,15 @@ export default function DevTicketsBoardPage() {
     return map;
   }, [tickets]);
 
+  const boardStats = useMemo(
+    () =>
+      BOARD_COLUMNS.map((col) => ({
+        col,
+        count: columns[col].length,
+      })),
+    [columns]
+  );
+
   const openDrawer = async (ticket: DevTicket) => {
     setDrawerTicket(ticket);
     setDrawerOpen(true);
@@ -146,13 +156,42 @@ export default function DevTicketsBoardPage() {
       <Toast message={toast} />
 
       <div className="container-fluid pt-6">
-        <div className="mb-4">
-          <h1 className="flex items-center gap-2 text-[1.125rem] font-semibold">
-            <i className="ri-layout-column-line text-primary" /> Board
-          </h1>
-        </div>
+        <DevTicketPageHeader
+          title="Board"
+          subtitle="Drag cards between columns to update ticket status."
+          icon="ri-layout-column-line"
+        />
 
         <DevTicketTabBar />
+
+        {!loading && !error && (
+          <div className="mb-5 flex flex-col gap-3 rounded-xl border border-defaultborder/70 bg-white px-4 py-3.5 dark:border-white/10 dark:bg-bodybg sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <p className="mb-0 text-[0.8125rem] font-medium text-defaulttextcolor dark:text-white">
+                {tickets.length} ticket{tickets.length === 1 ? "" : "s"} on board
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {boardStats.map(({ col, count }) => {
+                  const sc = STATUS_CONFIG[col] ?? STATUS_CONFIG.Open;
+                  return (
+                    <span
+                      key={col}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-defaultborder/60 bg-slate-50/80 px-2.5 py-1 text-[0.6875rem] font-medium text-[#8c9097] dark:border-white/10 dark:bg-white/[0.03]"
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${sc.dot}`} aria-hidden />
+                      {col}
+                      <span className="tabular-nums text-defaulttextcolor dark:text-white/80">{count}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="mb-0 flex items-center gap-1.5 text-[0.6875rem] text-[#8c9097]">
+              <i className="ri-drag-move-2-line" aria-hidden />
+              Drag cards to move status
+            </p>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 flex items-center justify-between rounded-md border border-danger/30 bg-danger/5 px-4 py-3">
@@ -162,9 +201,9 @@ export default function DevTicketsBoardPage() {
         )}
 
         {loading ? (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {BOARD_COLUMNS.map((col) => (
-              <div key={col} className="flex min-h-[28rem] flex-col overflow-hidden rounded-2xl border border-defaultborder/60 bg-slate-50/40 dark:border-white/10 dark:bg-black/10">
+              <div key={col} className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-defaultborder/60 bg-slate-50/40 dark:border-white/10 dark:bg-black/10">
                 <div className="h-1 animate-pulse bg-black/5 dark:bg-white/10" />
                 <div className="border-b border-defaultborder/60 px-4 py-3.5 dark:border-white/10">
                   <div className="h-4 w-24 animate-pulse rounded bg-black/5 dark:bg-white/10" />
@@ -177,7 +216,7 @@ export default function DevTicketsBoardPage() {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {BOARD_COLUMNS.map((col) => {
               const sc = STATUS_CONFIG[col] ?? STATUS_CONFIG.Open;
               const count = columns[col].length;
@@ -185,7 +224,7 @@ export default function DevTicketsBoardPage() {
               return (
               <div
                 key={col}
-                className={`flex min-h-[28rem] flex-col overflow-hidden rounded-2xl border bg-slate-50/50 transition-colors dark:bg-black/10 ${
+                className={`flex min-h-[28rem] flex-col overflow-hidden rounded-xl border bg-slate-50/50 transition-colors dark:bg-black/10 ${
                   isDropTarget
                     ? "border-primary/40 bg-primary/[0.04] ring-2 ring-primary/20 dark:bg-primary/[0.06]"
                     : "border-defaultborder/70 dark:border-white/10"

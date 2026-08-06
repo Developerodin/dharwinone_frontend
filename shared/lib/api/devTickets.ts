@@ -19,6 +19,22 @@ export const DEV_TICKET_CATEGORIES = ["Bug", "New Feature", "Improvement"] as co
 
 export type DevTicketCategory = (typeof DEV_TICKET_CATEGORIES)[number];
 
+/** Product surface — maps server-side to assignee (web→prakhar, mobile→vijay). */
+export const DEV_TICKET_PLATFORMS = ["web", "mobile"] as const;
+
+export type DevTicketPlatform = (typeof DEV_TICKET_PLATFORMS)[number];
+
+export const DEV_TICKET_PLATFORM_LABELS: Record<DevTicketPlatform, string> = {
+  web: "Web",
+  mobile: "Mobile App",
+};
+
+/** Default tester — server assigns on create; shown read-only in UI. */
+export const DEV_TICKET_DEFAULT_TESTER = {
+  name: "Harsh Bansal",
+  email: "harshbansal.it26@gmail.com",
+} as const;
+
 export const DEV_TICKET_LINK_RELS = [
   "blocks",
   "blocked-by",
@@ -39,6 +55,7 @@ export interface CreateDevTicketData {
   module?: string;
   environment?: "Staging" | "Production";
   labels?: DevTicketLabel[];
+  platform?: DevTicketPlatform;
   assignedTo?: string;
   attachments?: File[];
   git?: {
@@ -60,6 +77,7 @@ export interface UpdateDevTicketData {
   module?: string;
   environment?: "Staging" | "Production";
   labels?: DevTicketLabel[];
+  platform?: DevTicketPlatform;
   assignedTo?: string | null;
   git?: {
     branch?: string;
@@ -154,6 +172,8 @@ export interface DevTicket {
   module?: string;
   environment?: "Staging" | "Production";
   labels?: DevTicketLabel[];
+  platform?: DevTicketPlatform;
+  testedBy?: DevTicketUser | null;
   createdBy?: DevTicketUser;
   assignedTo?: DevTicketUser | null;
   watchers?: DevTicketUser[];
@@ -205,6 +225,7 @@ export interface DevTicketAnalytics {
 
 export interface BulkUpdateAction {
   status?: "Open" | "In Progress" | "Resolved" | "Closed";
+  platform?: DevTicketPlatform;
   assignedTo?: string;
   addLabel?: DevTicketLabel;
 }
@@ -259,6 +280,7 @@ export async function createDevTicket(ticketData: CreateDevTicketData): Promise<
     if (ticketData.category) formData.append("category", ticketData.category);
     if (ticketData.module) formData.append("module", ticketData.module);
     if (ticketData.environment) formData.append("environment", ticketData.environment);
+    if (ticketData.platform) formData.append("platform", ticketData.platform);
     if (ticketData.assignedTo) formData.append("assignedTo", ticketData.assignedTo);
     if (ticketData.labels?.length) formData.append("labels", JSON.stringify(ticketData.labels));
     ticketData.attachments.forEach((file) => formData.append("attachments", file));

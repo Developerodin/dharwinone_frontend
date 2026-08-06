@@ -13,8 +13,8 @@ export default function DevTicketTabBar() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Help & Support sections" className="mb-6 border-b border-defaultborder dark:border-white/10">
-      <ul className="flex gap-1">
+    <nav aria-label="Help & Support sections" className="mb-6">
+      <ul className="inline-flex max-w-full flex-wrap gap-1 rounded-lg border border-defaultborder/80 bg-slate-50/80 p-1 dark:border-white/10 dark:bg-white/[0.03]">
         {TABS.map((tab) => {
           const active = tab.match(pathname);
           return (
@@ -22,10 +22,10 @@ export default function DevTicketTabBar() {
               <Link
                 href={tab.href}
                 className={
-                  "inline-flex items-center px-4 py-2.5 text-[0.8125rem] transition-colors " +
+                  "inline-flex min-h-[2.25rem] items-center rounded-md px-4 text-[0.8125rem] transition-colors " +
                   (active
-                    ? "font-semibold text-defaulttextcolor dark:text-white border-b-2 border-primary -mb-px"
-                    : "font-medium text-[#8c9097] dark:text-white/50 hover:text-defaulttextcolor dark:hover:text-white/80")
+                    ? "bg-white font-semibold text-primary shadow-sm dark:bg-bodybg"
+                    : "font-medium text-[#8c9097] hover:text-defaulttextcolor dark:text-white/50 dark:hover:text-white/80")
                 }
                 aria-current={active ? "page" : undefined}
               >

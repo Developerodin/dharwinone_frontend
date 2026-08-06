@@ -1,9 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
 import Swal from "sweetalert2";
-import { listUsers } from "@/shared/lib/api/users";
 import {
   addComment,
   getDevTicket,
@@ -19,9 +17,13 @@ import {
   type DevTicket,
   type DevTicketLabel,
   type DevTicketLinkRel,
+  type DevTicketPlatform,
   DEV_TICKET_LABELS,
   DEV_TICKET_CATEGORIES,
   DEV_TICKET_LINK_RELS,
+  DEV_TICKET_PLATFORMS,
+  DEV_TICKET_PLATFORM_LABELS,
+  DEV_TICKET_DEFAULT_TESTER,
 } from "@/shared/lib/api/devTickets";
 import {
   STATUS_CONFIG,
@@ -42,25 +44,6 @@ import {
 } from "./dev-ticket-config";
 import DevTicketModulePageFields from "./dev-ticket-module-page-fields";
 import { formatDevTicketModuleLabel } from "./dev-ticket-modules";
-
-const AsyncSelect = dynamic(() => import("react-select/async"), { ssr: false });
-
-type AssigneeOption = { value: string; label: string };
-
-/** Server-searched — org can exceed any client-side prefetch cap, so assignable
- *  users are never fully loaded up front (see TASK_LIMIT truncation bug). */
-function loadAssigneeOptions(inputValue: string, callback: (options: AssigneeOption[]) => void) {
-  listUsers({ search: inputValue || undefined, limit: 20 })
-    .then((res) => {
-      callback(
-        (res.results ?? []).map((u) => ({
-          value: u.id ?? u._id ?? "",
-          label: u.name || u.email,
-        }))
-      );
-    })
-    .catch(() => callback([]));
-}
 
 const REACTION_EMOJIS = ["👍", "👎", "❤️", "🎉", "😕"];
 
@@ -109,10 +92,9 @@ export function DevTicketDetailDrawer({
     module: "",
     pageUrl: "",
     environment: "",
-    assignedTo: "",
+    platform: "web" as DevTicketPlatform,
     labels: [] as DevTicketLabel[],
   });
-  const [updateAssigneeOption, setUpdateAssigneeOption] = useState<AssigneeOption | null>(null);
   const [updating, setUpdating] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [linkRel, setLinkRel] = useState<DevTicketLinkRel>("relates-to");
@@ -147,15 +129,9 @@ export function DevTicketDetailDrawer({
       module: t.module ?? "",
       pageUrl: t.pageUrl ?? "",
       environment: t.environment ?? "Staging",
-      assignedTo: t.assignedTo?.id ?? t.assignedTo?._id ?? "",
+      platform: t.platform === "mobile" ? "mobile" : "web",
       labels: t.labels ?? [],
     });
-    const assigneeId = t.assignedTo?.id ?? t.assignedTo?._id ?? "";
-    setUpdateAssigneeOption(
-      assigneeId
-        ? { value: assigneeId, label: t.assignedTo?.name || t.assignedTo?.email || assigneeId }
-        : null
-    );
   }, []);
 
   useEffect(() => {
@@ -259,7 +235,7 @@ export function DevTicketDetailDrawer({
         pageUrl: updateForm.pageUrl.trim() || undefined,
         environment: updateForm.environment as DevTicket["environment"],
         labels: updateForm.labels,
-        assignedTo: updateForm.assignedTo || null,
+        platform: updateForm.platform,
       };
       const latest = await updateDevTicket(ticketId, body);
       setDetail(latest);
@@ -507,7 +483,18 @@ export function DevTicketDetailDrawer({
               { label: "Module", value: detail.module ? formatDevTicketModuleLabel(detail.module) : "—" },
               { label: "Environment", value: detail.environment || "—" },
               { label: "Priority", value: detail.priority },
-              { label: "Assignee", value: detail.assignedTo?.name ?? detail.assignedTo?.email ?? "Unassigned" },
+              {
+                label: "Platform",
+                value: detail.platform
+                  ? DEV_TICKET_PLATFORM_LABELS[detail.platform] ?? detail.platform
+                  : "—",
+              },
+              {
+                label: "Tester",
+                value: detail.testedBy?.name
+                  ? `${detail.testedBy.name}${detail.testedBy.email ? ` (${detail.testedBy.email})` : ""}`
+                  : `${DEV_TICKET_DEFAULT_TESTER.name} (${DEV_TICKET_DEFAULT_TESTER.email})`,
+              },
               { label: "Reporter", value: detail.createdBy?.name ?? detail.createdBy?.email ?? "—" },
               { label: "Created", value: formatDate(detail.createdAt) },
             ].map((item) => (
@@ -599,20 +586,23 @@ export function DevTicketDetailDrawer({
                     </select>
                   </div>
                   <div className="min-w-0">
-                    <label className={EDIT_LABEL}>Assignee</label>
-                    <AsyncSelect
-                      classNamePrefix="react-select"
-                      cacheOptions
-                      defaultOptions
-                      loadOptions={loadAssigneeOptions}
-                      placeholder="Unassigned"
-                      isClearable
-                      value={updateAssigneeOption}
-                      onChange={(opt) => {
-                        const option = opt as AssigneeOption | null;
-                        setUpdateAssigneeOption(option);
-                        setUpdateForm((f) => ({ ...f, assignedTo: option?.value ?? "" }));
-                      }}
+                    <label className={EDIT_LABEL}>Platform</label>
+                    <select
+                      className={EDIT_FIELD}
+                      value={updateForm.platform}
+                      onChange={(e) => setUpdateForm((f) => ({ ...f, platform: e.target.value as DevTicketPlatform }))}
+                    >
+                      {DEV_TICKET_PLATFORMS.map((p) => (
+                        <option key={p} value={p}>{DEV_TICKET_PLATFORM_LABELS[p]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="min-w-0">
+                    <label className={EDIT_LABEL}>Tester</label>
+                    <input
+                      className={`${EDIT_FIELD} bg-slate-50 dark:bg-white/5`}
+                      readOnly
+                      value={`${DEV_TICKET_DEFAULT_TESTER.name} — ${DEV_TICKET_DEFAULT_TESTER.email}`}
                     />
                   </div>
                 </div>

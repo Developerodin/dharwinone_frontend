@@ -4,7 +4,10 @@ import Seo from "@/shared/layout-components/seo/seo";
 import DevTicketAccessDenied from "@/shared/components/dev-tickets/dev-ticket-access-denied";
 import DevTicketTabBar from "@/shared/components/dev-tickets/dev-ticket-tab-bar";
 import DevTicketDetailDrawer from "@/shared/components/dev-tickets/dev-ticket-detail-drawer";
-import DevTicketModulePageFields from "@/shared/components/dev-tickets/dev-ticket-module-page-fields";
+import CreateDevTicketModal from "@/shared/components/dev-tickets/create-dev-ticket-modal";
+import DevTicketPageHeader from "@/shared/components/dev-tickets/dev-ticket-page-header";
+import DevTicketScopeTabs from "@/shared/components/dev-tickets/dev-ticket-scope-tabs";
+import DevTicketStatsStrip from "@/shared/components/dev-tickets/dev-ticket-stats-strip";
 import { DEV_TICKET_MODULE_LABELS, formatDevTicketModuleLabel } from "@/shared/components/dev-tickets/dev-ticket-modules";
 import {
   STATUS_CONFIG,
@@ -13,7 +16,6 @@ import {
   LABEL_CONFIG,
   canEditDevTicket,
   computeAgeDays,
-  formatFileSize,
   getDevTicketDisplayId,
   getInitials,
   getTicketDbId,
@@ -27,35 +29,18 @@ import {
   listDevTickets,
   updateDevTicket,
   DEV_TICKET_LABELS,
-  DEV_TICKET_CATEGORIES,
+  DEV_TICKET_PLATFORMS,
+  DEV_TICKET_PLATFORM_LABELS,
   type DevTicket,
   type DevTicketCategory,
   type DevTicketFilters,
   type DevTicketLabel,
+  type DevTicketPlatform,
 } from "@/shared/lib/api/devTickets";
-import { listUsers } from "@/shared/lib/api/users";
 import { useAuth } from "@/shared/contexts/auth-context";
 import Swal from "sweetalert2";
 import { useRouter, useSearchParams } from "next/navigation";
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AsyncSelect from "react-select/async";
-
-type AssigneeOption = { value: string; label: string };
-
-/** Server-searched — org can exceed any client-side prefetch cap, so assignable
- *  users are never fully loaded up front (see TASK_LIMIT truncation bug). */
-function loadAssigneeOptions(inputValue: string, callback: (options: AssigneeOption[]) => void) {
-  listUsers({ search: inputValue || undefined, limit: 20 })
-    .then((res) => {
-      callback(
-        (res.results ?? []).map((u) => ({
-          value: u.id ?? "",
-          label: u.name ? `${u.name} — ${u.email}` : u.email ?? "",
-        }))
-      );
-    })
-    .catch(() => callback([]));
-}
 
 type ScopeFilter = DevTicketFilters["scope"];
 
@@ -113,8 +98,7 @@ export default function DevTicketsPage() {
   const [drawerTicket, setDrawerTicket] = useState<DevTicket | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const [bulkAssignUser, setBulkAssignUser] = useState("");
-  const [bulkAssignOption, setBulkAssignOption] = useState<AssigneeOption | null>(null);
+  const [bulkAssignPlatform, setBulkAssignPlatform] = useState<DevTicketPlatform>("web");
   const [bulkLabel, setBulkLabel] = useState<DevTicketLabel>("regression");
   const [showBulkBar, setShowBulkBar] = useState(false);
 
@@ -129,13 +113,11 @@ export default function DevTicketsPage() {
     module: "",
     environment: "Staging" as DevTicket["environment"],
     labels: [] as DevTicketLabel[],
-    assignedTo: "",
+    platform: "web" as DevTicketPlatform,
   });
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const fetchGenerationRef = useRef(0);
@@ -143,9 +125,7 @@ export default function DevTicketsPage() {
   const prevDebouncedSearchRef = useRef(searchQuery);
 
   const [assignModalTicket, setAssignModalTicket] = useState<DevTicket | null>(null);
-  const [assignUserId, setAssignUserId] = useState("");
-  const [assignUserOption, setAssignUserOption] = useState<AssigneeOption | null>(null);
-  const [createAssigneeOption, setCreateAssigneeOption] = useState<AssigneeOption | null>(null);
+  const [assignPlatform, setAssignPlatform] = useState<DevTicketPlatform>("web");
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -405,14 +385,7 @@ export default function DevTicketsPage() {
   };
 
   const handleCreate = async () => {
-    if (createForm.title.trim().length < 5) {
-      await Swal.fire({ icon: "warning", title: "Title must be at least 5 characters." });
-      return;
-    }
-    if (createForm.description.trim().length < 10) {
-      await Swal.fire({ icon: "warning", title: "Description must be at least 10 characters." });
-      return;
-    }
+    if (createForm.title.trim().length < 5 || createForm.description.trim().length < 10) return;
     try {
       setCreating(true);
       await createDevTicket({
@@ -422,8 +395,7 @@ export default function DevTicketsPage() {
         attachments: attachments.length ? attachments : undefined,
       });
       setShowCreateModal(false);
-      setCreateForm({ title: "", description: "", stepsToReproduce: "", pageUrl: "", priority: "Medium", severity: "Major", category: "Bug", module: "", environment: "Staging", labels: [], assignedTo: "" });
-      setCreateAssigneeOption(null);
+      setCreateForm({ title: "", description: "", stepsToReproduce: "", pageUrl: "", priority: "Medium", severity: "Major", category: "Bug", module: "", environment: "Staging", labels: [], platform: "web" });
       setAttachments([]);
       showToast("Ticket created successfully");
       fetchTickets();
@@ -469,8 +441,8 @@ export default function DevTicketsPage() {
 
   const handleBulkAssign = async () => {
     const ids = Array.from(selectedIds);
-    if (!ids.length || !bulkAssignUser) return;
-    const result = await bulkUpdate(ids, { assignedTo: bulkAssignUser });
+    if (!ids.length || !bulkAssignPlatform) return;
+    const result = await bulkUpdate(ids, { platform: bulkAssignPlatform });
     if (result.skipped.length) showToast(`${result.updated.length} assigned, ${result.skipped.length} skipped`);
     else showToast(`${result.updated.length} ticket(s) assigned`);
     setSelectedIds(new Set());
@@ -520,68 +492,62 @@ export default function DevTicketsPage() {
       <Toast message={toast} />
 
       <div className="container-fluid pt-6">
-        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="flex items-center gap-2 text-[1.125rem] font-semibold text-defaulttextcolor dark:text-white">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                <i className="ri-lifebuoy-line text-[1rem]" />
-              </span>
-              Help &amp; Support
-            </h1>
-            <p className="mt-1 text-[0.8125rem] text-[#8c9097] dark:text-white/50">Internal dev &amp; bug tracker</p>
-          </div>
-          <button type="button" onClick={() => setShowCreateModal(true)} className="ti-btn ti-btn-primary ti-btn-wave inline-flex items-center gap-2 !px-4 !py-2 !text-[0.8125rem]">
-            <i className="ri-add-line" /> Create Ticket
-          </button>
-        </div>
+        <DevTicketPageHeader
+          title="Help & Support"
+          subtitle="Internal dev and bug tracker"
+          icon="ri-lifebuoy-line"
+          action={
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              className="ti-btn ti-btn-primary inline-flex w-full items-center justify-center gap-2 !px-4 !py-2 !text-[0.8125rem] sm:w-auto"
+            >
+              <i className="ri-add-line" aria-hidden />
+              Create ticket
+            </button>
+          }
+        />
 
         <DevTicketTabBar />
 
-        {/* Stats */}
-        <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {[
-            { label: "Open", count: pageStats.open, icon: "ri-radio-button-line", cls: "bg-primary/10 text-primary" },
-            { label: "In Progress", count: pageStats.inProgress, icon: "ri-loader-4-line", cls: "bg-warning/10 text-warning" },
-            { label: "Resolved", count: pageStats.resolved, icon: "ri-checkbox-circle-line", cls: "bg-success/10 text-success" },
-            { label: "Blocker / Critical", count: pageStats.critical, icon: "ri-alarm-warning-line", cls: "bg-danger/10 text-danger" },
-          ].map((s) => (
-            <div key={s.label} className="box !mb-0">
-              <div className="box-body !flex !items-center !gap-3 !p-4">
-                <span className={`avatar avatar-sm rounded-md ${s.cls}`}><i className={`${s.icon} text-[1rem]`} /></span>
-                <div>
-                  <p className="mb-0 text-[0.6875rem] text-[#8c9097]">{s.label}</p>
-                  <p className="mb-0 text-[1.125rem] font-semibold">{s.count}</p>
-                </div>
-              </div>
+        <DevTicketStatsStrip
+          stats={[
+            { label: "Open", count: pageStats.open, icon: "ri-radio-button-line", tone: "primary" },
+            { label: "In Progress", count: pageStats.inProgress, icon: "ri-loader-4-line", tone: "warning" },
+            { label: "Resolved", count: pageStats.resolved, icon: "ri-checkbox-circle-line", tone: "success" },
+            { label: "Blocker / Critical", count: pageStats.critical, icon: "ri-alarm-warning-line", tone: "danger" },
+          ]}
+        />
+
+        <DevTicketScopeTabs
+          tabs={SCOPES.map((s) => ({
+            key: s.key,
+            label: s.label,
+            count: scopeCounts[s.key ?? "all"] ?? 0,
+          }))}
+          value={scope}
+          onChange={(key) => {
+            setScope(key);
+            setCurrentPage(1);
+          }}
+        />
+
+        <div className="overflow-hidden rounded-xl border border-defaultborder/70 bg-white dark:border-white/10 dark:bg-bodybg">
+          <div className="flex flex-col gap-1 border-b border-defaultborder/60 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5 dark:border-white/10">
+            <div>
+              <h2 className="mb-0 text-[0.9375rem] font-semibold text-defaulttextcolor dark:text-white">All tickets</h2>
+              <p className="mb-0 mt-0.5 text-[0.6875rem] text-[#8c9097]">
+                {error ? "Could not load results" : `${totalResults} ticket${totalResults === 1 ? "" : "s"}`}
+                {!error && activeFilterCount > 0
+                  ? ` · ${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""} active`
+                  : ""}
+              </p>
             </div>
-          ))}
-        </div>
-
-        {/* Scope tabs */}
-        <div className="mb-4 inline-flex flex-wrap gap-1 rounded-lg border border-defaultborder p-1 dark:border-white/10">
-          {SCOPES.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              onClick={() => { setScope(s.key); setCurrentPage(1); }}
-              className={`rounded-md px-3 py-1.5 text-[0.75rem] font-medium transition ${scope === s.key ? "bg-primary text-white" : "text-[#8c9097] hover:bg-slate-100 dark:hover:bg-white/5"}`}
-            >
-              {s.label}
-              <span className="ms-1.5 tabular-nums opacity-70">({scopeCounts[s.key ?? "all"] ?? 0})</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="box">
-          <div className="box-header justify-between">
-            <div className="box-title">All Tickets</div>
-            <span className="text-[0.75rem] text-[#8c9097]">
-              {error ? "—" : `${totalResults} results`}
-              {!error && activeFilterCount > 0 && ` · ${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""}`}
-            </span>
           </div>
-          <div className="box-body">
-            <div className="mb-4 space-y-3">
+
+          <div className="border-b border-defaultborder/60 bg-slate-50/50 px-4 py-4 dark:border-white/10 dark:bg-white/[0.02] sm:px-5">
+            <p className="mb-3 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-[#8c9097]">Search and filter</p>
+            <div className="space-y-3">
               <div className="relative max-w-xl">
                 <span
                   className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center"
@@ -604,7 +570,7 @@ export default function DevTicketsPage() {
                   placeholder="Search ticket ID, title, description…"
                   aria-label="Search tickets"
                   aria-busy={isSearchBusy}
-                  className={`form-control !rounded-md !ps-10 !text-[0.8125rem] ${searchQuery ? "!pe-10" : "!pe-3"}`}
+                  className={`form-control !min-h-[2.375rem] !rounded-lg !ps-10 !text-[0.8125rem] ${searchQuery ? "!pe-10" : "!pe-3"}`}
                 />
                 {searchQuery && (
                   <button
@@ -617,51 +583,89 @@ export default function DevTicketsPage() {
                   </button>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
                 {[
                   { label: "Status", val: statusFilter, set: setStatusFilter, opts: Object.keys(STATUS_CONFIG) },
                   { label: "Priority", val: priorityFilter, set: setPriorityFilter, opts: Object.keys(PRIORITY_CONFIG) },
                   { label: "Severity", val: severityFilter, set: setSeverityFilter, opts: Object.keys(SEVERITY_CONFIG) },
                 ].map((f) => (
-                  <select key={f.label} value={f.val} onChange={(e) => { f.set(e.target.value); setCurrentPage(1); }} className={TICKET_FILTER_SELECT_CLASS}>
+                  <select
+                    key={f.label}
+                    value={f.val}
+                    onChange={(e) => {
+                      f.set(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className={TICKET_FILTER_SELECT_CLASS}
+                    aria-label={`Filter by ${f.label.toLowerCase()}`}
+                  >
                     <option value="">{f.label}: All</option>
-                    {f.opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                    {f.opts.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
                   </select>
                 ))}
-                <select value={labelFilter} onChange={(e) => { setLabelFilter(e.target.value); setCurrentPage(1); }} className={TICKET_FILTER_SELECT_CLASS}>
+                <select
+                  value={labelFilter}
+                  onChange={(e) => {
+                    setLabelFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className={TICKET_FILTER_SELECT_CLASS}
+                  aria-label="Filter by label"
+                >
                   <option value="">Label: All</option>
-                  {DEV_TICKET_LABELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                  {DEV_TICKET_LABELS.map((l) => (
+                    <option key={l} value={l}>
+                      {l}
+                    </option>
+                  ))}
                 </select>
-                <select value={moduleFilter} onChange={(e) => { setModuleFilter(e.target.value); setCurrentPage(1); }} className={`${TICKET_FILTER_SELECT_CLASS} sm:max-w-[200px]`}>
+                <select
+                  value={moduleFilter}
+                  onChange={(e) => {
+                    setModuleFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className={`${TICKET_FILTER_SELECT_CLASS} sm:max-w-[200px]`}
+                  aria-label="Filter by module"
+                >
                   <option value="">Module: All</option>
                   {DEV_TICKET_MODULE_LABELS.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
                   ))}
                 </select>
                 {hasActiveFilters && (
-                  <div className="w-full shrink-0 sm:w-auto">
-                    <button
-                      type="button"
-                      onClick={clearFilters}
-                      aria-label="Clear all filters"
-                      className="ti-btn ti-btn-sm ti-btn-soft-danger !inline-flex !shrink-0 !flex-none !items-center !justify-center !gap-1.5 !whitespace-nowrap !px-3 !py-2 !min-h-[2.375rem] !h-auto !w-full !text-[0.75rem] sm:!w-auto"
-                    >
-                      <i className="ri-filter-off-line text-[0.875rem]" aria-hidden />
-                      Clear all
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    aria-label="Clear all filters"
+                    className="ti-btn ti-btn-sm ti-btn-soft-danger !inline-flex !shrink-0 !items-center !gap-1.5 !whitespace-nowrap !px-3 !py-2 !min-h-[2.375rem]"
+                  >
+                    <i className="ri-filter-off-line text-[0.875rem]" aria-hidden />
+                    Clear filters
+                  </button>
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="px-4 py-4 sm:px-5">
 
             {selectedIds.size > 0 && (
-              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2">
-                <span className="text-[0.8125rem] font-medium">{selectedIds.size} selected</span>
-                <button type="button" onClick={() => { setBulkAssignUser(""); setBulkAssignOption(null); setShowBulkBar(true); }} className="ti-btn ti-btn-sm ti-btn-soft-primary">Assign</button>
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-primary/25 bg-primary/[0.04] px-3 py-2.5 dark:bg-primary/[0.06]">
+                <span className="text-[0.8125rem] font-medium text-defaulttextcolor dark:text-white">
+                  {selectedIds.size} selected
+                </span>
+                <button type="button" onClick={() => setShowBulkBar(true)} className="ti-btn ti-btn-sm ti-btn-soft-primary">Assign</button>
                 <select
                   value={bulkLabel}
                   onChange={(e) => setBulkLabel(e.target.value as DevTicketLabel)}
-                  className="form-control !w-auto !py-1 !px-2 !text-[0.75rem]"
+                  className="form-control !w-auto !min-h-[2rem] !py-1 !px-2 !text-[0.75rem]"
                   aria-label="Bulk label"
                 >
                   {DEV_TICKET_LABELS.map((l) => (
@@ -685,12 +689,20 @@ export default function DevTicketsPage() {
             )}
 
             {loading && tickets.length === 0 ? (
-              <div className="space-y-3">{[1, 2, 3, 4, 5].map((n) => <div key={n} className="h-12 animate-pulse rounded bg-black/5 dark:bg-white/10" />)}</div>
+              <div className="space-y-2">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <div key={n} className="h-12 animate-pulse rounded-lg bg-black/5 dark:bg-white/10" />
+                ))}
+              </div>
             ) : tickets.length === 0 ? (
-              <div className="py-16 text-center">
-                <i className="ri-bug-line mb-3 text-[2.5rem] text-primary/40" />
-                <h3 className="text-base font-semibold">{hasActiveFilters ? "No tickets match these filters" : "No tickets yet"}</h3>
-                <p className="text-[0.8125rem] text-[#8c9097]">{hasActiveFilters ? "Try adjusting or clearing filters." : "Create the first dev ticket to get started."}</p>
+              <div className="rounded-xl border border-dashed border-defaultborder/70 px-6 py-14 text-center dark:border-white/10">
+                <i className="ri-bug-line mb-3 text-[2.25rem] text-primary/40" aria-hidden />
+                <h3 className="text-base font-semibold text-defaulttextcolor dark:text-white">
+                  {hasActiveFilters ? "No tickets match these filters" : "No tickets yet"}
+                </h3>
+                <p className="mx-auto mt-1 max-w-sm text-[0.8125rem] text-[#8c9097]">
+                  {hasActiveFilters ? "Try adjusting or clearing filters." : "Create the first dev ticket to get started."}
+                </p>
                 {hasActiveFilters ? (
                   <button type="button" onClick={clearFilters} className="ti-btn ti-btn-primary mt-4">Clear filters</button>
                 ) : (
@@ -699,29 +711,39 @@ export default function DevTicketsPage() {
               </div>
             ) : (
               <div className={`relative transition-opacity ${isListBusy ? "opacity-60" : ""}`} aria-busy={isListBusy}>
-                <div className="table-responsive">
-                <table className="table table-hover table-bordered min-w-full whitespace-nowrap">
-                  <thead>
-                    <tr>
-                      <th className="!w-10">
-                        <input type="checkbox" checked={allPageSelected} ref={(el) => { if (el) el.indeterminate = someSelected && !allPageSelected; }} onChange={toggleSelectAll} aria-label="Select all" />
-                      </th>
-                      <th>Ticket</th>
-                      <th>Subject</th>
-                      <th>Status</th>
-                      <th>
-                        <button type="button" onClick={() => toggleSort("severity")} className="font-semibold hover:text-primary">Severity {sortBy.startsWith("severity") && (sortBy.endsWith("asc") ? "↑" : "↓")}</button>
-                      </th>
-                      <th>Module</th>
-                      <th>Priority</th>
-                      <th>Assignee</th>
-                      <th>
-                        <button type="button" onClick={() => toggleSort("createdAt")} className="font-semibold hover:text-primary">Age {sortBy.startsWith("createdAt") && (sortBy.endsWith("asc") ? "↑" : "↓")}</button>
-                      </th>
-                      <th className="!text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <div className="overflow-x-auto rounded-lg border border-defaultborder/60 dark:border-white/10">
+                  <table className="table table-hover mb-0 min-w-full whitespace-nowrap">
+                    <thead className="bg-slate-50/90 dark:bg-white/[0.03]">
+                      <tr className="text-[0.6875rem] uppercase tracking-[0.04em] text-[#8c9097]">
+                        <th className="!w-10 !border-b !border-defaultborder/60 !py-3 dark:!border-white/10">
+                          <input type="checkbox" checked={allPageSelected} ref={(el) => { if (el) el.indeterminate = someSelected && !allPageSelected; }} onChange={toggleSelectAll} aria-label="Select all on page" />
+                        </th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 dark:!border-white/10">Ticket</th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 dark:!border-white/10">Subject</th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 dark:!border-white/10">Status</th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 dark:!border-white/10">
+                          <button type="button" onClick={() => toggleSort("severity")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.04em] hover:text-primary">
+                            Severity
+                            {sortBy.startsWith("severity") ? (
+                              <i className={`text-[0.75rem] ${sortBy.endsWith("asc") ? "ri-arrow-up-s-line" : "ri-arrow-down-s-line"}`} aria-hidden />
+                            ) : null}
+                          </button>
+                        </th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 dark:!border-white/10">Module</th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 dark:!border-white/10">Priority</th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 dark:!border-white/10">Platform</th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 dark:!border-white/10">
+                          <button type="button" onClick={() => toggleSort("createdAt")} className="inline-flex items-center gap-1 font-semibold uppercase tracking-[0.04em] hover:text-primary">
+                            Age
+                            {sortBy.startsWith("createdAt") ? (
+                              <i className={`text-[0.75rem] ${sortBy.endsWith("asc") ? "ri-arrow-up-s-line" : "ri-arrow-down-s-line"}`} aria-hidden />
+                            ) : null}
+                          </button>
+                        </th>
+                        <th className="!border-b !border-defaultborder/60 !py-3 !text-center dark:!border-white/10">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
                     {tickets.map((ticket) => {
                       const id = getTicketDbId(ticket);
                       const sc = STATUS_CONFIG[ticket.status] ?? STATUS_CONFIG.Open;
@@ -731,7 +753,7 @@ export default function DevTicketsPage() {
                       const isOpenStatus = ticket.status !== "Resolved" && ticket.status !== "Closed";
                       const editable = canEditDevTicket(ticket, userId, isAdmin);
                       return (
-                        <tr key={id} className="cursor-pointer hover:bg-gray-50/50 dark:hover:bg-light/5" onClick={() => openDrawer(ticket)}>
+                        <tr key={id} className="cursor-pointer transition-colors hover:bg-slate-50/80 dark:hover:bg-white/[0.03]" onClick={() => openDrawer(ticket)}>
                           <td onClick={(e) => e.stopPropagation()}>
                             <input type="checkbox" checked={selectedIds.has(id)} onChange={() => toggleSelect(id)} aria-label={`Select ${getDevTicketDisplayId(ticket)}`} />
                           </td>
@@ -751,7 +773,11 @@ export default function DevTicketsPage() {
                           <td className="text-[0.8125rem] text-[#8c9097]">{ticket.module ? formatDevTicketModuleLabel(ticket.module) : "—"}</td>
                           <td><span className={`badge !rounded-full !text-[0.6875rem] ${pc.badge}`}>{ticket.priority}</span></td>
                           <td>
-                            {ticket.assignedTo ? (
+                            {ticket.platform ? (
+                              <span className="text-[0.75rem] font-medium" title={ticket.assignedTo?.email ?? ""}>
+                                {DEV_TICKET_PLATFORM_LABELS[ticket.platform] ?? ticket.platform}
+                              </span>
+                            ) : ticket.assignedTo ? (
                               <span className="avatar avatar-xs avatar-rounded bg-primary/10 text-primary text-[0.55rem] font-bold" title={ticket.assignedTo.name ?? ticket.assignedTo.email}>
                                 {getInitials(ticket.assignedTo.name, ticket.assignedTo.email)}
                               </span>
@@ -769,13 +795,7 @@ export default function DevTicketsPage() {
                                 <>
                                   <button type="button" onClick={() => {
                                     setAssignModalTicket(ticket);
-                                    const assigneeId = ticket.assignedTo?.id ?? ticket.assignedTo?._id ?? "";
-                                    setAssignUserId(assigneeId);
-                                    setAssignUserOption(
-                                      assigneeId
-                                        ? { value: assigneeId, label: ticket.assignedTo?.name || ticket.assignedTo?.email || assigneeId }
-                                        : null
-                                    );
+                                    setAssignPlatform(ticket.platform === "mobile" ? "mobile" : "web");
                                   }} className="ti-btn ti-btn-icon ti-btn-sm ti-btn-soft-info" aria-label="Assign"><i className="ri-user-add-line" /></button>
                                   <button type="button" onClick={() => handleDelete(ticket)} className="ti-btn ti-btn-icon ti-btn-sm ti-btn-soft-danger" aria-label="Delete"><i className="ri-delete-bin-5-line" /></button>
                                 </>
@@ -785,19 +805,35 @@ export default function DevTicketsPage() {
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
           </div>
 
           {totalPages > 1 && (
-            <div className="box-footer flex items-center justify-between">
-              <p className="mb-0 text-[0.75rem] text-[#8c9097]">Page {currentPage} of {totalPages}</p>
-              <div className="flex gap-1">
-                <button type="button" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)} className="ti-btn ti-btn-sm ti-btn-light">Prev</button>
-                <button type="button" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)} className="ti-btn ti-btn-sm ti-btn-light">Next</button>
+            <div className="flex flex-col gap-3 border-t border-defaultborder/60 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5 dark:border-white/10">
+              <p className="mb-0 text-[0.75rem] text-[#8c9097]">
+                Page {currentPage} of {totalPages}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((p) => p - 1)}
+                  className="ti-btn ti-btn-sm ti-btn-light"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((p) => p + 1)}
+                  className="ti-btn ti-btn-sm ti-btn-light"
+                >
+                  Next
+                </button>
               </div>
             </div>
           )}
@@ -821,142 +857,33 @@ export default function DevTicketsPage() {
       />
 
       {/* Create modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-[105] flex items-start justify-center overflow-y-auto bg-black/50 p-4 pt-[5vh]" onClick={() => setShowCreateModal(false)}>
-          <div className="w-full max-w-2xl rounded-md bg-white shadow-lg dark:bg-bodybg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b px-5 py-4">
-              <h6 className="text-[0.9375rem] font-semibold">Create Dev Ticket</h6>
-              <button type="button" onClick={() => setShowCreateModal(false)} className="ti-btn ti-btn-icon ti-btn-sm ti-btn-light"><i className="ri-close-line" /></button>
-            </div>
-            <div className="space-y-4 p-5">
-              <div>
-                <label className="form-label">Title <span className="text-danger">*</span></label>
-                <input className="form-control" value={createForm.title} onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))} onBlur={() => {}} />
-              </div>
-              <div>
-                <label className="form-label">Description <span className="text-danger">*</span></label>
-                <textarea className="form-control" rows={4} value={createForm.description} onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))} />
-              </div>
-              <div>
-                <label className="form-label">Steps to reproduce</label>
-                <textarea className="form-control" rows={3} value={createForm.stepsToReproduce} onChange={(e) => setCreateForm((f) => ({ ...f, stepsToReproduce: e.target.value }))} />
-              </div>
-              <div
-                className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition ${dragOver ? "border-primary bg-primary/5" : "border-defaultborder"}`}
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(Array.from(e.dataTransfer.files)); }}
-              >
-                <i className="ri-upload-cloud-2-line mb-2 text-[2rem] text-primary/50" />
-                <p className="mb-2 text-[0.8125rem]">Drag files here or <span className="text-primary underline">browse</span></p>
-                <p className="mb-0 text-[0.6875rem] text-[#8c9097]">Images, video, PDF, logs — max 10 files</p>
-                <input ref={fileInputRef} type="file" multiple className="hidden" accept="image/*,video/*,.pdf,.log,.txt" onChange={(e) => addFiles(Array.from(e.target.files ?? []))} />
-              </div>
-              {attachmentErrors.length > 0 && <p className="text-[0.75rem] text-danger">{attachmentErrors.join(", ")}</p>}
-              {attachments.map((f, i) => (
-                <div key={i} className="flex items-center gap-2 rounded border px-3 py-2">
-                  <i className="ri-file-line" />
-                  <span className="flex-1 truncate text-[0.8125rem]">{f.name}</span>
-                  <span className="text-[0.6875rem] text-[#8c9097]">{formatFileSize(f.size)}</span>
-                  <button type="button" onClick={() => setAttachments((a) => a.filter((_, j) => j !== i))}><i className="ri-close-line" /></button>
-                </div>
-              ))}
-              <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-                <div>
-                  <label className="form-label">Category</label>
-                  <select className="form-control form-control-block" value={createForm.category} onChange={(e) => setCreateForm((f) => ({ ...f, category: e.target.value as DevTicketCategory }))}>
-                    {DEV_TICKET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Severity</label>
-                  <select className="form-control form-control-block" value={createForm.severity} onChange={(e) => setCreateForm((f) => ({ ...f, severity: e.target.value as DevTicket["severity"] }))}>
-                    {Object.keys(SEVERITY_CONFIG).map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Priority</label>
-                  <select className="form-control form-control-block" value={createForm.priority} onChange={(e) => setCreateForm((f) => ({ ...f, priority: e.target.value as DevTicket["priority"] }))}>
-                    {Object.keys(PRIORITY_CONFIG).map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Environment</label>
-                  <select className="form-control form-control-block" value={createForm.environment} onChange={(e) => setCreateForm((f) => ({ ...f, environment: e.target.value as DevTicket["environment"] }))}>
-                    <option value="Staging">Staging</option>
-                    <option value="Production">Production</option>
-                  </select>
-                </div>
-              </div>
-              <DevTicketModulePageFields
-                module={createForm.module}
-                pageUrl={createForm.pageUrl}
-                onModuleChange={(module) => setCreateForm((f) => ({ ...f, module }))}
-                onPageUrlChange={(pageUrl) => setCreateForm((f) => ({ ...f, pageUrl }))}
-              />
-              <div>
-                <label className="form-label">Assign to</label>
-                <AsyncSelect
-                  classNamePrefix="react-select"
-                  className="react-select-container"
-                  isClearable
-                  cacheOptions
-                  defaultOptions
-                  loadOptions={loadAssigneeOptions}
-                  placeholder="Search user…"
-                  value={createAssigneeOption}
-                  onChange={(opt) => {
-                    const option = opt as AssigneeOption | null;
-                    setCreateAssigneeOption(option);
-                    setCreateForm((f) => ({ ...f, assignedTo: option?.value ?? "" }));
-                  }}
-                  menuPortalTarget={typeof document !== "undefined" ? document.body : undefined}
-                  styles={{ menuPortal: (base) => ({ ...base, zIndex: 200 }) }}
-                />
-              </div>
-              <div>
-                <label className="form-label">Labels</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {DEV_TICKET_LABELS.map((lbl) => {
-                    const sel = createForm.labels.includes(lbl);
-                    return (
-                      <button key={lbl} type="button" onClick={() => setCreateForm((f) => ({ ...f, labels: sel ? f.labels.filter((l) => l !== lbl) : [...f.labels, lbl] }))} className={`badge !rounded-full cursor-pointer ${sel ? LABEL_CONFIG[lbl].badge : "bg-slate-100 text-slate-500"}`}>{lbl}</button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 border-t px-5 py-4">
-              <button type="button" onClick={() => setShowCreateModal(false)} className="ti-btn ti-btn-light">Cancel</button>
-              <button type="button" onClick={handleCreate} disabled={creating} className="ti-btn ti-btn-primary">
-                {creating ? <><span className="me-1 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> Creating…</> : "Create Ticket"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CreateDevTicketModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        form={createForm}
+        onFormChange={setCreateForm}
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        attachmentErrors={attachmentErrors}
+        onAddFiles={addFiles}
+        creating={creating}
+        onSubmit={handleCreate}
+      />
 
       {/* Bulk assign modal */}
       {showBulkBar && (
         <div className="fixed inset-0 z-[106] flex items-center justify-center bg-black/50 p-4" onClick={() => setShowBulkBar(false)}>
           <div className="w-full max-w-sm rounded-md bg-white p-5 dark:bg-bodybg" onClick={(e) => e.stopPropagation()}>
             <h6 className="mb-3 font-semibold">Bulk assign</h6>
-            <AsyncSelect
-              classNamePrefix="react-select"
-              cacheOptions
-              defaultOptions
-              loadOptions={loadAssigneeOptions}
-              placeholder="Select user"
-              isClearable
-              value={bulkAssignOption}
-              onChange={(opt) => {
-                const option = opt as AssigneeOption | null;
-                setBulkAssignOption(option);
-                setBulkAssignUser(option?.value ?? "");
-              }}
-              className="mb-3"
-            />
+            <select
+              className="form-control form-control-block mb-3"
+              value={bulkAssignPlatform}
+              onChange={(e) => setBulkAssignPlatform(e.target.value as DevTicketPlatform)}
+            >
+              {DEV_TICKET_PLATFORMS.map((p) => (
+                <option key={p} value={p}>{DEV_TICKET_PLATFORM_LABELS[p]}</option>
+              ))}
+            </select>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowBulkBar(false)} className="ti-btn ti-btn-light">Cancel</button>
               <button type="button" onClick={handleBulkAssign} className="ti-btn ti-btn-primary">Assign</button>
@@ -969,22 +896,16 @@ export default function DevTicketsPage() {
       {assignModalTicket && (
         <div className="fixed inset-0 z-[106] flex items-center justify-center bg-black/50 p-4" onClick={() => setAssignModalTicket(null)}>
           <div className="w-full max-w-sm rounded-md bg-white p-5 dark:bg-bodybg" onClick={(e) => e.stopPropagation()}>
-            <h6 className="mb-3 font-semibold">Assign ticket</h6>
-            <AsyncSelect
-              classNamePrefix="react-select"
-              cacheOptions
-              defaultOptions
-              loadOptions={loadAssigneeOptions}
-              placeholder="Unassigned"
-              isClearable
-              value={assignUserOption}
-              onChange={(opt) => {
-                const option = opt as AssigneeOption | null;
-                setAssignUserOption(option);
-                setAssignUserId(option?.value ?? "");
-              }}
-              className="mb-3"
-            />
+            <h6 className="mb-3 font-semibold">Assign platform</h6>
+            <select
+              className="form-control form-control-block mb-3"
+              value={assignPlatform}
+              onChange={(e) => setAssignPlatform(e.target.value as DevTicketPlatform)}
+            >
+              {DEV_TICKET_PLATFORMS.map((p) => (
+                <option key={p} value={p}>{DEV_TICKET_PLATFORM_LABELS[p]}</option>
+              ))}
+            </select>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setAssignModalTicket(null)} className="ti-btn ti-btn-light">Cancel</button>
               <button
@@ -993,7 +914,7 @@ export default function DevTicketsPage() {
                   const id = getTicketDbId(assignModalTicket);
                   if (!id) return;
                   try {
-                    const updated = await updateDevTicket(id, { assignedTo: assignUserId || null });
+                    const updated = await updateDevTicket(id, { platform: assignPlatform });
                     handleTicketUpdated(updated);
                     setAssignModalTicket(null);
                     showToast("Assignment updated");
