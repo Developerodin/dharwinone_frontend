@@ -3,11 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "generate-templates": "node scripts/generate-templates.js",
     "dev": "next dev -p 3001",
     "build": "next build --webpack",
     "build:turbo": "next build",
-    "postbuild": "node scripts/prune-next-build.js && node scripts/verify-build-output.js && node scripts/check-document-shell.js",
     "start": "next start",
     "lint": "eslint .",
     "audit:ci": "npm audit --audit-level=high",
@@ -17,9 +15,7 @@
     "test:taskboard": "vitest run --coverage",
     "test": "vitest run --coverage",
     "lhci:taskboard": "lhci autorun",
-    "check:taskboard-bundle": "node scripts/check-taskboard-bundle.mjs",
-    "test:taskboard:unit": "vitest run",
-    "verify:legacy-deps": "node scripts/verify-legacy-deps.mjs"
+    "test:taskboard:unit": "vitest run"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
