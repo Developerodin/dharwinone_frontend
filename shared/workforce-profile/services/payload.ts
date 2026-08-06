@@ -10,6 +10,21 @@ const yr = (s: string): number | undefined => {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 
+/**
+ * Drops "" and undefined entries. The normalizer emits "" for every absent
+ * string, but the `PATCH /auth/me/with-candidate` Joi schema rejects empty
+ * strings ("... is not allowed to be empty", and `""` is not a valid date)
+ * and answers 400. The admin route avoids this because toCandidatePayload
+ * spreads each optional field conditionally.
+ */
+const isAbsoluteUrl = (url: string | undefined): boolean =>
+  !!url && /^https?:\/\//i.test(url);
+
+const compact = <T extends Record<string, unknown>>(obj: T): Partial<T> =>
+  Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== "" && v !== undefined),
+  ) as Partial<T>;
+
 /** Admin create/update payload — `Partial<CandidateListItem>` shape. */
 export function toCandidatePayload(
   n: NormalizedWorkforce,
@@ -92,9 +107,14 @@ export function toSelfServicePayload(
     out.supervisorContact = n.supervisorContact || null;
     out.supervisorCountryCode = n.supervisorCountryCode || null;
     if (n.salaryRange) out.salaryRange = n.salaryRange;
-    if (n.address) out.address = n.address;
+    if (n.address) out.address = compact(n.address);
     if (n.socialLinks) out.socialLinks = n.socialLinks;
-    if (n.profilePicture) out.profilePicture = n.profilePicture;
+    // profilePicture.url is validated with Joi .uri(). A relative path is
+    // server-origin data, so echoing it back changes nothing — drop it rather
+    // than trade a no-op for a 400.
+    if (n.profilePicture && isAbsoluteUrl(n.profilePicture.url)) {
+      out.profilePicture = n.profilePicture;
+    }
   }
 
   if (include("qualification")) {
@@ -110,23 +130,26 @@ export function toSelfServicePayload(
   }
 
   if (include("work-experience")) {
-    out.experiences = n.experiences;
+    // currentlyWorking is a boolean and survives compact(); blank dates do not.
+    out.experiences = n.experiences.map((x) => compact({ ...x }));
   }
 
   if (include("documents")) {
-    out.documents = n.documents;
+    out.documents = n.documents.map((d) => compact({ ...d }));
   }
 
   if (include("salary")) {
-    out.salarySlips = n.salarySlips.map((s) => ({
-      month: s.month,
-      ...(yr(s.year) ? { year: yr(s.year) } : {}),
-      documentUrl: s.documentUrl,
-      key: s.key,
-      originalName: s.originalName,
-      size: s.size,
-      mimeType: s.mimeType,
-    }));
+    out.salarySlips = n.salarySlips.map((s) =>
+      compact({
+        month: s.month,
+        year: yr(s.year),
+        documentUrl: s.documentUrl,
+        key: s.key,
+        originalName: s.originalName,
+        size: s.size,
+        mimeType: s.mimeType,
+      }),
+    );
   }
 
   return out as UpdateMeWithCandidatePayload;

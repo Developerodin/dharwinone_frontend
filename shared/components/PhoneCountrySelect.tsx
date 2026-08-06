@@ -52,7 +52,7 @@ export function PhoneCountrySelect({ value, onChange, name, className = "", id }
             minHeight: 38,
             borderRadius: 6,
             backgroundColor: "rgb(var(--body-bg) / 1)",
-            borderColor: "rgb(var(--default-border) / 1)",
+            borderColor: "rgb(var(--input-border) / 1)",
             color: "rgb(var(--default-text-color) / 1)",
           }),
           singleValue: (base) => ({

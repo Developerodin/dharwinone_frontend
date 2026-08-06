@@ -3,6 +3,7 @@
 import React from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
+import wizardUi from "../engine/workforce-wizard.module.css";
 
 let rowCounter = 0;
 const newId = () => `x-${Date.now()}-${++rowCounter}`;
@@ -43,7 +44,7 @@ export function ExperienceStep() {
               description: "",
             })
           }
-          className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+          className={wizardUi.actionBtn}
         >
           + Add Experience
         </button>

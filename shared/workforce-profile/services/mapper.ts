@@ -1,4 +1,5 @@
 import { resolveEmployeeJobTitle } from "@/shared/lib/employee-job-title";
+import { parseStoredPhone } from "@/shared/lib/phoneCountries";
 import type { CandidateListItem } from "@/shared/lib/api/employees";
 import type { CandidateWithProfile } from "@/shared/lib/api/auth";
 import type {
@@ -100,13 +101,17 @@ export function mapToFormState(source: WorkforceSource): WorkforceFormState {
     & Partial<CandidateWithProfile>;
 
   const empty = emptyWorkforceFormState();
+  const storedPhone = parseStoredPhone(migrated.phoneNumber, migrated.countryCode);
 
   const personalInfo: PersonalInfoSlice = {
     ...empty.personalInfo,
     fullName: asString(migrated.fullName, empty.personalInfo.fullName),
     email: asString(migrated.email, empty.personalInfo.email),
-    phoneNumber: asString(migrated.phoneNumber, empty.personalInfo.phoneNumber),
-    countryCode: asString(migrated.countryCode, empty.personalInfo.countryCode),
+    // Stored phones come back E.164 or formatted ("+91 90000 00000"), while the
+    // input holds national digits only and the API demands ^\d{6,15}$. Without
+    // this split, opening a profile and saving it answers 400.
+    phoneNumber: storedPhone.digits || empty.personalInfo.phoneNumber,
+    countryCode: storedPhone.countryCode || empty.personalInfo.countryCode,
     shortBio: asString(migrated.shortBio, empty.personalInfo.shortBio),
     degree: asString(migrated.degree, empty.personalInfo.degree),
     designation: resolveEmployeeJobTitle(migrated) || asString(migrated.designation, empty.personalInfo.designation),

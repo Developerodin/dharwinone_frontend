@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import { getPhoneValidationError } from "@/shared/lib/phoneCountries";
 import type { Mode, StepId } from "../types/wizard.types";
 import type {
   ValidationIssue,
@@ -42,8 +43,13 @@ export const DEFAULT_RULES: ValidationRule[] = [
   {
     field: "personalInfo.phoneNumber",
     section: "personal-info",
-    test: (s) =>
-      s.personalInfo.phoneNumber.trim() ? null : "Phone number is required",
+    // The API only accepts national digits (^\d{6,15}$). Validating here turns
+    // a server 400 into an inline message, and matches the legacy forms.
+    test: (s) => {
+      const v = s.personalInfo.phoneNumber.trim();
+      if (!v) return "Phone number is required";
+      return getPhoneValidationError(v, s.personalInfo.countryCode);
+    },
   },
   {
     field: "personalInfo.password",

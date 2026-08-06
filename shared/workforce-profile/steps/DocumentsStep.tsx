@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
+import wizardUi from "../engine/workforce-wizard.module.css";
 import { useDocumentUpload } from "../resources/useDocumentUpload";
 import type { DocumentResource } from "../types/resource.types";
 
@@ -109,7 +110,7 @@ export function DocumentsStep() {
         <button
           type="button"
           onClick={addDraft}
-          className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+          className={wizardUi.actionBtn}
         >
           + Add Document
         </button>

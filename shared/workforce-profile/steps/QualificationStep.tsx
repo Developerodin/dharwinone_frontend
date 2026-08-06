@@ -3,6 +3,8 @@
 import React from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
+import wizardUi from "../engine/workforce-wizard.module.css";
+import styles from "./qualification-step.module.css";
 
 let rowCounter = 0;
 const newId = () => `q-${Date.now()}-${++rowCounter}`;
@@ -35,10 +37,10 @@ export function QualificationStep() {
   const years = generateYearOptions();
 
   return (
-    <div className="p-4">
-      <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">02</p>
-      <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
-        <div>Qualification :</div>
+    <div className={styles.step}>
+      <p className={styles.sectionEyebrow}>02</p>
+      <div className={styles.sectionHead}>
+        <div className={styles.sectionTitle}>Qualification :</div>
         <button
           type="button"
           onClick={() =>
@@ -52,12 +54,12 @@ export function QualificationStep() {
               description: "",
             })
           }
-          className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+          className={wizardUi.actionBtn}
         >
           + Add Education
         </button>
       </div>
-      {eduErr && <div className="text-red-500 text-sm mb-3">{eduErr}</div>}
+      {eduErr && <div className={styles.sectionError}>{eduErr}</div>}
 
       {educations.map((edu) => {
         const yearMismatch =
@@ -65,36 +67,38 @@ export function QualificationStep() {
           edu.endYear &&
           !validateYearRange(edu.startYear, edu.endYear);
         return (
-          <div
-            key={edu.id}
-            className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3"
-          >
+          <div key={edu.id} className={styles.card}>
             <button
               type="button"
               onClick={() => removeEducation(edu.id)}
-              className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+              className={styles.cardRemove}
+              aria-label="Remove education"
             >
-              ✕
+              <i className="ri-close-line" aria-hidden="true" />
             </button>
-            <div className="xl:col-span-6 col-span-12">
-              <label className="form-label">
-                Degree <span className="text-red-500">*</span>
+
+            <div className={`${styles.field} ${styles.col6}`}>
+              <label className={styles.label} htmlFor={`degree-${edu.id}`}>
+                Degree <span className={styles.required}>*</span>
               </label>
               <input
+                id={`degree-${edu.id}`}
                 type="text"
-                className={`form-control w-full !rounded-md ${eduErr ? "border-red-500" : ""}`}
+                className={`${styles.input} ${eduErr ? styles.inputError : ""}`}
                 placeholder="Degree"
                 value={edu.degree}
                 onChange={(e) => updateEducation(edu.id, { degree: e.target.value })}
               />
             </div>
-            <div className="xl:col-span-6 col-span-12">
-              <label className="form-label">
-                University <span className="text-red-500">*</span>
+
+            <div className={`${styles.field} ${styles.col6}`}>
+              <label className={styles.label} htmlFor={`institute-${edu.id}`}>
+                University <span className={styles.required}>*</span>
               </label>
               <input
+                id={`institute-${edu.id}`}
                 type="text"
-                className={`form-control w-full !rounded-md ${eduErr ? "border-red-500" : ""}`}
+                className={`${styles.input} ${eduErr ? styles.inputError : ""}`}
                 placeholder="University/Institute"
                 value={edu.institute}
                 onChange={(e) =>
@@ -102,13 +106,15 @@ export function QualificationStep() {
                 }
               />
             </div>
-            <div className="xl:col-span-6 col-span-12">
-              <label className="form-label">
-                Location <span className="text-red-500">*</span>
+
+            <div className={`${styles.field} ${styles.col6}`}>
+              <label className={styles.label} htmlFor={`location-${edu.id}`}>
+                Location <span className={styles.required}>*</span>
               </label>
               <input
+                id={`location-${edu.id}`}
                 type="text"
-                className="form-control w-full !rounded-md"
+                className={styles.input}
                 placeholder="Location"
                 value={edu.location}
                 onChange={(e) =>
@@ -116,57 +122,62 @@ export function QualificationStep() {
                 }
               />
             </div>
-            <div className="xl:col-span-6 col-span-12">
-              <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-6">
-                  <label className="form-label">
-                    Start Year <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    className="form-control w-full !rounded-md"
-                    value={edu.startYear}
-                    onChange={(e) =>
-                      updateEducation(edu.id, { startYear: e.target.value })
-                    }
-                  >
-                    <option value="">Select Start Year</option>
-                    {years.map((y) => (
-                      <option key={y} value={y}>
-                        {y}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-span-6">
-                  <label className="form-label">
-                    End Year <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    className="form-control w-full !rounded-md"
-                    value={edu.endYear}
-                    onChange={(e) =>
-                      updateEducation(edu.id, { endYear: e.target.value })
-                    }
-                  >
-                    <option value="">Select End Year</option>
-                    {years.map((y) => (
-                      <option key={y} value={y}>
-                        {y}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              {yearMismatch && (
-                <div className="text-red-500 text-sm mt-2 col-span-12">
-                  Start year cannot be ahead of end year
-                </div>
-              )}
+
+            <div className={`${styles.field} ${styles.col3}`}>
+              <label className={styles.label} htmlFor={`start-year-${edu.id}`}>
+                Start Year <span className={styles.required}>*</span>
+              </label>
+              <select
+                id={`start-year-${edu.id}`}
+                className={styles.select}
+                value={edu.startYear}
+                onChange={(e) =>
+                  updateEducation(edu.id, { startYear: e.target.value })
+                }
+              >
+                <option value="">Select Start Year</option>
+                {years.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="xl:col-span-12 col-span-12">
-              <label className="form-label">Description</label>
+
+            <div className={`${styles.field} ${styles.col3}`}>
+              <label className={styles.label} htmlFor={`end-year-${edu.id}`}>
+                End Year <span className={styles.required}>*</span>
+              </label>
+              <select
+                id={`end-year-${edu.id}`}
+                className={styles.select}
+                value={edu.endYear}
+                onChange={(e) =>
+                  updateEducation(edu.id, { endYear: e.target.value })
+                }
+              >
+                <option value="">Select End Year</option>
+                {years.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {yearMismatch && (
+              <p className={`${styles.fieldError} ${styles.col12}`}>
+                Start year cannot be ahead of end year
+              </p>
+            )}
+
+            <div className={`${styles.field} ${styles.col12}`}>
+              <label className={styles.label} htmlFor={`description-${edu.id}`}>
+                Description
+              </label>
               <textarea
-                className="form-control w-full !rounded-md"
+                id={`description-${edu.id}`}
+                className={styles.textarea}
                 rows={3}
                 placeholder="Description"
                 value={edu.description}
@@ -179,49 +190,53 @@ export function QualificationStep() {
         );
       })}
 
-      <div className="xl:col-span-12 col-span-12">
-        <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
-          <div>Skills :</div>
+      <div className={styles.skillsSection}>
+        <div className={styles.sectionHead}>
+          <div className={styles.sectionTitle}>Skills :</div>
           <button
             type="button"
             onClick={() =>
               addSkill({ id: newId(), name: "", level: "Beginner" })
             }
-            className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+            className={wizardUi.actionBtn}
           >
             + Add Skill
           </button>
         </div>
-        {skillErr && <div className="text-red-500 text-sm mb-3">{skillErr}</div>}
+        {skillErr && <div className={styles.sectionError}>{skillErr}</div>}
 
         {skills.map((sk) => (
-          <div
-            key={sk.id}
-            className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3"
-          >
+          <div key={sk.id} className={styles.card}>
             <button
               type="button"
               onClick={() => removeSkill(sk.id)}
-              className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+              className={styles.cardRemove}
+              aria-label="Remove skill"
             >
-              ✕
+              <i className="ri-close-line" aria-hidden="true" />
             </button>
-            <div className="xl:col-span-4 col-span-12">
-              <label className="form-label">
-                Skill Name <span className="text-red-500">*</span>
+
+            <div className={`${styles.field} ${styles.col4}`}>
+              <label className={styles.label} htmlFor={`skill-name-${sk.id}`}>
+                Skill Name <span className={styles.required}>*</span>
               </label>
               <input
+                id={`skill-name-${sk.id}`}
                 type="text"
-                className="form-control w-full !rounded-md"
+                className={styles.input}
                 placeholder="e.g., JavaScript, Python, React"
                 value={sk.name}
                 onChange={(e) => updateSkill(sk.id, { name: e.target.value })}
               />
             </div>
-            <div className="xl:col-span-4 col-span-12">
-              <label className="form-label">Skill Level</label>
+
+            <div className={`${styles.field} ${styles.col4}`}>
+              <label className={styles.label} htmlFor={`skill-level-${sk.id}`}>
+                Skill Level
+              </label>
               <select
-                className="form-control w-full !rounded-md"
+                id={`skill-level-${sk.id}`}
+                className={styles.select}
                 value={sk.level}
                 onChange={(e) => updateSkill(sk.id, { level: e.target.value })}
               >
@@ -231,11 +246,15 @@ export function QualificationStep() {
                 <option value="Expert">Expert</option>
               </select>
             </div>
-            <div className="xl:col-span-4 col-span-12">
-              <label className="form-label">Category</label>
+
+            <div className={`${styles.field} ${styles.col4}`}>
+              <label className={styles.label} htmlFor={`skill-category-${sk.id}`}>
+                Category
+              </label>
               <input
+                id={`skill-category-${sk.id}`}
                 type="text"
-                className="form-control w-full !rounded-md"
+                className={styles.input}
                 placeholder="e.g., Frontend, Languages"
                 value={sk.category ?? ""}
                 onChange={(e) => updateSkill(sk.id, { category: e.target.value })}

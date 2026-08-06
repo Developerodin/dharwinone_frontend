@@ -17,6 +17,7 @@ export type WizardContextValue = {
   isSaving: boolean;
   loadError: string | null;
   saveError: string | null;
+  clearSaveError: () => void;
 
   isDirty: boolean;
   dirtySections: Partial<Record<StepId, boolean>>;
@@ -24,6 +25,10 @@ export type WizardContextValue = {
 
   issues: ValidationIssue[];
   issuesByField: Record<string, ValidationIssue[]>;
+  /** Errors grouped per step, so the step nav can flag where the problem is. */
+  issuesBySection: Partial<Record<StepId, ValidationIssue[]>>;
+  /** True once Save was pressed — fields stop hiding their errors after that. */
+  submitAttempted: boolean;
 
   submit: () => Promise<void>;
 };

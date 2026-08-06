@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Mode, Role } from "../types/wizard.types";
 import { useWorkforceStore, selectFormState } from "../state/workforce.store";
 import type { ValidationResult } from "../types/validation.types";
@@ -25,17 +25,39 @@ export type UseWorkforceSubmitOptions = {
 export type UseWorkforceSubmitReturn = {
   submit: () => Promise<StrategyResult | null>;
   isSubmitting: boolean;
+  /** Message from the last failed save. The caller renders it — nothing throws. */
+  submitError: string | null;
+  clearSubmitError: () => void;
 };
+
+/** Prefer the API's message ("phoneNumber must be…") over axios' generic status text. */
+function readApiErrorMessage(err: unknown): string {
+  const res = (err as { response?: { data?: { message?: unknown } } })?.response;
+  const apiMessage = res?.data?.message;
+  if (Array.isArray(apiMessage) && apiMessage.length > 0) {
+    return apiMessage.map(String).join(", ");
+  }
+  if (typeof apiMessage === "string" && apiMessage.trim()) return apiMessage.trim();
+  if (err instanceof Error && err.message) return err.message;
+  return "Couldn't save your profile. Please try again.";
+}
 
 export function useWorkforceSubmit(
   opts: UseWorkforceSubmitOptions,
 ): UseWorkforceSubmitReturn {
   const { mode, role, id, dirty, validate, analytics, onSuccess, onValidationError } = opts;
+  // The ref guards against double-submit synchronously; the state drives the UI.
+  // Reading the ref alone never re-renders, so "Saving…" would never appear.
   const submittingRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const commitSnapshot = useWorkforceStore((s) => s.commitSnapshot);
+
+  const clearSubmitError = useCallback(() => setSubmitError(null), []);
 
   const submit = useCallback(async (): Promise<StrategyResult | null> => {
     if (submittingRef.current) return null;
+    setSubmitError(null);
 
     const result = validate();
     if (result.hasErrors) {
@@ -49,6 +71,7 @@ export function useWorkforceSubmit(
     }
 
     submittingRef.current = true;
+    setIsSubmitting(true);
     const startedAt = Date.now();
     analytics.trackSubmitStart();
 
@@ -61,11 +84,15 @@ export function useWorkforceSubmit(
       onSuccess?.(outcome);
       return outcome;
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Submit failed";
+      // Rethrowing here escaped as an unhandled rejection (dev error overlay) and
+      // the user was never told the save failed. Surface it instead.
+      const message = readApiErrorMessage(err);
       analytics.trackSubmitFailure(message);
-      throw err;
+      setSubmitError(message);
+      return null;
     } finally {
       submittingRef.current = false;
+      setIsSubmitting(false);
     }
   }, [
     mode,
@@ -79,5 +106,5 @@ export function useWorkforceSubmit(
     commitSnapshot,
   ]);
 
-  return { submit, isSubmitting: submittingRef.current };
+  return { submit, isSubmitting, submitError, clearSubmitError };
 }

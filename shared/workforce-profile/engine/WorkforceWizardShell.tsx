@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { useWizardContext } from "./WizardContext";
 import { WizardStepTabs } from "./WizardStepTabs";
 import { WizardFooter } from "./WizardFooter";
 import type { StepId } from "../types/wizard.types";
+import styles from "./workforce-wizard.module.css";
 
 type StepRender = Partial<Record<StepId, React.ReactNode>>;
 
@@ -30,9 +31,33 @@ export function WorkforceWizardShell({
     setStepByIndex,
     isSaving,
     saveError,
+    clearSaveError,
+    issuesBySection,
     isDirty,
     submit,
   } = useWizardContext();
+
+  const stepRegionRef = useRef<HTMLDivElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const firstRenderRef = useRef(true);
+
+  // Swapping step content silently leaves screen readers on the old context.
+  useEffect(() => {
+    if (firstRenderRef.current) {
+      firstRenderRef.current = false;
+      return;
+    }
+    stepRegionRef.current?.focus();
+  }, [currentStep]);
+
+  // A blocked or failed save must not be something the user has to hunt for.
+  useEffect(() => {
+    if (saveError) errorRef.current?.focus();
+  }, [saveError]);
+
+  const errorSteps = steps
+    .filter((s) => issuesBySection[s.id]?.some((i) => i.severity === "error"))
+    .map((s) => s.id);
 
   // In self-service modes the user is editing an existing profile, often a
   // single field. Expose Save on every step (disabled until dirty) instead of
@@ -53,19 +78,43 @@ export function WorkforceWizardShell({
   );
 
   return (
-    <div className="relative">
+    <div className={styles.shell}>
       {header}
       <WizardStepTabs
         steps={steps}
         currentStep={currentStep}
         onSelect={setStepById}
+        errorSteps={errorSteps}
       />
-      <div className="min-h-[200px]">{body}</div>
       {saveError ? (
-        <div className="px-6 pt-2 text-sm text-danger" role="alert">
-          {saveError}
+        <div
+          ref={errorRef}
+          tabIndex={-1}
+          role="alert"
+          aria-live="assertive"
+          className={styles.saveError}
+        >
+          <i className="ri-error-warning-line" aria-hidden="true" />
+          <span>{saveError}</span>
+          <button
+            type="button"
+            onClick={clearSaveError}
+            className={styles.saveErrorDismiss}
+            aria-label="Dismiss error"
+          >
+            <i className="ri-close-line" aria-hidden="true" />
+          </button>
         </div>
       ) : null}
+      <div
+        ref={stepRegionRef}
+        tabIndex={-1}
+        role="group"
+        aria-label={steps[currentIndex]?.title ?? "Wizard step"}
+        className="min-h-[200px] outline-none"
+      >
+        {body}
+      </div>
       <WizardFooter
         isFirst={isFirst}
         isLast={isLast}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   Mode,
   Role,
@@ -8,6 +8,7 @@ import type {
   StepId,
 } from "../types/wizard.types";
 import type { WizardContextValue } from "../engine/WizardContext";
+import type { ValidationResult } from "../types/validation.types";
 import { useWizardNavigation } from "./useWizardNavigation";
 import { useDirtyState } from "./useDirtyState";
 import { useWorkforceValidation, type ValidationRule } from "./useWorkforceValidation";
@@ -71,6 +72,37 @@ export function useWorkforceForm(
 
   const asyncLoad = asyncState.load;
 
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // A blocked save used to be silent: the offending field could sit on another
+  // step with nothing pointing at it. Jump there, say how many, focus the field.
+  const handleValidationError = useCallback(
+    (result: ValidationResult) => {
+      const errors = result.issues.filter((i) => i.severity === "error");
+      const first = errors[0];
+      if (!first) return;
+      setValidationError(
+        errors.length === 1
+          ? first.message
+          : `${errors.length} fields need attention. First: ${first.message}`,
+      );
+      nav.setStepById(first.section);
+      if (typeof document === "undefined") return;
+      const domId = first.field.split(".").pop()?.replace(/\[\]$/, "");
+      if (!domId) return;
+      // Let the target step render before moving focus into it.
+      window.requestAnimationFrame(() => {
+        const el = document.getElementById(domId);
+        if (el instanceof HTMLElement) {
+          el.focus();
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
+      });
+    },
+    [nav],
+  );
+
   const submitter = useWorkforceSubmit({
     mode,
     role,
@@ -79,6 +111,7 @@ export function useWorkforceForm(
     validate: validation.validateAll,
     analytics,
     onSuccess: onSubmitSuccess,
+    onValidationError: handleValidationError,
   });
 
   useEffect(() => {
@@ -87,7 +120,14 @@ export function useWorkforceForm(
   }, [load, id, asyncLoad]);
 
   const submit = useCallback(async (): Promise<void> => {
+    setSubmitAttempted(true);
+    setValidationError(null);
     await submitter.submit();
+  }, [submitter]);
+
+  const clearSaveError = useCallback(() => {
+    setValidationError(null);
+    submitter.clearSubmitError();
   }, [submitter]);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -108,7 +148,10 @@ export function useWorkforceForm(
       isLoading: asyncState.isLoading,
       isSaving: submitter.isSubmitting,
       loadError: asyncState.loadError?.message ?? null,
-      saveError: asyncState.saveError?.message ?? null,
+      // asyncState.save is a no-op here; the real save runs through `submitter`,
+      // so its error is the one the user needs to see.
+      saveError: submitter.submitError ?? validationError,
+      clearSaveError,
 
       isDirty: dirty.isDirty,
       dirtySections: dirty.dirtySections,
@@ -116,6 +159,8 @@ export function useWorkforceForm(
 
       issues: validation.issues,
       issuesByField: validation.issuesByField,
+      issuesBySection: validation.issuesBySection,
+      submitAttempted,
 
       submit,
     }),
@@ -129,13 +174,17 @@ export function useWorkforceForm(
       nav.setStepByIndex,
       asyncState.isLoading,
       asyncState.loadError,
-      asyncState.saveError,
       submitter.isSubmitting,
+      submitter.submitError,
+      validationError,
+      clearSaveError,
       dirty.isDirty,
       dirty.dirtySections,
       resetStore,
       validation.issues,
       validation.issuesByField,
+      validation.issuesBySection,
+      submitAttempted,
       submit,
     ],
   );

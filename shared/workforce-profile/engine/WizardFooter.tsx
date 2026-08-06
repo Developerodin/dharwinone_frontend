@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import styles from "./workforce-wizard.module.css";
 
 type Props = {
   isFirst: boolean;
@@ -35,33 +36,42 @@ export function WizardFooter({
       type="button"
       onClick={onSubmit}
       disabled={isSaving || (alwaysShowSubmit && !isDirty)}
-      className="ti-btn bg-green-600 text-white !py-2 !px-4 !rounded-md disabled:opacity-60"
+      className={styles.submitBtn}
+      aria-busy={isSaving || undefined}
+      title={alwaysShowSubmit && !isDirty && !isSaving ? "No changes to save yet" : undefined}
     >
-      {isSaving ? "Saving…" : submitLabel}
+      {isSaving ? (
+        <>
+          <span className={styles.spinner} aria-hidden="true" />
+          Saving…
+        </>
+      ) : (
+        submitLabel
+      )}
     </button>
   );
 
+  // When Save sits next to Next, Next steps down to a neutral style so the
+  // screen keeps exactly one primary action.
+  const nextIsSecondary = alwaysShowSubmit && !isLast;
+
   return (
     <div
-      className={[
-        "p-3 flex items-center justify-between gap-3 border-t border-dashed border-defaultborder dark:border-defaultborder/10 bg-white dark:bg-bodybg",
-        sticky ? "sticky bottom-0 z-10" : "",
-      ].join(" ")}
+      className={[styles.footer, sticky ? "sticky bottom-0 z-10" : ""].filter(Boolean).join(" ")}
     >
       <div className="flex">
-        {!isFirst && (
-          <button
-            type="button"
-            onClick={onBack}
-            className="ti-btn ti-btn-secondary"
-            disabled={isSaving}
-          >
-            Back
-          </button>
-        )}
+        {/* Kept mounted and disabled on step 1 — unmounting made the footer jump. */}
+        <button
+          type="button"
+          onClick={onBack}
+          className={styles.backBtn}
+          disabled={isFirst || isSaving}
+        >
+          Back
+        </button>
       </div>
 
-      <div className="flex ml-auto items-center gap-2">
+      <div className={styles.footerActions}>
         {isLast ? (
           submitButton
         ) : (
@@ -70,7 +80,7 @@ export function WizardFooter({
             <button
               type="button"
               onClick={onNext}
-              className="ti-btn ti-btn-primary-full text-white"
+              className={nextIsSecondary ? styles.nextBtnSecondary : styles.nextBtn}
               disabled={isSaving}
             >
               Next

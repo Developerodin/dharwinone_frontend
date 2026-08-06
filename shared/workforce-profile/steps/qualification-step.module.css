@@ -1,0 +1,185 @@
+.step {
+  padding: 1.5rem 1.75rem 2rem;
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .step {
+    padding: 1.75rem 2rem 2.25rem;
+  }
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.sectionEyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #8c9097;
+  opacity: 0.5;
+}
+
+.sectionTitle {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: rgb(var(--default-text-color));
+}
+
+.sectionError {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: rgb(var(--danger));
+}
+
+.card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem 1.25rem;
+  padding: 0.95rem 2.5rem 0.95rem 0.95rem;
+  margin-bottom: 0.75rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgb(var(--default-border) / 0.85);
+  background: rgb(var(--body-bg));
+}
+
+@media (min-width: 768px) {
+  .card {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+}
+
+.col6,
+.col3,
+.col4,
+.col12 {
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .col6 {
+    grid-column: span 6;
+  }
+
+  .col3 {
+    grid-column: span 3;
+  }
+
+  .col4 {
+    grid-column: span 4;
+  }
+
+  .col12 {
+    grid-column: span 12;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: rgb(var(--default-text-color));
+}
+
+.required {
+  color: rgb(var(--danger));
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(var(--input-border));
+  background: rgb(255 255 255);
+  color: rgb(var(--default-text-color));
+  font-size: 0.875rem;
+  line-height: 1.4;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+:global(.dark) .input,
+:global(.dark) .select,
+:global(.dark) .textarea {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(var(--body-bg));
+}
+
+.select {
+  appearance: auto;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: rgb(var(--primary) / 0.45);
+  box-shadow: 0 0 0 3px rgb(var(--primary) / 0.08);
+}
+
+.inputError {
+  border-color: rgb(var(--danger)) !important;
+}
+
+.textarea {
+  min-height: 6.5rem;
+  resize: vertical;
+}
+
+.fieldError {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: rgb(var(--danger));
+}
+
+.cardRemove {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: rgb(var(--danger) / 0.08);
+  color: rgb(var(--danger));
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.cardRemove:hover {
+  background: rgb(var(--danger) / 0.16);
+}
+
+.skillsSection {
+  margin-top: 1.75rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .input,
+  .select,
+  .textarea,
+  .cardRemove {
+    transition: none;
+  }
+}

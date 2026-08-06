@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useId, useRef } from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
 import { getPhoneCountry } from "@/shared/lib/phoneCountries";
 import { PhoneCountrySelect } from "@/shared/components/PhoneCountrySelect";
+import { CountrySelect } from "@/shared/components/CountrySelect";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { hasPermission } from "@/shared/lib/permissions";
+import styles from "./personal-info-step.module.css";
 
 const VISA_TYPES = [
   "F-1", "J-1", "H-1B", "H-2B", "L-1", "O-1", "P-1",
@@ -21,7 +23,7 @@ const VISA_LABELS: Record<string, string> = {
   "O-1": "O-1 (Extraordinary Ability)",
   "P-1": "P-1 (Athlete/Entertainer)",
   "R-1": "R-1 (Religious Worker)",
-  "TN": "TN (NAFTA Professional)",
+  TN: "TN (NAFTA Professional)",
   "E-1": "E-1 (Treaty Trader)",
   "E-2": "E-2 (Treaty Investor)",
   "E-3": "E-3 (Australian Professional)",
@@ -50,43 +52,139 @@ const SALARY_RANGES = [
   "Prefer not to disclose",
 ];
 
-const COUNTRIES = [
-  "United States",
-  "Canada",
-  "United Kingdom",
-  "Australia",
-  "Germany",
-  "France",
-  "India",
-  "China",
-  "Japan",
-  "Brazil",
-  "Mexico",
-  "Other",
-];
-
 const SOCIAL_PLATFORMS = [
   "LinkedIn", "GitHub", "Twitter", "Facebook",
   "Instagram", "Portfolio", "Website", "Other",
 ];
 
+/**
+ * The normalizer prepends https:// before sending, so a bare domain is valid
+ * input — rejecting it here contradicted what the API actually stores.
+ */
 const validateURL = (url: string): boolean => {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
   try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:";
+    const u = new URL(candidate);
+    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname.includes(".");
   } catch {
     return false;
   }
 };
 
+/** ids must be usable by htmlFor/aria — a raw section title has spaces and "&". */
+const slugify = (s: string): string =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+const MAX_PICTURE_BYTES = 5 * 1024 * 1024;
+
 let socialIdCounter = 0;
 const newSocialId = () => `sl-${Date.now()}-${++socialIdCounter}`;
+
+type FieldProps = {
+  id: string;
+  label: string;
+  required?: boolean;
+  optional?: boolean;
+  hint?: string;
+  error?: string | null;
+  className?: string;
+  children: React.ReactNode;
+};
+
+const FORM_CONTROL_TAGS = new Set(["input", "select", "textarea"]);
+
+const isFormControl = (node: React.ReactElement): boolean =>
+  typeof node.type === "string" && FORM_CONTROL_TAGS.has(node.type);
+
+function Field({
+  id,
+  label,
+  required,
+  optional,
+  hint,
+  error,
+  className,
+  children,
+}: FieldProps) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
+
+  return (
+    <div className={`${styles.field} ${className ?? ""}`.trim()}>
+      <label htmlFor={id} id={`${id}-label`} className={styles.label}>
+        {label}
+        {required ? <span className={styles.required}> *</span> : null}
+        {optional ? <span className={styles.labelOptional}> (optional)</span> : null}
+      </label>
+      {/*
+        Only a real form control may take the id — injecting it into a wrapper
+        (the phone row is a <div>) pointed <label for> at the div, duplicated the
+        id with the inner input, and hid the error from assistive tech. Wrappers
+        set id/aria-describedby on their own input instead.
+      */}
+      {React.isValidElement(children) && isFormControl(children)
+        ? React.cloneElement(children as React.ReactElement<{ id?: string; "aria-describedby"?: string; "aria-invalid"?: boolean }>, {
+            id,
+            "aria-describedby": describedBy,
+            "aria-invalid": error ? true : undefined,
+          })
+        : children}
+      {hint ? (
+        <p id={hintId} className={styles.fieldHint}>
+          {hint}
+        </p>
+      ) : null}
+      {error ? (
+        <p id={errorId} className={styles.fieldError} role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+type SectionProps = {
+  icon: string;
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+};
+
+function Section({ icon, title, hint, children }: SectionProps) {
+  const headingId = `${slugify(title)}-heading`;
+  return (
+    <section className={styles.section} aria-labelledby={headingId}>
+      <div className={styles.sectionHead}>
+        <span className={styles.sectionIcon} aria-hidden="true">
+          <i className={icon} />
+        </span>
+        <div>
+          <h3 id={headingId} className={styles.sectionTitle}>
+            {title}
+          </h3>
+          {hint ? <p className={styles.sectionHint}>{hint}</p> : null}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
 
 export function PersonalInfoStep() {
   const pi = useWorkforceStore((s) => s.personalInfo);
   const setPersonalInfo = useWorkforceStore((s) => s.setPersonalInfo);
-  const { issuesByField, mode } = useWizardContext();
+  const { issuesByField, mode, currentIndex, steps, submitAttempted } = useWizardContext();
   const auth = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputId = useId();
+  // Errors stay quiet until the user leaves a field (or presses Save), so an
+  // untouched form doesn't open covered in red.
+  const [touched, setTouched] = React.useState<Record<string, boolean>>({});
+  const [pictureError, setPictureError] = React.useState<string | null>(null);
+  const [showPassword, setShowPassword] = React.useState(false);
 
   const showCompanyEmail =
     hasPermission(auth, "create_employee") || hasPermission(auth, "update_employee");
@@ -95,11 +193,15 @@ export function PersonalInfoStep() {
     mode === "self-service-employee" || mode === "self-service-candidate";
 
   const fieldErr = (key: string): string | null => {
+    if (!submitAttempted && !touched[key]) return null;
     const list = issuesByField[`personalInfo.${key}`];
     if (!list || list.length === 0) return null;
     const err = list.find((i) => i.severity === "error");
     return err?.message ?? null;
   };
+
+  const markTouched = (key: string) => () =>
+    setTouched((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
 
   const onText = <K extends keyof typeof pi>(key: K) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -111,17 +213,23 @@ export function PersonalInfoStep() {
 
   const onProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
+    setPictureError(null);
     if (!file) {
       setPersonalInfo({ profilePictureFile: null });
       return;
     }
+    // Both rejections used to clear the input and return in silence — the user
+    // picked a file and simply saw nothing happen.
     const allowed = ["image/jpeg", "image/jpg", "image/png"];
     if (!allowed.includes(file.type)) {
       e.target.value = "";
+      setPictureError("That file type isn't supported. Choose a JPG or PNG image.");
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > MAX_PICTURE_BYTES) {
       e.target.value = "";
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      setPictureError(`That image is ${mb} MB. Choose one under 5 MB.`);
       return;
     }
     setPersonalInfo({ profilePictureFile: file, profilePictureRemoved: false });
@@ -133,6 +241,7 @@ export function PersonalInfoStep() {
       profilePicture: undefined,
       profilePictureRemoved: true,
     });
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const previewUrl = React.useMemo(() => {
@@ -140,8 +249,6 @@ export function PersonalInfoStep() {
     return pi.profilePicture?.url ?? "";
   }, [pi.profilePictureFile, pi.profilePicture?.url]);
 
-  // Revoke object URLs we created so the browser releases the file. Server
-  // URLs from `pi.profilePicture?.url` do not need revocation.
   useEffect(() => {
     if (!pi.profilePictureFile) return;
     return () => URL.revokeObjectURL(previewUrl);
@@ -165,479 +272,511 @@ export function PersonalInfoStep() {
   const phoneCountry = getPhoneCountry(pi.countryCode);
   const supervisorCountry = getPhoneCountry(pi.supervisorCountryCode || pi.countryCode);
 
+  const inputClass = (hasError?: boolean, readOnly?: boolean) =>
+    [
+      styles.input,
+      hasError ? styles.inputError : "",
+      readOnly ? styles.inputReadOnly : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
   return (
-    <div className="p-6 w-full">
-      <p className="mb-1 font-semibold text-[#8c9097] dark:text-white/50 opacity-50 text-[1.25rem]">01</p>
-      <div className="grid grid-cols-12 gap-6 w-full">
-        <div className="xl:col-span-12 col-span-12 mb-4">
-          <label className="form-label">Profile Picture (Optional)</label>
-          <div className="flex items-center gap-4">
-            <div className="relative">
+    <div className={styles.step}>
+      <header className={styles.stepHeader}>
+        {/* Step count comes from the wizard — candidate mode has no Salary step. */}
+        <p className={styles.stepEyebrow}>
+          Step {currentIndex + 1} of {steps.length}
+        </p>
+        <h2 className={styles.stepTitle}>Personal information</h2>
+        <p className={styles.stepLead}>
+          Start with who you are and how we can reach you. Required fields are marked with an asterisk.
+        </p>
+      </header>
+
+      <Section
+        icon="ri-user-3-line"
+        title="Identity & contact"
+        hint="Your name, login email, and primary phone number."
+      >
+        <div className={styles.identityCard}>
+          <div className={styles.avatarBlock}>
+            <div className={styles.avatarRing}>
               {previewUrl ? (
                 <img
                   src={previewUrl}
-                  alt="Profile Preview"
-                  className="w-20 h-20 rounded-full object-cover border-2 border-gray-300"
+                  alt="Your profile photo"
+                  className={styles.avatarImage}
                 />
               ) : (
-                <div className="w-20 h-20 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300">
-                  <i className="ri-user-line text-2xl text-gray-400"></i>
+                <div className={styles.avatarPlaceholder} aria-hidden="true">
+                  <i className="ri-user-line" />
                 </div>
               )}
             </div>
-            <div className="flex-1">
-              <input
-                type="file"
-                accept=".jpg,.jpeg,.png"
-                onChange={onProfilePictureChange}
-                className="form-control w-full !rounded-md"
-                id="profilePicture"
-              />
-              <small className="text-gray-500 text-xs mt-1">
-                Supported formats: JPG, JPEG, PNG only. Max size: 5MB
-              </small>
-            </div>
-            {previewUrl && (
+            <input
+              ref={fileInputRef}
+              id={fileInputId}
+              type="file"
+              accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+              onChange={onProfilePictureChange}
+              className={styles.hiddenFile}
+              aria-label="Upload profile picture"
+            />
+            <div className={styles.avatarActions}>
               <button
                 type="button"
-                onClick={removeProfilePicture}
-                className="ti-btn ti-btn-danger ti-btn-sm"
+                className={styles.uploadBtn}
+                onClick={() => fileInputRef.current?.click()}
               >
-                <i className="ri-delete-bin-line"></i>
+                <i className="ri-upload-2-line" aria-hidden="true" />
+                {previewUrl ? "Change photo" : "Upload photo"}
               </button>
-            )}
+              {previewUrl ? (
+                <button type="button" className={styles.removeBtn} onClick={removeProfilePicture}>
+                  <i className="ri-delete-bin-line" aria-hidden="true" />
+                  Remove
+                </button>
+              ) : null}
+            </div>
+            <p className={styles.avatarHint}>JPG or PNG, up to 5 MB</p>
+            {pictureError ? (
+              <p className={styles.avatarError} role="alert">
+                {pictureError}
+              </p>
+            ) : null}
+          </div>
+
+          <div className={`${styles.identityFields} ${styles.gridFull}`}>
+            <Field id="fullName" label="Full name" required error={fieldErr("fullName")}>
+              <input
+                type="text"
+                value={pi.fullName}
+                onChange={onText("fullName")}
+                onBlur={markTouched("fullName")}
+                className={inputClass(Boolean(fieldErr("fullName")))}
+                placeholder="Your legal name"
+                autoComplete="name"
+              />
+            </Field>
+
+            <Field
+              id="email"
+              label="Email"
+              required
+              error={fieldErr("email")}
+              hint={emailReadOnly ? "Login email is managed by your administrator." : undefined}
+            >
+              <input
+                type="email"
+                value={pi.email}
+                onChange={onText("email")}
+                onBlur={markTouched("email")}
+                disabled={emailReadOnly}
+                readOnly={emailReadOnly}
+                className={inputClass(Boolean(fieldErr("email")), emailReadOnly)}
+                placeholder="name@company.com"
+                autoComplete="email"
+              />
+            </Field>
+
+            {/* id lives on the input, not the row — see the note in Field. */}
+            <Field
+              id="phoneNumber"
+              label="Phone number"
+              required
+              error={fieldErr("phoneNumber")}
+              className={styles.gridFull}
+            >
+              <div className={styles.phoneRow} role="group" aria-labelledby="phoneNumber-label">
+                <PhoneCountrySelect
+                  name="countryCode"
+                  value={pi.countryCode}
+                  onChange={(code) => setPersonalInfo({ countryCode: code })}
+                />
+                <input
+                  id="phoneNumber"
+                  type="tel"
+                  value={pi.phoneNumber}
+                  onChange={onText("phoneNumber")}
+                  onBlur={markTouched("phoneNumber")}
+                  className={inputClass(Boolean(fieldErr("phoneNumber")))}
+                  placeholder={phoneCountry.placeholder}
+                  maxLength={phoneCountry.maxLength}
+                  inputMode="numeric"
+                  autoComplete="tel-national"
+                  aria-invalid={fieldErr("phoneNumber") ? true : undefined}
+                  aria-describedby={fieldErr("phoneNumber") ? "phoneNumber-error" : undefined}
+                />
+              </div>
+            </Field>
           </div>
         </div>
 
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="fullName" className="form-label">
-            Full Name <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            id="fullName"
-            value={pi.fullName}
-            onChange={onText("fullName")}
-            className={`form-control w-full !rounded-md ${fieldErr("fullName") ? "border-red-500" : ""}`}
-            placeholder="Full Name"
-          />
-          {fieldErr("fullName") && (
-            <div className="text-red-500 text-sm mt-1">{fieldErr("fullName")}</div>
-          )}
-        </div>
-
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="email" className="form-label">
-            Email <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="email"
-            id="email"
-            value={pi.email}
-            onChange={onText("email")}
-            disabled={emailReadOnly}
-            className={`form-control w-full !rounded-md ${fieldErr("email") ? "border-red-500" : ""}`}
-            placeholder="xyz@example.com"
-          />
-          {fieldErr("email") && (
-            <div className="text-red-500 text-sm mt-1">{fieldErr("email")}</div>
-          )}
-        </div>
-
-        {showCompanyEmail && (
-          <>
-            <div className="xl:col-span-6 col-span-12">
-              <label htmlFor="companyAssignedEmail" className="form-label">
-                Company / work email{" "}
-                <span className="text-textmuted font-normal text-xs">(optional)</span>
-              </label>
+        {showCompanyEmail ? (
+          <div className={`${styles.grid} ${styles.gridOffsetTop}`}>
+            <Field
+              id="companyAssignedEmail"
+              label="Company / work email"
+              optional
+              hint="Google Workspace or Microsoft 365 mailbox — separate from login email."
+            >
               <input
                 type="email"
-                id="companyAssignedEmail"
                 value={pi.companyAssignedEmail}
                 onChange={onText("companyAssignedEmail")}
-                className="form-control w-full !rounded-md"
+                className={styles.input}
                 placeholder="name@yourcompany.com"
+                autoComplete="email"
               />
-              <small className="text-gray-500 text-xs mt-1 block">
-                Google Workspace or Microsoft 365 mailbox — separate from login email above.
-              </small>
-            </div>
-            <div className="xl:col-span-6 col-span-12">
-              <label htmlFor="companyEmailProvider" className="form-label">Mailbox provider</label>
+            </Field>
+            <Field id="companyEmailProvider" label="Mailbox provider">
               <select
-                id="companyEmailProvider"
                 value={pi.companyEmailProvider}
                 onChange={(e) =>
                   setPersonalInfo({
-                    companyEmailProvider:
-                      e.target.value as typeof pi.companyEmailProvider,
+                    companyEmailProvider: e.target.value as typeof pi.companyEmailProvider,
                   })
                 }
-                className="form-control w-full !rounded-md"
+                className={styles.select}
               >
                 <option value="">Auto-detect from address</option>
                 <option value="gmail">Google / Gmail</option>
                 <option value="outlook">Microsoft / Outlook</option>
                 <option value="unknown">Other / unknown</option>
               </select>
-            </div>
-          </>
-        )}
-
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="phone" className="form-label">
-            Phone Number <span className="text-red-500">*</span>
-          </label>
-          <div className="flex gap-2">
-            <PhoneCountrySelect
-              name="countryCode"
-              value={pi.countryCode}
-              onChange={(code) => setPersonalInfo({ countryCode: code })}
-            />
-            <input
-              type="tel"
-              id="phone"
-              value={pi.phoneNumber}
-              onChange={onText("phoneNumber")}
-              className={`form-control flex-1 min-w-0 !rounded-md ${fieldErr("phoneNumber") ? "!border-red-500" : ""}`}
-              placeholder={phoneCountry.placeholder}
-              maxLength={phoneCountry.maxLength}
-              inputMode="numeric"
-            />
+            </Field>
           </div>
-          {fieldErr("phoneNumber") && (
-            <div className="text-red-500 text-sm mt-1">{fieldErr("phoneNumber")}</div>
-          )}
-        </div>
+        ) : null}
+      </Section>
 
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="sevisId" className="form-label">SEVIS ID</label>
-          <input
-            type="text"
-            id="sevisId"
-            value={pi.sevisId}
-            onChange={onText("sevisId")}
-            className="form-control w-full !rounded-md"
-            placeholder="SEVIS ID"
-          />
-        </div>
-
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="ead" className="form-label">EAD</label>
-          <input
-            type="text"
-            id="ead"
-            value={pi.ead}
-            onChange={onText("ead")}
-            className="form-control w-full !rounded-md"
-            placeholder="EAD"
-          />
-        </div>
-
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="degree" className="form-label">Degree</label>
-          <input
-            type="text"
-            id="degree"
-            value={pi.degree}
-            onChange={onText("degree")}
-            className="form-control w-full !rounded-md"
-            placeholder="Degree"
-          />
-        </div>
-
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="designation" className="form-label">Position / job title</label>
-          <input
-            type="text"
-            id="designation"
-            value={pi.designation}
-            onChange={onText("designation")}
-            className="form-control w-full !rounded-md"
-            placeholder="e.g. Software Engineer"
-          />
-        </div>
-
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="supervisorName" className="form-label">Supervisor Name</label>
-          <input
-            type="text"
-            id="supervisorName"
-            value={pi.supervisorName}
-            onChange={onText("supervisorName")}
-            className="form-control w-full !rounded-md"
-            placeholder="supervisor name"
-          />
-        </div>
-
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="supervisorContact" className="form-label">Supervisor Phone No.</label>
-          <div className="flex gap-2">
-            <PhoneCountrySelect
-              name="supervisorCountryCode"
-              value={pi.supervisorCountryCode || pi.countryCode}
-              onChange={(code) => setPersonalInfo({ supervisorCountryCode: code })}
-            />
-            <input
-              type="tel"
-              id="supervisorContact"
-              value={pi.supervisorContact}
-              onChange={onText("supervisorContact")}
-              className="form-control flex-1 min-w-0 !rounded-md"
-              placeholder={supervisorCountry.placeholder}
-              maxLength={supervisorCountry.maxLength}
-              inputMode="numeric"
-            />
-          </div>
-        </div>
-
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="visaType" className="form-label">
-            Visa Type <span className="text-red-500">*</span>
-          </label>
-          <select
-            id="visaType"
-            value={pi.visaType}
-            onChange={onText("visaType")}
-            className={`form-control w-full !rounded-md ${fieldErr("visaType") ? "border-red-500" : ""}`}
-          >
-            <option value="">Select Visa Type</option>
-            {VISA_TYPES.map((v) => (
-              <option key={v} value={v}>
-                {VISA_LABELS[v]}
-              </option>
-            ))}
-          </select>
-          {fieldErr("visaType") && (
-            <div className="text-red-500 text-sm mt-1">{fieldErr("visaType")}</div>
-          )}
-        </div>
-
-        {pi.visaType === "Other" && (
-          <div className="xl:col-span-6 col-span-12">
-            <label htmlFor="customVisaType" className="form-label">
-              Custom Visa Type <span className="text-red-500">*</span>
-            </label>
+      <Section
+        icon="ri-briefcase-4-line"
+        title="Work & immigration"
+        hint="Role details, visa status, and compensation range."
+      >
+        <div className={styles.grid}>
+          <Field id="designation" label="Position / job title" optional>
             <input
               type="text"
-              id="customVisaType"
-              value={pi.customVisaType}
-              onChange={onText("customVisaType")}
-              className="form-control w-full !rounded-md"
-              placeholder="Enter visa type"
+              value={pi.designation}
+              onChange={onText("designation")}
+              className={styles.input}
+              placeholder="e.g. Software Engineer"
+              autoComplete="organization-title"
             />
-          </div>
-        )}
+          </Field>
 
-        <div className="xl:col-span-6 col-span-12">
-          <label htmlFor="salaryRange" className="form-label">
-            Salary Range <span className="text-red-500">*</span>
-          </label>
-          <select
-            id="salaryRange"
-            value={pi.salaryRange}
-            onChange={onText("salaryRange")}
-            className="form-control w-full !rounded-md"
-          >
-            <option value="">Select Salary Range</option>
-            {SALARY_RANGES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </div>
+          <Field id="degree" label="Degree" optional>
+            <input
+              type="text"
+              value={pi.degree}
+              onChange={onText("degree")}
+              className={styles.input}
+              placeholder="Highest qualification"
+            />
+          </Field>
 
-        <div className="xl:col-span-12 col-span-12">
-          <div className="grid grid-cols-12 gap-4 border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-800/50">
-            <div className="xl:col-span-12 col-span-12">
-              <h4 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">
-                Address Information
-              </h4>
+          <Field id="supervisorName" label="Supervisor name" optional>
+            <input
+              type="text"
+              value={pi.supervisorName}
+              onChange={onText("supervisorName")}
+              className={styles.input}
+              placeholder="Manager or advisor"
+            />
+          </Field>
+
+          <Field id="supervisorContact" label="Supervisor phone" optional>
+            <div className={styles.phoneRow}>
+              <PhoneCountrySelect
+                name="supervisorCountryCode"
+                value={pi.supervisorCountryCode || pi.countryCode}
+                onChange={(code) => setPersonalInfo({ supervisorCountryCode: code })}
+              />
+              <input
+                type="tel"
+                value={pi.supervisorContact}
+                onChange={onText("supervisorContact")}
+                className={styles.input}
+                placeholder={supervisorCountry.placeholder}
+                maxLength={supervisorCountry.maxLength}
+                inputMode="numeric"
+                autoComplete="tel-national"
+              />
             </div>
+          </Field>
 
-            <div className="xl:col-span-12 col-span-12">
-              <label htmlFor="streetAddress" className="form-label">
-                Street Address <span className="text-red-500">*</span>
-              </label>
+          <Field id="sevisId" label="SEVIS ID" optional>
+            <input
+              type="text"
+              value={pi.sevisId}
+              onChange={onText("sevisId")}
+              className={styles.input}
+              placeholder="If applicable"
+            />
+          </Field>
+
+          <Field id="ead" label="EAD" optional>
+            <input
+              type="text"
+              value={pi.ead}
+              onChange={onText("ead")}
+              className={styles.input}
+              placeholder="Employment authorization"
+            />
+          </Field>
+
+          {/* Not marked required: the rule is a warning by design (staff outside
+              the US have no visa), and fieldErr only surfaces hard errors. */}
+          <Field id="visaType" label="Visa type" error={fieldErr("visaType")}>
+            <select
+              value={pi.visaType}
+              onChange={onText("visaType")}
+              onBlur={markTouched("visaType")}
+              className={`${styles.select} ${fieldErr("visaType") ? styles.inputError : ""}`}
+            >
+              <option value="">Select visa type</option>
+              {VISA_TYPES.map((v) => (
+                <option key={v} value={v}>
+                  {VISA_LABELS[v]}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {pi.visaType === "Other" ? (
+            <Field id="customVisaType" label="Custom visa type" required>
               <input
                 type="text"
-                id="streetAddress"
+                value={pi.customVisaType}
+                onChange={onText("customVisaType")}
+                className={styles.input}
+                placeholder="Enter visa type"
+              />
+            </Field>
+          ) : null}
+
+          <Field id="salaryRange" label="Salary range" optional>
+            <select
+              value={pi.salaryRange}
+              onChange={onText("salaryRange")}
+              className={styles.select}
+            >
+              <option value="">Select salary range</option>
+              {SALARY_RANGES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </Section>
+
+      {/* No asterisks here: the API accepts a partial address and nothing
+          validates these, so marking them required was a false promise. */}
+      <Section icon="ri-map-pin-line" title="Address" hint="Where you currently live or receive mail.">
+        <div className={styles.addressPanel}>
+          <div className={styles.grid}>
+            <Field id="streetAddress" label="Street address" className={styles.gridFull}>
+              <input
+                type="text"
                 value={pi.address.streetAddress}
                 onChange={onAddress("streetAddress")}
-                className="form-control w-full !rounded-md"
-                placeholder="Enter street address"
+                className={styles.input}
+                placeholder="Street number and name"
+                autoComplete="address-line1"
               />
-            </div>
+            </Field>
 
-            <div className="xl:col-span-12 col-span-12">
-              <label htmlFor="streetAddress2" className="form-label">Street Address Line 2</label>
+            <Field id="streetAddress2" label="Street address line 2" optional className={styles.gridFull}>
               <input
                 type="text"
-                id="streetAddress2"
                 value={pi.address.streetAddress2}
                 onChange={onAddress("streetAddress2")}
-                className="form-control w-full !rounded-md"
-                placeholder="Apartment, suite, unit, building, floor, etc."
+                className={styles.input}
+                placeholder="Apartment, suite, unit, building, floor"
+                autoComplete="address-line2"
               />
-            </div>
+            </Field>
 
-            <div className="xl:col-span-6 col-span-12">
-              <label htmlFor="city" className="form-label">
-                City <span className="text-red-500">*</span>
-              </label>
+            <Field id="city" label="City">
               <input
                 type="text"
-                id="city"
                 value={pi.address.city}
                 onChange={onAddress("city")}
-                className="form-control w-full !rounded-md"
-                placeholder="Enter city"
+                className={styles.input}
+                placeholder="City"
+                autoComplete="address-level2"
               />
-            </div>
+            </Field>
 
-            <div className="xl:col-span-6 col-span-12">
-              <label htmlFor="state" className="form-label">
-                State (Territory or Military Post) <span className="text-red-500">*</span>
-              </label>
+            <Field id="state" label="State / territory / military post">
               <input
                 type="text"
-                id="state"
                 value={pi.address.state}
                 onChange={onAddress("state")}
-                className="form-control w-full !rounded-md"
-                placeholder="Enter state, territory, or military post"
+                className={styles.input}
+                placeholder="State or territory"
+                autoComplete="address-level1"
               />
-            </div>
+            </Field>
 
-            <div className="xl:col-span-6 col-span-12">
-              <label htmlFor="zipCode" className="form-label">
-                ZIP Code <span className="text-red-500">*</span>
-              </label>
+            <Field id="zipCode" label="ZIP code">
               <input
                 type="text"
-                id="zipCode"
                 value={pi.address.zipCode}
                 onChange={onAddress("zipCode")}
-                className="form-control w-full !rounded-md"
-                placeholder="Enter ZIP code"
+                className={styles.input}
+                placeholder="ZIP / postal code"
+                autoComplete="postal-code"
               />
-            </div>
+            </Field>
 
-            <div className="xl:col-span-6 col-span-12">
-              <label htmlFor="country" className="form-label">
-                Country <span className="text-red-500">*</span>
-              </label>
-              <select
-                id="country"
+            <Field id="country" label="Country">
+              <CountrySelect
                 value={pi.address.country}
-                onChange={onAddress("country")}
-                className="form-control w-full !rounded-md"
-              >
-                <option value="">Select Country</option>
-                {COUNTRIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
+                onChange={(name) =>
+                  setPersonalInfo({ address: { ...pi.address, country: name } })
+                }
+              />
+            </Field>
           </div>
         </div>
+      </Section>
 
-        <div className="xl:col-span-12 col-span-12">
-          <label htmlFor="bio" className="form-label">Short Bio</label>
+      <Section icon="ri-quill-pen-line" title="About you" hint="A short summary for your profile.">
+        <Field id="bio" label="Short bio" optional className={styles.gridFull}>
           <textarea
-            id="bio"
             value={pi.shortBio}
             onChange={onText("shortBio")}
-            className="form-control w-full !rounded-md"
-            rows={3}
+            className={styles.textarea}
+            rows={4}
+            placeholder="Briefly describe your background, skills, or goals."
           />
+        </Field>
+      </Section>
+
+      <Section
+        icon="ri-links-line"
+        title="Social links"
+        hint="Add at least one profile where recruiters or teammates can learn more about you."
+      >
+        <div className={styles.socialHeader}>
+          {/* Nothing enforces this and the API accepts an empty list — an
+              asterisk here promised a rule that does not exist. */}
+          <span className={styles.label}>Profiles</span>
+          <button type="button" onClick={addSocialLink} className={styles.addLinkBtn}>
+            <i className="ri-add-line" aria-hidden="true" />
+            Add link
+          </button>
         </div>
 
-        <div className="xl:col-span-12 col-span-12">
-          <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
-            <div>
-              Social Links <span className="text-red-500">*</span> :
-            </div>
-            <button
-              type="button"
-              onClick={addSocialLink}
-              className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
-            >
-              + Add Social Link
-            </button>
-          </div>
-
-          {pi.socialLinks.map((link, index) => (
-            <div
-              key={link.id}
-              className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3"
-            >
-              <button
-                type="button"
-                onClick={() => removeSocialLink(index)}
-                className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+        {pi.socialLinks.length === 0 ? (
+          <p className={styles.emptySocial}>
+            No links yet. Add LinkedIn, GitHub, or a portfolio URL to complete this section.
+          </p>
+        ) : (
+          pi.socialLinks.map((link, index) => (
+            <div key={link.id} className={styles.socialCard}>
+              <Field
+                id={`social-platform-${link.id}`}
+                label="Platform"
+                required
+                className={styles.col5}
               >
-                ✕
-              </button>
-              <div className="xl:col-span-6 col-span-12">
-                <label className="form-label">
-                  Platform <span className="text-red-500">*</span>
-                </label>
                 <select
-                  className="form-control w-full !rounded-md"
+                  className={styles.select}
                   value={link.platform}
                   onChange={(e) => setSocialLink(index, "platform", e.target.value)}
                 >
-                  <option value="">Select Platform</option>
+                  <option value="">Select platform</option>
                   {SOCIAL_PLATFORMS.map((p) => (
                     <option key={p} value={p}>
                       {p}
                     </option>
                   ))}
                 </select>
-              </div>
-              <div className="xl:col-span-6 col-span-12">
-                <label className="form-label">
-                  URL <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field
+                id={`social-url-${link.id}`}
+                label="URL"
+                required
+                className={styles.col6}
+                error={link.url && !validateURL(link.url) ? "Enter a valid web address, e.g. linkedin.com/in/you" : null}
+              >
                 <input
-                  type="url"
-                  className="form-control w-full !rounded-md"
-                  placeholder="https://example.com"
+                  type="text"
+                  className={`${styles.input} ${link.url && !validateURL(link.url) ? styles.inputError : ""}`}
+                  placeholder="linkedin.com/in/you"
                   value={link.url}
                   onChange={(e) => setSocialLink(index, "url", e.target.value)}
+                  inputMode="url"
                 />
-                {link.url && !validateURL(link.url) && (
-                  <div className="text-red-500 text-sm mt-1">Please enter a valid URL</div>
-                )}
+              </Field>
+              <div className={`${styles.socialRemoveCell} ${styles.col1}`}>
+                <button
+                  type="button"
+                  onClick={() => removeSocialLink(index)}
+                  className={styles.socialRemove}
+                  aria-label={`Remove social link ${index + 1}`}
+                >
+                  <i className="ri-close-line" aria-hidden="true" />
+                </button>
               </div>
             </div>
-          ))}
-        </div>
-
-        {showPasswordField && (
-          <div className="xl:col-span-6 col-span-12">
-            <label htmlFor="password" className="form-label">
-              Password <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="password"
-              id="password"
-              value={pi.password}
-              onChange={onText("password")}
-              className={`form-control w-full !rounded-md ${fieldErr("password") ? "border-red-500" : ""}`}
-              placeholder="Enter password"
-            />
-            {fieldErr("password") && (
-              <div className="text-red-500 text-sm mt-1">{fieldErr("password")}</div>
-            )}
-          </div>
+          ))
         )}
-      </div>
+      </Section>
+
+      {showPasswordField ? (
+        <Section icon="ri-lock-password-line" title="Account security">
+          <div className={styles.grid}>
+            <Field
+              id="password"
+              label="Password"
+              required
+              hint="At least 8 characters."
+              error={fieldErr("password")}
+            >
+              <div className={styles.passwordRow}>
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  value={pi.password}
+                  onChange={onText("password")}
+                  onBlur={markTouched("password")}
+                  className={inputClass(Boolean(fieldErr("password")))}
+                  placeholder="Create a secure password"
+                  autoComplete="new-password"
+                  aria-invalid={fieldErr("password") ? true : undefined}
+                  aria-describedby={
+                    [
+                      "password-hint",
+                      fieldErr("password") ? "password-error" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ") || undefined
+                  }
+                />
+                <button
+                  type="button"
+                  className={styles.passwordToggle}
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                >
+                  <i
+                    className={showPassword ? "ri-eye-off-line" : "ri-eye-line"}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
+            </Field>
+          </div>
+        </Section>
+      ) : null}
     </div>
   );
 }
