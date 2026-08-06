@@ -193,6 +193,32 @@ describe("payload.toSelfServicePayload — backend Joi contract", () => {
     expect(payload).toHaveProperty("profilePicture");
   });
 
+  // POST /upload/single echoes `label` in its response, but profilePicture on
+  // PATCH /auth/me/with-candidate only allows url/key/originalName/size/mimeType.
+  it("strips label from profile picture upload metadata", () => {
+    const state = makeFormState({
+      personalInfo: {
+        ...makeFormState().personalInfo,
+        profilePicture: {
+          url: "https://cdn.example.com/pic.png",
+          key: "uploads/pic.png",
+          originalName: "pic.png",
+          size: 10,
+          mimeType: "image/png",
+          label: "pic.png",
+        } as NonNullable<
+          ReturnType<typeof makeFormState>["personalInfo"]["profilePicture"]
+        > & { label: string },
+      },
+    });
+    const payload = toSelfServicePayload(normalize(state), {
+      "personal-info": true,
+    }) as Record<string, unknown>;
+    const pic = payload.profilePicture as Record<string, unknown>;
+    expect(pic.url).toBe("https://cdn.example.com/pic.png");
+    expect(pic).not.toHaveProperty("label");
+  });
+
   it("drops an empty document label", () => {
     const state = makeFormState({
       documents: {

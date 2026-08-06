@@ -25,6 +25,18 @@ const compact = <T extends Record<string, unknown>>(obj: T): Partial<T> =>
     Object.entries(obj).filter(([, v]) => v !== "" && v !== undefined),
   ) as Partial<T>;
 
+/** Backend profilePicture schema — strip upload extras like `label`. */
+const toProfilePicturePayload = (
+  pic: NonNullable<NormalizedWorkforce["profilePicture"]>,
+) =>
+  compact({
+    url: pic.url,
+    key: pic.key,
+    originalName: pic.originalName,
+    size: pic.size,
+    mimeType: pic.mimeType,
+  });
+
 /** Admin create/update payload — `Partial<CandidateListItem>` shape. */
 export function toCandidatePayload(
   n: NormalizedWorkforce,
@@ -33,7 +45,11 @@ export function toCandidatePayload(
     fullName: n.fullName,
     email: n.email,
     phoneNumber: n.phoneNumber,
-    profilePicture: n.profilePictureRemoved ? null : n.profilePicture,
+    profilePicture: n.profilePictureRemoved
+      ? null
+      : n.profilePicture
+        ? toProfilePicturePayload(n.profilePicture)
+        : undefined,
     skills: n.skills.map(({ name, level, category }) => ({ name, level, category })),
     qualifications: n.qualifications.map((q) => ({
       degree: q.degree,
@@ -116,8 +132,9 @@ export function toSelfServicePayload(
     } else if (n.profilePicture && isAbsoluteUrl(n.profilePicture.url)) {
       // profilePicture.url is validated with Joi .uri(). A relative path is
       // server-origin data, so echoing it back changes nothing — drop it rather
-      // than trade a no-op for a 400.
-      out.profilePicture = n.profilePicture;
+      // than trade a no-op for a 400. Upload metadata may include `label`, which
+      // the schema rejects — pick only allowed fields (legacy settings page does this).
+      out.profilePicture = toProfilePicturePayload(n.profilePicture);
     }
   }
 

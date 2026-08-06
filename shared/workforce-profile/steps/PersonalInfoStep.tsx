@@ -244,7 +244,16 @@ export function PersonalInfoStep() {
     setPictureUploading(true);
     try {
       const meta = await uploadDocument(file, file.name);
-      setPersonalInfo({ profilePicture: meta, profilePictureFile: null });
+      setPersonalInfo({
+        profilePicture: {
+          url: meta.url,
+          key: meta.key,
+          originalName: meta.originalName,
+          size: meta.size,
+          mimeType: meta.mimeType,
+        },
+        profilePictureFile: null,
+      });
     } catch {
       setPersonalInfo({ profilePictureFile: null });
       setPictureError("Couldn't upload that photo. Check your connection and try again.");
