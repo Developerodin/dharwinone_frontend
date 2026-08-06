@@ -24,16 +24,21 @@ import {
   DEV_TICKET_PLATFORMS,
   DEV_TICKET_PLATFORM_LABELS,
   DEV_TICKET_DEFAULT_TESTER,
+  DEV_TICKET_DEPLOYED_TO,
+  type DevTicketDeployedTo,
 } from "@/shared/lib/api/devTickets";
 import {
   STATUS_CONFIG,
   PRIORITY_CONFIG,
   SEVERITY_CONFIG,
   LABEL_CONFIG,
+  ENVIRONMENT_CONFIG,
+  DEPLOYMENT_CONFIG,
   computeAgeDays,
   formatDate,
   formatFileSize,
   formatRelative,
+  formatDevTicketActivity,
   getDevTicketDisplayId,
   getAllTicketAttachments,
   getInitials,
@@ -92,6 +97,7 @@ export function DevTicketDetailDrawer({
     module: "",
     pageUrl: "",
     environment: "",
+    deployedTo: "Not Deployed" as DevTicketDeployedTo,
     platform: "web" as DevTicketPlatform,
     labels: [] as DevTicketLabel[],
   });
@@ -129,6 +135,7 @@ export function DevTicketDetailDrawer({
       module: t.module ?? "",
       pageUrl: t.pageUrl ?? "",
       environment: t.environment ?? "Staging",
+      deployedTo: t.deployedTo ?? "Not Deployed",
       platform: t.platform === "mobile" ? "mobile" : "web",
       labels: t.labels ?? [],
     });
@@ -234,6 +241,7 @@ export function DevTicketDetailDrawer({
         module: updateForm.module.trim() || undefined,
         pageUrl: updateForm.pageUrl.trim() || undefined,
         environment: updateForm.environment as DevTicket["environment"],
+        deployedTo: updateForm.deployedTo,
         labels: updateForm.labels,
         platform: updateForm.platform,
       };
@@ -481,7 +489,8 @@ export function DevTicketDetailDrawer({
             {[
               { label: "Category", value: detail.category || "—" },
               { label: "Module", value: detail.module ? formatDevTicketModuleLabel(detail.module) : "—" },
-              { label: "Environment", value: detail.environment || "—" },
+              { label: "Environment", value: ENVIRONMENT_CONFIG[detail.environment === "Production" ? "Production" : "Staging"]?.label ?? detail.environment ?? "—" },
+              { label: "Fix deployed to", value: DEPLOYMENT_CONFIG[detail.deployedTo ?? "Not Deployed"]?.label ?? "Not deployed" },
               { label: "Priority", value: detail.priority },
               {
                 label: "Platform",
@@ -594,6 +603,35 @@ export function DevTicketDetailDrawer({
                     >
                       {DEV_TICKET_PLATFORMS.map((p) => (
                         <option key={p} value={p}>{DEV_TICKET_PLATFORM_LABELS[p]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="min-w-0">
+                    <label className={EDIT_LABEL}>Environment</label>
+                    <select
+                      className={EDIT_FIELD}
+                      value={updateForm.environment}
+                      onChange={(e) =>
+                        setUpdateForm((f) => ({ ...f, environment: e.target.value as DevTicket["environment"] }))
+                      }
+                    >
+                      <option value="Staging">Staging</option>
+                      <option value="Production">Production</option>
+                    </select>
+                  </div>
+                  <div className="min-w-0">
+                    <label className={EDIT_LABEL}>Fix deployed to</label>
+                    <select
+                      className={EDIT_FIELD}
+                      value={updateForm.deployedTo}
+                      onChange={(e) =>
+                        setUpdateForm((f) => ({ ...f, deployedTo: e.target.value as DevTicketDeployedTo }))
+                      }
+                    >
+                      {DEV_TICKET_DEPLOYED_TO.map((stage) => (
+                        <option key={stage} value={stage}>
+                          {DEPLOYMENT_CONFIG[stage].label}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -973,21 +1011,24 @@ export function DevTicketDetailDrawer({
                 {(detail.activityLog ?? []).length === 0 ? (
                   <p className="py-4 text-center text-[0.75rem] text-slate-400">No activity recorded</p>
                 ) : (
-                  [...(detail.activityLog ?? [])].reverse().map((entry, i) => (
+                  [...(detail.activityLog ?? [])].reverse().map((entry, i) => {
+                    const activity = formatDevTicketActivity(entry);
+                    return (
                     <div key={i} className="relative border-l-2 border-primary/20 py-2 pl-3 pr-1 last:pb-1">
-                      <p className="mb-0 text-[0.75rem] font-medium capitalize text-defaulttextcolor dark:text-white/90">
-                        {entry.action.replace(/_/g, " ")}
-                        {entry.from && entry.to && (
-                          <span className="ms-1 font-normal text-slate-400">
-                            {entry.from} → {entry.to}
-                          </span>
-                        )}
+                      <p className="mb-0 text-[0.75rem] font-medium text-defaulttextcolor dark:text-white/90">
+                        {activity.title}
                       </p>
-                      <p className="mb-0 text-[0.6875rem] text-slate-400">
+                      {activity.detail ? (
+                        <p className="mb-0 mt-0.5 text-[0.6875rem] leading-relaxed text-slate-500 dark:text-white/45">
+                          {activity.detail}
+                        </p>
+                      ) : null}
+                      <p className="mb-0 mt-0.5 text-[0.6875rem] text-slate-400">
                         {entry.performedBy?.name || entry.performedBy?.email || "System"} · {formatRelative(entry.createdAt)}
                       </p>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}

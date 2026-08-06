@@ -35,6 +35,10 @@ export const DEV_TICKET_DEFAULT_TESTER = {
   email: "harshbansal.it26@gmail.com",
 } as const;
 
+export type DevTicketDeployedTo = "Not Deployed" | "Testing" | "Production";
+
+export const DEV_TICKET_DEPLOYED_TO: DevTicketDeployedTo[] = ["Not Deployed", "Testing", "Production"];
+
 export const DEV_TICKET_LINK_RELS = [
   "blocks",
   "blocked-by",
@@ -54,6 +58,7 @@ export interface CreateDevTicketData {
   category?: DevTicketCategory;
   module?: string;
   environment?: "Staging" | "Production";
+  deployedTo?: DevTicketDeployedTo;
   labels?: DevTicketLabel[];
   platform?: DevTicketPlatform;
   assignedTo?: string;
@@ -76,6 +81,7 @@ export interface UpdateDevTicketData {
   category?: DevTicketCategory;
   module?: string;
   environment?: "Staging" | "Production";
+  deployedTo?: DevTicketDeployedTo;
   labels?: DevTicketLabel[];
   platform?: DevTicketPlatform;
   assignedTo?: string | null;
@@ -171,6 +177,7 @@ export interface DevTicket {
   category?: DevTicketCategory;
   module?: string;
   environment?: "Staging" | "Production";
+  deployedTo?: DevTicketDeployedTo;
   labels?: DevTicketLabel[];
   platform?: DevTicketPlatform;
   testedBy?: DevTicketUser | null;
@@ -226,6 +233,7 @@ export interface DevTicketAnalytics {
 export interface BulkUpdateAction {
   status?: "Open" | "In Progress" | "Resolved" | "Closed";
   platform?: DevTicketPlatform;
+  deployedTo?: DevTicketDeployedTo;
   assignedTo?: string;
   addLabel?: DevTicketLabel;
 }

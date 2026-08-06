@@ -4,9 +4,12 @@ import Seo from "@/shared/layout-components/seo/seo";
 import DevTicketAccessDenied from "@/shared/components/dev-tickets/dev-ticket-access-denied";
 import DevTicketPageHeader from "@/shared/components/dev-tickets/dev-ticket-page-header";
 import DevTicketTabBar from "@/shared/components/dev-tickets/dev-ticket-tab-bar";
+import boardStyles from "@/shared/components/dev-tickets/dev-ticket-board-workspace.module.css";
 import DevTicketDetailDrawer from "@/shared/components/dev-tickets/dev-ticket-detail-drawer";
+import DevTicketDeploymentControl from "@/shared/components/dev-tickets/dev-ticket-deployment-control";
 import {
   BOARD_COLUMNS,
+  DEPLOYMENT_CONFIG,
   LABEL_CONFIG,
   PRIORITY_CONFIG,
   SEVERITY_CONFIG,
@@ -101,6 +104,25 @@ export default function DevTicketsBoardPage() {
     [columns]
   );
 
+  const deploymentStats = useMemo(() => {
+    let notDeployed = 0;
+    let testing = 0;
+    let production = 0;
+    tickets.forEach((t) => {
+      const stage = t.deployedTo ?? "Not Deployed";
+      if (stage === "Production") production += 1;
+      else if (stage === "Testing") testing += 1;
+      else notDeployed += 1;
+    });
+    return { notDeployed, testing, production };
+  }, [tickets]);
+
+  const handleTicketUpdated = useCallback((updated: DevTicket) => {
+    const uid = getTicketDbId(updated);
+    setTickets((prev) => prev.map((t) => (getTicketDbId(t) === uid ? updated : t)));
+    if (drawerTicket && getTicketDbId(drawerTicket) === uid) setDrawerTicket(updated);
+  }, [drawerTicket]);
+
   const openDrawer = async (ticket: DevTicket) => {
     setDrawerTicket(ticket);
     setDrawerOpen(true);
@@ -158,65 +180,93 @@ export default function DevTicketsBoardPage() {
       <div className="container-fluid pt-6">
         <DevTicketPageHeader
           title="Board"
-          subtitle="Drag cards between columns to update ticket status."
+          badge="Kanban workflow"
+          subtitle="Drag cards to update status. Deployment badges show where the fix has been pushed."
           icon="ri-layout-column-line"
         />
 
         <DevTicketTabBar />
 
-        {!loading && !error && (
-          <div className="mb-5 flex flex-col gap-3 rounded-xl border border-defaultborder/70 bg-white px-4 py-3.5 dark:border-white/10 dark:bg-bodybg sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <p className="mb-0 text-[0.8125rem] font-medium text-defaulttextcolor dark:text-white">
-                {tickets.length} ticket{tickets.length === 1 ? "" : "s"} on board
+        <div
+          className={`${boardStyles.workspace} overflow-hidden rounded-2xl border border-primary/10 p-4 shadow-sm dark:border-primary/20 sm:p-5`}
+        >
+          {!loading && !error && (
+            <div className="mb-4 flex flex-col gap-3 rounded-xl border border-white/60 bg-white/80 px-4 py-3.5 backdrop-blur-[2px] dark:border-white/10 dark:bg-bodybg/90 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <p className="mb-0 text-[0.8125rem] font-medium text-defaulttextcolor dark:text-white">
+                  {tickets.length} ticket{tickets.length === 1 ? "" : "s"} on board
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {boardStats.map(({ col, count }) => {
+                    const sc = STATUS_CONFIG[col] ?? STATUS_CONFIG.Open;
+                    return (
+                      <span
+                        key={col}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-defaultborder/60 bg-white px-2.5 py-1 text-[0.6875rem] font-medium text-[#8c9097] dark:border-white/10 dark:bg-white/[0.04]"
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full ${sc.dot}`} aria-hidden />
+                        {col}
+                        <span className="tabular-nums text-defaulttextcolor dark:text-white/80">{count}</span>
+                      </span>
+                    );
+                  })}
+                  <span className="hidden h-4 w-px bg-defaultborder/60 sm:inline-block dark:bg-white/10" aria-hidden />
+                  {(["Not Deployed", "Testing", "Production"] as const).map((stage) => {
+                    const dc = DEPLOYMENT_CONFIG[stage];
+                    const count =
+                      stage === "Production"
+                        ? deploymentStats.production
+                        : stage === "Testing"
+                          ? deploymentStats.testing
+                          : deploymentStats.notDeployed;
+                    return (
+                      <span
+                        key={stage}
+                        className={`inline-flex items-center gap-1.5 rounded-full border border-defaultborder/60 px-2.5 py-1 text-[0.6875rem] font-medium dark:border-white/10 ${dc.badge}`}
+                        title="Where the fix has been deployed"
+                      >
+                        <i className={`${dc.icon} text-[0.75rem]`} aria-hidden />
+                        {dc.label}
+                        <span className="tabular-nums">{count}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="mb-0 flex items-center gap-1.5 text-[0.6875rem] text-[#8c9097]">
+                <i className="ri-drag-move-2-line" aria-hidden />
+                Drag cards to move status
               </p>
-              <div className="flex flex-wrap items-center gap-2">
-                {boardStats.map(({ col, count }) => {
-                  const sc = STATUS_CONFIG[col] ?? STATUS_CONFIG.Open;
-                  return (
-                    <span
-                      key={col}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-defaultborder/60 bg-slate-50/80 px-2.5 py-1 text-[0.6875rem] font-medium text-[#8c9097] dark:border-white/10 dark:bg-white/[0.03]"
-                    >
-                      <span className={`h-1.5 w-1.5 rounded-full ${sc.dot}`} aria-hidden />
-                      {col}
-                      <span className="tabular-nums text-defaulttextcolor dark:text-white/80">{count}</span>
-                    </span>
-                  );
-                })}
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-4 flex items-center justify-between rounded-md border border-danger/30 bg-danger/5 px-4 py-3">
+              <span className="text-danger text-[0.8125rem]">{error}</span>
+              <button type="button" onClick={fetchBoard} className="ti-btn ti-btn-sm ti-btn-danger">Retry</button>
+            </div>
+          )}
+
+          {loading ? (
+            <div className={`${boardStyles.laneScroll} -mx-1 overflow-x-auto pb-2`}>
+              <div className="flex min-w-max gap-4 px-1 xl:grid xl:min-w-0 xl:grid-cols-4">
+                {BOARD_COLUMNS.map((col) => (
+                  <div key={col} className="flex w-[17.5rem] shrink-0 flex-col overflow-hidden rounded-xl border border-defaultborder/60 bg-white/90 dark:border-white/10 dark:bg-bodybg/80 xl:w-auto">
+                    <div className="h-1.5 animate-pulse bg-black/5 dark:bg-white/10" />
+                    <div className="border-b border-defaultborder/60 px-4 py-3.5 dark:border-white/10">
+                      <div className="h-4 w-24 animate-pulse rounded bg-black/5 dark:bg-white/10" />
+                    </div>
+                    <div className="min-h-[24rem] space-y-3 p-3">
+                      <div className="h-28 animate-pulse rounded-xl bg-black/5 dark:bg-white/10" />
+                      <div className="h-28 animate-pulse rounded-xl bg-black/5 dark:bg-white/10" />
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <p className="mb-0 flex items-center gap-1.5 text-[0.6875rem] text-[#8c9097]">
-              <i className="ri-drag-move-2-line" aria-hidden />
-              Drag cards to move status
-            </p>
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-4 flex items-center justify-between rounded-md border border-danger/30 bg-danger/5 px-4 py-3">
-            <span className="text-danger text-[0.8125rem]">{error}</span>
-            <button type="button" onClick={fetchBoard} className="ti-btn ti-btn-sm ti-btn-danger">Retry</button>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {BOARD_COLUMNS.map((col) => (
-              <div key={col} className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-defaultborder/60 bg-slate-50/40 dark:border-white/10 dark:bg-black/10">
-                <div className="h-1 animate-pulse bg-black/5 dark:bg-white/10" />
-                <div className="border-b border-defaultborder/60 px-4 py-3.5 dark:border-white/10">
-                  <div className="h-4 w-24 animate-pulse rounded bg-black/5 dark:bg-white/10" />
-                </div>
-                <div className="space-y-3 p-3">
-                  <div className="h-28 animate-pulse rounded-xl bg-black/5 dark:bg-white/10" />
-                  <div className="h-28 animate-pulse rounded-xl bg-black/5 dark:bg-white/10" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          ) : (
+            <div className={`${boardStyles.laneScroll} -mx-1 overflow-x-auto pb-2`}>
+              <div className="flex min-w-max gap-4 px-1 xl:grid xl:min-w-0 xl:grid-cols-4">
             {BOARD_COLUMNS.map((col) => {
               const sc = STATUS_CONFIG[col] ?? STATUS_CONFIG.Open;
               const count = columns[col].length;
@@ -224,10 +274,10 @@ export default function DevTicketsBoardPage() {
               return (
               <div
                 key={col}
-                className={`flex min-h-[28rem] flex-col overflow-hidden rounded-xl border bg-slate-50/50 transition-colors dark:bg-black/10 ${
+                className={`flex w-[17.5rem] shrink-0 flex-col overflow-hidden rounded-xl border transition-colors xl:w-auto xl:min-h-[28rem] ${
                   isDropTarget
                     ? "border-primary/40 bg-primary/[0.04] ring-2 ring-primary/20 dark:bg-primary/[0.06]"
-                    : "border-defaultborder/70 dark:border-white/10"
+                    : "border-defaultborder/70 bg-white/95 dark:border-white/10 dark:bg-bodybg/90"
                 }`}
                 onDragEnter={() => setDragOverCol(col)}
                 onDragLeave={(e) => {
@@ -245,7 +295,7 @@ export default function DevTicketsBoardPage() {
                   setDragOverCol(null);
                 }}
               >
-                <div className="h-1 shrink-0" style={{ backgroundColor: sc.color }} />
+                <div className="h-1.5 shrink-0" style={{ backgroundColor: sc.color }} />
                 <div className="flex items-center justify-between gap-2 border-b border-defaultborder/60 px-4 py-3.5 dark:border-white/10">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className={`h-2 w-2 shrink-0 rounded-full ${sc.dot}`} aria-hidden />
@@ -273,6 +323,8 @@ export default function DevTicketsBoardPage() {
                       const age = computeAgeDays(ticket.createdAt);
                       const isDragging = draggingId === id;
                       const showPriority = ticket.priority === "Urgent" || ticket.priority === "High";
+                      const deployStage = ticket.deployedTo ?? "Not Deployed";
+                      const deployCfg = DEPLOYMENT_CONFIG[deployStage];
                       return (
                         <article
                           key={id}
@@ -295,7 +347,7 @@ export default function DevTicketsBoardPage() {
                           }}
                           role="button"
                           tabIndex={0}
-                          aria-label={`${ticket.title}, ${col}, ${getDevTicketDisplayId(ticket)}`}
+                          aria-label={`${ticket.title}, ${col}, ${deployCfg.label}, ${getDevTicketDisplayId(ticket)}`}
                           className={`group cursor-grab rounded-xl border bg-white p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-all active:cursor-grabbing dark:bg-bodybg dark:shadow-[0_1px_3px_rgba(0,0,0,0.2)] ${
                             isDragging
                               ? "scale-[0.98] border-primary/30 opacity-50 shadow-none"
@@ -320,9 +372,18 @@ export default function DevTicketsBoardPage() {
                             </div>
                           </div>
 
-                          <h4 className="mb-3 line-clamp-2 text-[0.875rem] font-semibold leading-snug text-defaulttextcolor dark:text-white">
+                          <h4 className="mb-2 line-clamp-2 text-[0.875rem] font-semibold leading-snug text-defaulttextcolor dark:text-white">
                             {ticket.title}
                           </h4>
+
+                          <div className="mb-3">
+                            <DevTicketDeploymentControl
+                              ticket={ticket}
+                              userId={userId}
+                              onUpdated={handleTicketUpdated}
+                              onError={showToast}
+                            />
+                          </div>
 
                           <div className="flex items-center justify-between gap-2 border-t border-defaultborder/50 pt-2.5 dark:border-white/10">
                             <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[0.6875rem] text-slate-500 dark:text-white/45">
@@ -364,19 +425,17 @@ export default function DevTicketsBoardPage() {
               </div>
             );
             })}
-          </div>
-        )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <DevTicketDetailDrawer
         open={drawerOpen}
         ticket={drawerTicket}
         onClose={() => { setDrawerOpen(false); setDrawerTicket(null); }}
-        onTicketUpdated={(updated) => {
-          const uid = getTicketDbId(updated);
-          setDrawerTicket(updated);
-          setTickets((prev) => prev.map((t) => (getTicketDbId(t) === uid ? updated : t)));
-        }}
+        onTicketUpdated={handleTicketUpdated}
         onOpenLinkedTicket={async (linkedId) => {
           try {
             setDrawerTicket(await getDevTicket(linkedId));

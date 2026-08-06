@@ -1,5 +1,5 @@
 import React from "react";
-import type { DevTicket, DevTicketAttachment, DevTicketLabel } from "@/shared/lib/api/devTickets";
+import type { DevTicket, DevTicketAttachment, DevTicketDeployedTo, DevTicketLabel } from "@/shared/lib/api/devTickets";
 
 export const STATUS_CONFIG: Record<string, { dot: string; badge: string; icon: string; color: string }> = {
   Open: { dot: "bg-primary", badge: "bg-primary/10 text-primary", icon: "ri-radio-button-line", color: "#6366f1" },
@@ -29,6 +29,44 @@ export const LABEL_CONFIG: Record<DevTicketLabel, { badge: string; label: string
   performance: { badge: "bg-blue-500/10 text-blue-600 dark:text-blue-400", label: "performance" },
   security: { badge: "bg-orange-500/10 text-orange-600 dark:text-orange-400", label: "security" },
   ui: { badge: "bg-primary/10 text-primary", label: "ui" },
+};
+
+export const ENVIRONMENT_CONFIG: Record<
+  NonNullable<DevTicket["environment"]>,
+  { label: string }
+> = {
+  Staging: { label: "Staging" },
+  Production: { label: "Production" },
+};
+
+export const DEPLOYMENT_CONFIG: Record<
+  DevTicketDeployedTo,
+  { badge: string; label: string; toggleLabel: string; icon: string; indicator: string; toggleActiveText: string }
+> = {
+  "Not Deployed": {
+    badge: "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-white/50",
+    label: "Not deployed",
+    toggleLabel: "None",
+    icon: "ri-code-box-line",
+    indicator: "bg-slate-200/90 shadow-sm dark:bg-white/15",
+    toggleActiveText: "text-slate-700 dark:text-white/85",
+  },
+  Testing: {
+    badge: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    label: "In Testing",
+    toggleLabel: "Testing",
+    icon: "ri-flask-line",
+    indicator: "bg-amber-400/90 shadow-sm dark:bg-amber-500/80",
+    toggleActiveText: "text-amber-950 dark:text-amber-950",
+  },
+  Production: {
+    badge: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    label: "In Production",
+    toggleLabel: "Live",
+    icon: "ri-rocket-2-line",
+    indicator: "bg-emerald-500/90 shadow-sm dark:bg-emerald-500",
+    toggleActiveText: "text-white",
+  },
 };
 
 export const BOARD_COLUMNS = ["Open", "In Progress", "Resolved", "Closed"] as const;
@@ -112,7 +150,78 @@ export function canEditDevTicket(
   if (!userId) return false;
   const creatorId = ticket.createdBy?.id ?? ticket.createdBy?._id;
   const assigneeId = ticket.assignedTo?.id ?? ticket.assignedTo?._id;
-  return String(creatorId) === String(userId) || String(assigneeId) === String(userId);
+  const testerId = ticket.testedBy?.id ?? ticket.testedBy?._id;
+  return (
+    String(creatorId) === String(userId) ||
+    String(assigneeId) === String(userId) ||
+    String(testerId) === String(userId)
+  );
+}
+
+/** Assigned developer or tester can change deployment from the board. */
+export function canControlDeployment(ticket: DevTicket, userId?: string): boolean {
+  if (!userId) return false;
+  const assigneeId = ticket.assignedTo?.id ?? ticket.assignedTo?._id;
+  const testerId = ticket.testedBy?.id ?? ticket.testedBy?._id;
+  return (
+    Boolean(assigneeId && String(assigneeId) === String(userId)) ||
+    Boolean(testerId && String(testerId) === String(userId))
+  );
+}
+
+/** @deprecated Use canControlDeployment */
+export function isAssignedDev(ticket: DevTicket, userId?: string): boolean {
+  return canControlDeployment(ticket, userId);
+}
+
+const ACTIVITY_ACTION_LABELS: Record<string, string> = {
+  created: "Ticket created",
+  status_changed: "Status changed",
+  title_changed: "Title changed",
+  description_changed: "Description changed",
+  steps_to_reproduce_changed: "Steps to reproduce changed",
+  priority_changed: "Priority changed",
+  severity_changed: "Severity changed",
+  category_changed: "Category changed",
+  module_changed: "Module changed",
+  page_changed: "Page changed",
+  environment_changed: "Environment changed",
+  deployed_to_changed: "Fix deployed to changed",
+  platform_changed: "Platform changed",
+  labels_changed: "Labels changed",
+  assigned: "Assignee changed",
+  label_added: "Label added",
+  comment_added: "Comment added",
+  attachment_added: "Attachment added",
+  attachment_removed: "Attachment removed",
+  reopened: "Ticket reopened",
+  watcher_added: "Watcher added",
+  watcher_removed: "Watcher removed",
+  link_added: "Link added",
+  link_removed: "Link removed",
+  field_changed: "Field updated",
+};
+
+export function formatDevTicketActivity(entry: {
+  action: string;
+  field?: string;
+  from?: string;
+  to?: string;
+}): { title: string; detail?: string } {
+  const title = ACTIVITY_ACTION_LABELS[entry.action] ?? entry.action.replace(/_/g, " ");
+  if (entry.action === "created" && entry.to) {
+    return { title, detail: entry.to };
+  }
+  if (entry.action === "comment_added" && entry.to) {
+    return { title, detail: entry.to };
+  }
+  if (entry.from && entry.to) {
+    const field = entry.field ? `${entry.field}: ` : "";
+    return { title, detail: `${field}${entry.from} → ${entry.to}` };
+  }
+  if (entry.to) return { title, detail: entry.to };
+  if (entry.field) return { title, detail: entry.field };
+  return { title };
 }
 
 export function getInitials(name?: string, email?: string): string {
