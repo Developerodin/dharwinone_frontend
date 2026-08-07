@@ -64,12 +64,12 @@ export function AgentOrb({
 
 export function ReasoningIndicator() {
   return (
-    <div className="mb-4 flex justify-start">
-      <div className="mr-2 flex-shrink-0">
-        <AgentOrb size="sm" />
+    <div className="mb-5 flex justify-start" aria-live="polite" aria-label="Dharwin is working">
+      <div className="mr-2.5 mt-0.5 flex-shrink-0 self-start">
+        <AgentOrb size="sm" pulse />
       </div>
-      <div className="flex flex-col">
-        <span className={`mb-1 px-1 ${TYPE.author}`}>Dharwin</span>
+      <div className="flex min-w-0 flex-col">
+        <span className={`mb-1.5 px-1 ${TYPE.author}`}>Dharwin</span>
         <div className="flex items-center gap-2 px-1 py-1">
           <span className="flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-primary" style={{ animation: "agent-dot 1.2s ease-in-out infinite", animationDelay: "0ms" }} />
@@ -149,7 +149,7 @@ export function CopyButton({ text }: { text: string }) {
       onClick={onCopy}
       title={done ? "Copied" : "Copy"}
       aria-label={done ? "Copied" : "Copy"}
-      className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+      className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
     >
       {done ? (
         <>

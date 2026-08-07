@@ -28,11 +28,22 @@ export const TONE_DOT: Record<Tone, string> = {
 // wrapping records in a bordered bubble double-framed every answer (bubble
 // border + card border + accent stripe = three edges around one datum).
 // One frame only, and it belongs to the record card.
+//
+// User bubble: brand fill only (Restrained accent). Soft radius with a
+// clipped trailing corner for chat directionality; inset ring for edge
+// definition instead of a purple glow (reads less like AI chrome). Text is
+// tinted near-white so it stays ≥4.5:1 on primary without pure #fff.
 export const SURFACE = {
   card:        "rounded-lg border border-slate-200 bg-white dark:border-slate-700/60 dark:bg-slate-800/50",
   console:     "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950",
-  bubbleAgent: "text-slate-900 dark:text-slate-100",
-  bubbleUser:  "rounded-2xl rounded-tr-sm bg-primary text-white shadow-[0_4px_14px_-8px_rgb(132_90_223_/_0.55)]",
+  bubbleAgent: "text-slate-800 dark:text-slate-100",
+  bubbleUser:
+    "rounded-[1.125rem] rounded-br-md bg-primary text-violet-50 " +
+    "shadow-[0_1px_2px_rgb(15_23_42_/_0.06),0_6px_16px_-10px_rgb(132_90_223_/_0.38)] " +
+    "ring-1 ring-inset ring-white/15 " +
+    "dark:shadow-[0_1px_2px_rgb(0_0_0_/_0.35),0_8px_20px_-12px_rgb(132_90_223_/_0.45)] " +
+    "dark:ring-white/12 " +
+    "selection:bg-white/25 selection:text-white",
 } as const;
 
 // Accessible brand ink. `primary` (#845ADF) is 4.66:1 on white — it only
@@ -56,7 +67,7 @@ export const WRAP_ANYWHERE = "[overflow-wrap:anywhere]";
 // else is app sans in normal case, and hierarchy comes from size + weight.
 // 11px is the floor; nothing renders smaller.
 export const TYPE = {
-  author:   "font-mono text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400",
+  author:   "font-mono text-[11px] uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400",
   label:    "text-[11px] font-medium text-slate-500 dark:text-slate-400",
   meta:     "text-[11px] text-slate-500 dark:text-slate-400",
   title:    "text-[13px] font-semibold text-slate-900 dark:text-slate-50",
