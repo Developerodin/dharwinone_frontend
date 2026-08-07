@@ -19,6 +19,7 @@ import {
   getDevTicketDisplayId,
   getInitials,
   getTicketDbId,
+  isAllowedDevTicketAttachment,
 } from "@/shared/components/dev-tickets/dev-ticket-config";
 import {
   bulkUpdate,
@@ -369,15 +370,13 @@ export default function DevTicketsPage() {
   const addFiles = (files: File[]) => {
     const errors: string[] = [];
     const valid: File[] = [];
-    const allowed = ["image/", "video/", "application/pdf", "text/plain", "text/log"];
     if (attachments.length + files.length > 10) {
       errors.push("Maximum 10 files allowed.");
       setAttachmentErrors(errors);
       return;
     }
     files.forEach((f) => {
-      const ok = allowed.some((p) => f.type.startsWith(p) || f.name.endsWith(".log"));
-      if (!ok) errors.push(`${f.name}: type not allowed`);
+      if (!isAllowedDevTicketAttachment(f)) errors.push(`${f.name}: type not allowed`);
       else valid.push(f);
     });
     setAttachmentErrors(errors);

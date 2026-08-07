@@ -46,6 +46,8 @@ import {
   highlightMentions,
   isImage,
   isVideo,
+  DEV_TICKET_ATTACHMENT_ACCEPT,
+  isAllowedDevTicketAttachment,
 } from "./dev-ticket-config";
 import DevTicketModulePageFields from "./dev-ticket-module-page-fields";
 import { formatDevTicketModuleLabel } from "./dev-ticket-modules";
@@ -264,9 +266,19 @@ export function DevTicketDetailDrawer({
 
   const handleAddAttachments = async (files: File[]) => {
     if (!ticketId || !files.length) return;
+    const valid = files.filter(isAllowedDevTicketAttachment);
+    const rejected = files.filter((f) => !isAllowedDevTicketAttachment(f));
+    if (rejected.length) {
+      await Swal.fire({
+        icon: "error",
+        title: "File type not allowed",
+        text: rejected.map((f) => f.name).join(", "),
+      });
+    }
+    if (!valid.length) return;
     try {
       setAttachmentBusy(true);
-      applyTicketUpdate(await addTicketAttachments(ticketId, files));
+      applyTicketUpdate(await addTicketAttachments(ticketId, valid));
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } }; message?: string };
       await Swal.fire({ icon: "error", title: "Upload failed", text: e?.response?.data?.message ?? e?.message ?? "Could not add attachments." });
@@ -803,7 +815,7 @@ export function DevTicketDetailDrawer({
                     type="file"
                     multiple
                     className="hidden"
-                    accept="image/*,video/*,.pdf,.log,.txt"
+                    accept={DEV_TICKET_ATTACHMENT_ACCEPT}
                     onChange={(e) => {
                       const files = Array.from(e.target.files ?? []);
                       e.target.value = "";
@@ -1078,12 +1090,22 @@ export function DevTicketDetailDrawer({
                 ref={commentFileRef}
                 type="file"
                 multiple
-                accept="image/*,video/*,.pdf,.log,.txt"
+                accept={DEV_TICKET_ATTACHMENT_ACCEPT}
                 className="hidden"
                 onChange={(e) => {
                   const files = Array.from(e.target.files ?? []);
-                  if (files.length) setCommentAttachments((prev) => [...prev, ...files]);
                   e.target.value = "";
+                  if (!files.length) return;
+                  const valid = files.filter(isAllowedDevTicketAttachment);
+                  const rejected = files.filter((f) => !isAllowedDevTicketAttachment(f));
+                  if (rejected.length) {
+                    void Swal.fire({
+                      icon: "error",
+                      title: "File type not allowed",
+                      text: rejected.map((f) => f.name).join(", "),
+                    });
+                  }
+                  if (valid.length) setCommentAttachments((prev) => [...prev, ...valid]);
                 }}
               />
               <div className="flex items-center gap-2 border-t border-defaultborder/60 px-3 py-2 dark:border-white/10">

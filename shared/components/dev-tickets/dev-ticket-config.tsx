@@ -141,6 +141,55 @@ export function isVideo(mime?: string): boolean {
   return Boolean(mime?.startsWith("video/"));
 }
 
+/** Keep in sync with BE `imageVideoFileFilter` in middlewares/upload.js */
+export const DEV_TICKET_DOC_MIME_TYPES = [
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+  "text/log",
+  "application/rtf",
+  "text/rtf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.oasis.opendocument.presentation",
+] as const;
+
+export const DEV_TICKET_DOC_EXTENSIONS = [
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+  ".csv",
+  ".rtf",
+  ".odt",
+  ".ods",
+  ".odp",
+  ".txt",
+  ".log",
+] as const;
+
+export const DEV_TICKET_ATTACHMENT_ACCEPT = `image/*,video/*,${DEV_TICKET_DOC_EXTENSIONS.join(",")}`;
+
+export const DEV_TICKET_ATTACHMENT_HINT =
+  "Images, video, and documents (PDF, Word, Excel, PowerPoint, CSV, RTF, OpenDocument, TXT, LOG) · up to 10 files";
+
+export function isAllowedDevTicketAttachment(file: File): boolean {
+  const type = file.type || "";
+  if (type.startsWith("image/") || type.startsWith("video/")) return true;
+  if ((DEV_TICKET_DOC_MIME_TYPES as readonly string[]).includes(type)) return true;
+  const name = file.name.toLowerCase();
+  return DEV_TICKET_DOC_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
 export function canEditDevTicket(
   ticket: DevTicket,
   userId?: string,

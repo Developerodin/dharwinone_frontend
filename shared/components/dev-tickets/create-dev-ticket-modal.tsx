@@ -5,6 +5,8 @@ import {
   LABEL_CONFIG,
   PRIORITY_CONFIG,
   SEVERITY_CONFIG,
+  DEV_TICKET_ATTACHMENT_ACCEPT,
+  DEV_TICKET_ATTACHMENT_HINT,
   formatFileSize,
   getInitials,
 } from "@/shared/components/dev-tickets/dev-ticket-config";
@@ -251,13 +253,13 @@ export default function CreateDevTicketModal({
                 <p className="mb-1 text-[0.8125rem] font-medium text-defaulttextcolor">
                   Drag files here or <span className="text-primary underline">browse</span>
                 </p>
-                <p className="mb-0 text-[0.6875rem] text-[#8c9097]">Images, video, PDF, logs · up to 10 files</p>
+                <p className="mb-0 text-[0.6875rem] text-[#8c9097]">{DEV_TICKET_ATTACHMENT_HINT}</p>
                 <input
                   ref={fileInputRef}
                   type="file"
                   multiple
                   className="hidden"
-                  accept="image/*,video/*,.pdf,.log,.txt"
+                  accept={DEV_TICKET_ATTACHMENT_ACCEPT}
                   onChange={(e) => onAddFiles(Array.from(e.target.files ?? []))}
                 />
               </div>
