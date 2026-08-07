@@ -81,18 +81,21 @@ function BubbleContent({
   asChild = false,
   className,
   children,
+  style,
   ...props
 }: React.ComponentProps<"div"> & {
   asChild?: boolean;
 }) {
   const variant = React.useContext(BubbleVariantContext);
 
-  // Extra horizontal inset so glyphs clear the rounded edges;
-  // vertical stays tighter than left/right.
+  // Roomier horizontal inset (32px) so glyphs clear rounded edges;
+  // !important + inline backup beat purge/specificity fights. Keep py-3.
   // box-border + wrap utilities keep long lines inside the fill.
+  // Ghost keeps p-0 via fillClass + twMerge; skip inline pad for ghost.
+  const isGhost = variant === "ghost";
   const classes = cn(
     "box-border w-fit max-w-full min-w-0 rounded-xl border border-transparent",
-    "px-5 py-3 text-sm leading-relaxed",
+    isGhost ? "py-3 text-sm leading-relaxed" : "!px-8 py-3 text-sm leading-relaxed",
     "break-words [overflow-wrap:anywhere] [word-break:break-word]",
     "group-data-[align=end]/bubble:self-end",
     "[button]:text-left [button,a]:transition-colors",
@@ -101,16 +104,23 @@ function BubbleContent({
     className
   );
 
-  if (asChild && React.isValidElement<{ className?: string }>(children)) {
+  const padStyle: React.CSSProperties | undefined = isGhost
+    ? style
+    : { ...style, paddingLeft: 32, paddingRight: 32 };
+
+  if (asChild && React.isValidElement<{ className?: string; style?: React.CSSProperties }>(children)) {
     return React.cloneElement(children, {
       ...props,
       className: cn(classes, children.props.className),
+      style: isGhost
+        ? { ...children.props.style, ...style }
+        : { ...children.props.style, ...style, paddingLeft: 32, paddingRight: 32 },
       ...({ "data-slot": "bubble-content" } as const),
-    } as Partial<typeof children.props> & { className?: string });
+    } as Partial<typeof children.props> & { className?: string; style?: React.CSSProperties });
   }
 
   return (
-    <div data-slot="bubble-content" className={classes} {...props}>
+    <div data-slot="bubble-content" className={classes} {...props} style={padStyle}>
       {children}
     </div>
   );

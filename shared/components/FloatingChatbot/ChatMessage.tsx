@@ -64,8 +64,7 @@ export default function ChatMessage({ role, content, fullscreen = false, blocks,
             <BubbleContent
               className={[
                 "text-[13px] leading-[1.55]",
-                // User: hug copy with BubbleContent's equal p-3; do not stretch
-                // to column width (left-aligned text + empty right).
+                // User: hug copy (w-fit) so BubbleContent !px-8 expands the purple box.
                 isUser ? "w-fit max-w-full whitespace-pre-wrap" : "w-full max-w-full",
               ].join(" ")}
             >
