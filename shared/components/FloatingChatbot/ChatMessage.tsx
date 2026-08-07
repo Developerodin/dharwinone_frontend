@@ -53,7 +53,9 @@ export default function ChatMessage({ role, content, fullscreen = false, blocks,
           <span className={TYPE.author}>{isUser ? "You" : "Dharwin"}</span>
         </div>
 
-        <BubbleGroup className={isUser ? "w-full items-end" : "w-full"}>
+        <BubbleGroup
+          className={isUser ? "w-fit max-w-full self-end" : "w-full"}
+        >
           <Bubble
             variant={isUser ? "default" : "muted"}
             align={isUser ? "end" : "start"}
@@ -62,7 +64,9 @@ export default function ChatMessage({ role, content, fullscreen = false, blocks,
             <BubbleContent
               className={[
                 "text-[13px] leading-[1.55]",
-                isUser ? "whitespace-pre-wrap" : "w-full max-w-full",
+                // User: hug copy with BubbleContent's equal p-3; do not stretch
+                // to column width (left-aligned text + empty right).
+                isUser ? "w-fit max-w-full whitespace-pre-wrap" : "w-full max-w-full",
               ].join(" ")}
             >
               {isUser ? (

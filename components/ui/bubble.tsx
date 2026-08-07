@@ -87,11 +87,12 @@ function BubbleContent({
 }) {
   const variant = React.useContext(BubbleVariantContext);
 
-  // Padding lives on the painted surface so text never kisses the radius.
+  // Equal inset on all sides so short copy sits centered in the fill
+  // (asymmetric px/py left text flush top-left with dead space opposite).
   // box-border + wrap utilities keep long lines inside the fill.
   const classes = cn(
     "box-border w-fit max-w-full min-w-0 rounded-xl border border-transparent",
-    "px-4 py-2.5 text-sm leading-relaxed sm:px-5 sm:py-3",
+    "p-3 text-sm leading-relaxed",
     "break-words [overflow-wrap:anywhere] [word-break:break-word]",
     "group-data-[align=end]/bubble:self-end",
     "[button]:text-left [button,a]:transition-colors",
