@@ -29,17 +29,17 @@ export const TONE_DOT: Record<Tone, string> = {
 // border + card border + accent stripe = three edges around one datum).
 // One frame only, and it belongs to the record card.
 //
-// User bubble: brand fill only (Restrained accent). Squircle radius (not
-// a full pill) so short single-line messages keep usable inset at the
-// curve; trailing corner clipped for chat directionality. Inset ring for
-// edge definition instead of a purple glow. Text is tinted near-white so
+// User bubble: brand fill only (Restrained accent). Soft squircle (rounded-2xl,
+// not a pill) so corners don't eat glyphs when padding is generous (px-5/py-3
+// on ChatMessage). Trailing corner clipped for chat directionality. Inset ring
+// for edge definition instead of a purple glow. Text is tinted near-white so
 // it stays ≥4.5:1 on primary without pure #fff.
 export const SURFACE = {
   card:        "rounded-lg border border-slate-200 bg-white dark:border-slate-700/60 dark:bg-slate-800/50",
   console:     "border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950",
   bubbleAgent: "text-slate-800 dark:text-slate-100",
   bubbleUser:
-    "rounded-xl rounded-br-md bg-primary text-violet-50 " +
+    "rounded-2xl rounded-br-md bg-primary text-violet-50 " +
     "shadow-[0_1px_2px_rgb(15_23_42_/_0.06),0_6px_16px_-10px_rgb(132_90_223_/_0.38)] " +
     "ring-1 ring-inset ring-white/15 " +
     "dark:shadow-[0_1px_2px_rgb(0_0_0_/_0.35),0_8px_20px_-12px_rgb(132_90_223_/_0.45)] " +

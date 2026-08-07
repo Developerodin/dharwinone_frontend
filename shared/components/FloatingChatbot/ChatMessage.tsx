@@ -17,19 +17,20 @@ interface Props {
 
 export default function ChatMessage({ role, content, fullscreen = false, blocks, onAction }: Props) {
   const isUser = role === "user";
-  // Cap measure so long queries wrap inside the panel instead of stretching
-  // the bubble edge-to-edge. Agent stays wider for structured cards/tables.
-  const columnMax = fullscreen
+  // Cap measure on the painted bubble (not a parent wrapper) so padding is
+  // inside max-width via box-border and long queries wrap instead of escaping
+  // the purple fill.
+  const bubbleMax = fullscreen
     ? isUser
       ? "max-w-[min(100%,42rem)] sm:max-w-[min(75%,40rem)] md:max-w-[min(65%,36rem)]"
       : "max-w-[96%] sm:max-w-[92%] md:max-w-[90%]"
     : isUser
-      ? "max-w-[min(92%,22rem)] sm:max-w-[min(88%,24rem)]"
+      ? "max-w-[min(100%,22rem)] sm:max-w-[min(100%,24rem)]"
       : "max-w-[92%] sm:max-w-[90%]";
 
   return (
     <article
-      className={`group/msg mb-5 flex last:mb-2 ${isUser ? "justify-end" : "justify-start"}`}
+      className={`group/msg mb-5 flex w-full min-w-0 last:mb-2 ${isUser ? "justify-end" : "justify-start"}`}
       aria-label={isUser ? "Your message" : "Dharwin reply"}
     >
       {!isUser && (
@@ -40,8 +41,7 @@ export default function ChatMessage({ role, content, fullscreen = false, blocks,
 
       <div
         className={[
-          "flex min-w-0 flex-col",
-          columnMax,
+          "flex min-w-0 max-w-full flex-col",
           isUser ? "items-end" : "flex-1",
         ].join(" ")}
       >
@@ -52,9 +52,15 @@ export default function ChatMessage({ role, content, fullscreen = false, blocks,
 
         <div
           className={[
-            "relative box-border min-w-0 max-w-full overflow-hidden break-words text-[13px] leading-[1.55] [overflow-wrap:anywhere]",
+            "relative box-border min-w-0 break-words text-[13px] leading-[1.55]",
+            "[overflow-wrap:anywhere] [word-break:break-word]",
+            bubbleMax,
             isUser
-              ? `${SURFACE.bubbleUser} w-full whitespace-pre-wrap px-4 py-2.5 sm:px-5 sm:py-3`
+              ? // w-fit + bubbleMax: hug short copy; wrap long copy inside the fill.
+                // No overflow-hidden — that clipped glyphs into the radius and
+                // looked like text escaping the purple background.
+                // Do not add max-w-full here — it fights bubbleMax in Tailwind's CSS order.
+                `${SURFACE.bubbleUser} w-fit whitespace-pre-wrap px-5 py-3`
               : `${SURFACE.bubbleAgent} w-full px-0.5 sm:px-1`,
           ].join(" ")}
         >
