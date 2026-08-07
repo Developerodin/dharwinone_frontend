@@ -87,12 +87,12 @@ function BubbleContent({
 }) {
   const variant = React.useContext(BubbleVariantContext);
 
-  // Equal inset on all sides so short copy sits centered in the fill
-  // (asymmetric px/py left text flush top-left with dead space opposite).
+  // Extra horizontal inset so glyphs clear the rounded edges;
+  // vertical stays tighter than left/right.
   // box-border + wrap utilities keep long lines inside the fill.
   const classes = cn(
     "box-border w-fit max-w-full min-w-0 rounded-xl border border-transparent",
-    "p-3 text-sm leading-relaxed",
+    "px-5 py-3 text-sm leading-relaxed",
     "break-words [overflow-wrap:anywhere] [word-break:break-word]",
     "group-data-[align=end]/bubble:self-end",
     "[button]:text-left [button,a]:transition-colors",
