@@ -79,22 +79,26 @@ function alignClass(col: Column): string {
 
 function formatClass(col: Column): string {
   if (col.format === "number" || col.format === "currency") return "tabular-nums";
-  if (col.format === "mono" || col.format === "date") return "font-mono text-[11.5px]";
+  if (col.format === "mono" || col.format === "date") return "font-mono text-[12.5px]";
   return "";
 }
 
 // ── Public API ──────────────────────────────────────────────────────────
 
-export function StructuredResponse({ blocks, compact = false }: { blocks: Block[]; compact?: boolean }) {
+export function StructuredResponse({
+  blocks, compact = false, onAction,
+}: { blocks: Block[]; compact?: boolean; onAction?: (text: string) => void }) {
   if (!blocks?.length) return null;
   return (
     <div className={`space-y-2.5 ${CONTAINMENT} ${WRAP_ANYWHERE}`}>
-      {blocks.map((b, i) => <BlockRenderer key={i} block={b} compact={compact} />)}
+      {blocks.map((b, i) => <BlockRenderer key={i} block={b} compact={compact} onAction={onAction} />)}
     </div>
   );
 }
 
-function BlockRenderer({ block, compact }: { block: Block; compact: boolean }) {
+function BlockRenderer({
+  block, compact, onAction,
+}: { block: Block; compact: boolean; onAction?: (text: string) => void }) {
   switch (block.type) {
     case "text":      return <TextBlockView block={block} />;
     case "heading":   return <HeadingBlockView block={block} />;
@@ -103,9 +107,9 @@ function BlockRenderer({ block, compact }: { block: Block; compact: boolean }) {
     case "badge_row": return <BadgeRowView block={block} />;
     case "table":     return <TableBlockView block={block} compact={compact} />;
     case "cards":     return <CardsBlockView block={block} compact={compact} />;
-    case "group":     return <GroupBlockView block={block} compact={compact} />;
+    case "group":     return <GroupBlockView block={block} compact={compact} onAction={onAction} />;
     case "fallback":  return <FallbackBlockView block={block} />;
-    case "actions":   return <ActionsBlockView block={block} />;
+    case "actions":   return <ActionsBlockView block={block} onAction={onAction} />;
     default:          return null;
   }
 }
@@ -173,12 +177,8 @@ function TableBlockView({ block, compact = false }: { block: TableBlock; compact
         <div className="flex items-center justify-between gap-2">
           <p className={TYPE.title}>{block.title}</p>
           {showPagination && (
-            <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-              <span className="text-primary/80">{start + 1}</span>
-              <span className="mx-0.5 opacity-50">–</span>
-              <span className="text-primary/80">{end}</span>
-              <span className="mx-1 opacity-50">of</span>
-              <span className="text-slate-700 dark:text-slate-200">{total}</span>
+            <span className={TYPE.meta}>
+              {start + 1}–{end} of <span className="font-medium text-slate-700 dark:text-slate-200">{total}</span>
             </span>
           )}
         </div>
@@ -201,15 +201,15 @@ function TableBlockView({ block, compact = false }: { block: TableBlock; compact
 
 function RealTable({ columns, rows, startIndex }: { columns: Column[]; rows: Row[]; startIndex: number }) {
   return (
-    <div className={`hidden overflow-x-auto rounded-xl border border-slate-200/70 bg-white shadow-[0_2px_10px_-6px_rgba(15,23,42,.08)] sm:block dark:border-slate-700/60 dark:bg-slate-800/60 ${CONTAINMENT}`}>
-      <table className="min-w-full text-[12px]">
-        <thead className="border-b border-slate-200/80 bg-slate-50/60 dark:border-slate-700/60 dark:bg-slate-900/40">
+    <div className={`hidden overflow-x-auto rounded-lg border border-slate-200 bg-white sm:block dark:border-slate-700/60 dark:bg-slate-800/50 ${CONTAINMENT}`}>
+      <table className="min-w-full text-[12.5px]">
+        <thead className="border-b border-slate-200 bg-slate-50 dark:border-slate-700/60 dark:bg-slate-900/40">
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
                 scope="col"
-                className={`whitespace-nowrap px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400 ${alignClass(col)}`}
+                className={`whitespace-nowrap px-3 py-2 text-[11px] font-medium text-slate-500 dark:text-slate-400 ${alignClass(col)}`}
               >
                 {col.label}
               </th>
@@ -256,7 +256,7 @@ function CardStack({
       {rows.map((row, ri) => {
         const absoluteIndex = startIndex + ri;
         return (
-          <RecordCard key={absoluteIndex} index={absoluteIndex}>
+          <RecordCard key={absoluteIndex}>
             {columns.map((col) => {
               const v = row[col.key];
               const raw = cellText(v);
@@ -295,7 +295,7 @@ function CardsBlockView({ block, compact = false }: { block: CardsBlock; compact
           ([, v]) => v !== null && v !== undefined && v !== ""
         );
         return (
-          <RecordCard key={i} index={i}>
+          <RecordCard key={i}>
             {entries.map(([k, v]) => (
               <FieldRow key={k} label={formatKey(k)}>
                 {typeof v === "object" ? JSON.stringify(v) : String(v)}
@@ -310,20 +310,22 @@ function CardsBlockView({ block, compact = false }: { block: CardsBlock; compact
 
 // ── Group ───────────────────────────────────────────────────────────────
 
-function GroupBlockView({ block, compact = false }: { block: GroupBlock; compact?: boolean }) {
+function GroupBlockView({
+  block, compact = false, onAction,
+}: { block: GroupBlock; compact?: boolean; onAction?: (text: string) => void }) {
   const [open, setOpen] = useState(block.defaultOpen ?? true);
   const isCollapsible = !!block.collapsible;
 
   const inner: ReactNode = (
     <div className="space-y-2">
-      {block.blocks.map((b, i) => <BlockRenderer key={i} block={b} compact={compact} />)}
+      {block.blocks.map((b, i) => <BlockRenderer key={i} block={b} compact={compact} onAction={onAction} />)}
     </div>
   );
 
   if (!isCollapsible) {
     return (
       <div className={`space-y-2 ${CONTAINMENT}`}>
-        {block.title && <p className={`${TYPE.heading3} text-primary/80`}>{block.title}</p>}
+        {block.title && <p className={TYPE.heading3}>{block.title}</p>}
         {inner}
       </div>
     );
@@ -337,7 +339,7 @@ function GroupBlockView({ block, compact = false }: { block: GroupBlock; compact
         className="flex w-full items-center justify-between gap-2 px-3 py-2"
         aria-expanded={open}
       >
-        <span className={`${TYPE.heading3} text-primary/80`}>{block.title}</span>
+        <span className={TYPE.heading3}>{block.title}</span>
         <span className="text-slate-500">{open ? "−" : "+"}</span>
       </button>
       {open && <div className="border-t border-slate-200/60 px-3 py-2 dark:border-slate-700/50">{inner}</div>}
@@ -349,7 +351,7 @@ function GroupBlockView({ block, compact = false }: { block: GroupBlock; compact
 
 function FallbackBlockView({ block }: { block: FallbackBlock }) {
   return (
-    <div className={`overflow-hidden rounded-xl border border-amber-200/60 bg-gradient-to-br from-amber-50/70 to-white px-3.5 py-3 ${CONTAINMENT} ${WRAP_ANYWHERE} dark:border-amber-900/40 dark:from-amber-900/15 dark:to-slate-800/40`}>
+    <div className={`overflow-hidden rounded-lg border border-amber-200 bg-amber-50/60 px-3.5 py-3 ${CONTAINMENT} ${WRAP_ANYWHERE} dark:border-amber-900/40 dark:bg-amber-900/15`}>
       <div className="flex items-start gap-2">
         <span className="mt-1 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200">
           <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.4}>
@@ -363,10 +365,10 @@ function FallbackBlockView({ block }: { block: FallbackBlock }) {
 
           {block.reasons.length > 0 && (
             <div className="space-y-1">
-              <p className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
+              <p className="text-[13px] font-semibold text-amber-800 dark:text-amber-300">
                 Why this might be
               </p>
-              <ul className="ml-4 list-disc space-y-0.5 text-[12px] text-slate-700 marker:text-amber-500 dark:text-slate-300">
+              <ul className="ml-4 list-disc space-y-0.5 text-[13px] text-slate-700 marker:text-amber-500 dark:text-slate-300">
                 {block.reasons.map((r, i) => (
                   <li key={i} className="[&>p]:mb-0">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{r}</ReactMarkdown>
@@ -379,7 +381,7 @@ function FallbackBlockView({ block }: { block: FallbackBlock }) {
           {block.suggestions.length > 0 && (
             <div className="space-y-1">
               <p className={TYPE.title}>Try next</p>
-              <ul className="ml-4 list-disc space-y-0.5 text-[12px] text-slate-700 marker:text-primary/70 dark:text-slate-300">
+              <ul className="ml-4 list-disc space-y-0.5 text-[13px] text-slate-700 marker:text-primary dark:text-slate-300">
                 {block.suggestions.map((s, i) => (
                   <li key={i} className="[&>p]:mb-0">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{s}</ReactMarkdown>
@@ -396,16 +398,22 @@ function FallbackBlockView({ block }: { block: FallbackBlock }) {
 
 // ── Actions ─────────────────────────────────────────────────────────────
 
-function ActionsBlockView({ block }: { block: ActionsBlock }) {
+// These buttons used to render `data-intent` / `data-payload` with no
+// onClick — a styled affordance that did nothing when clicked. They now
+// resend the payload (falling back to the label) as the next question.
+// Without a handler wired in, they don't render at all rather than lie.
+function ActionsBlockView({
+  block, onAction,
+}: { block: ActionsBlock; onAction?: (text: string) => void }) {
+  if (!onAction) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {block.buttons.map((btn, i) => (
         <button
           key={i}
           type="button"
-          data-intent={btn.intent}
-          data-payload={btn.payload}
-          className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/[0.06] px-3 py-1 text-[11.5px] font-medium text-primary transition-all hover:border-primary/60 hover:bg-primary/10"
+          onClick={() => onAction(btn.payload || btn.label)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-[13px] font-medium text-slate-800 transition-colors hover:border-primary hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-100 dark:hover:border-primary"
         >
           {btn.label}
         </button>

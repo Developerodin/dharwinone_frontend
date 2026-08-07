@@ -152,6 +152,7 @@ export interface DevTicketComment {
   reactions?: DevTicketReaction[];
   attachments?: DevTicketAttachment[];
   createdAt?: string;
+  editedAt?: string;
 }
 
 export interface DevTicketAttachment {
@@ -341,6 +342,20 @@ export async function addComment(
     return data;
   }
   const { data } = await apiClient.post<DevTicket>(`${BASE}/${id}/comments`, { content });
+  return data;
+}
+
+export async function updateComment(
+  id: string,
+  commentId: string,
+  content: string
+): Promise<DevTicket> {
+  const { data } = await apiClient.patch<DevTicket>(`${BASE}/${id}/comments/${commentId}`, { content });
+  return data;
+}
+
+export async function deleteComment(id: string, commentId: string): Promise<DevTicket> {
+  const { data } = await apiClient.delete<DevTicket>(`${BASE}/${id}/comments/${commentId}`);
   return data;
 }
 

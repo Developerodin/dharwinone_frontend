@@ -47,11 +47,11 @@ function renderHast(node: HastNode | undefined, key?: number): ReactNode {
     case "i":
       return <em key={key} className="italic">{rendered}</em>;
     case "code":
-      return <code key={key} className="rounded bg-primary/10 dark:bg-primary/20 px-1 text-[0.92em] font-mono text-primary dark:text-purple-300">{rendered}</code>;
+      return <code key={key} className="rounded bg-violet-50 px-1 font-mono text-[0.92em] text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">{rendered}</code>;
     case "a": {
       const href = ((node as { properties?: { href?: string } }).properties?.href) ?? "#";
       return (
-        <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">
+        <a key={key} href={href} target="_blank" rel="noopener noreferrer" className="text-violet-700 underline underline-offset-2 dark:text-violet-300">
           {rendered}
         </a>
       );
@@ -85,11 +85,7 @@ export function MarkdownTable({ node }: { node: HastNode | undefined }) {
       {showPagination && (
         <div className="flex items-center justify-between gap-2 px-1 pb-0.5">
           <span className={TYPE.meta}>
-            <span className="text-primary/80">{start + 1}</span>
-            <span className="mx-0.5 opacity-50">–</span>
-            <span className="text-primary/80">{end}</span>
-            <span className="mx-1 opacity-50">of</span>
-            <span className="text-slate-700 dark:text-slate-200">{total}</span>
+            {start + 1}–{end} of <span className="font-medium text-slate-700 dark:text-slate-200">{total}</span>
           </span>
         </div>
       )}
@@ -98,7 +94,7 @@ export function MarkdownTable({ node }: { node: HastNode | undefined }) {
         const cells = findHast(row, "td");
         const absoluteIndex = start + ri;
         return (
-          <RecordCard key={absoluteIndex} index={absoluteIndex}>
+          <RecordCard key={absoluteIndex}>
             {cells.map((cell, ci) => {
               const label = headers[ci] || `Field ${ci + 1}`;
               const valueText = hastText(cell).trim();
@@ -123,21 +119,16 @@ export function MarkdownTable({ node }: { node: HastNode | undefined }) {
 
 // ─── CodeBlock — fenced code with macOS-window chrome ─────────────────────
 
+// Dropped the fake macOS traffic-light window chrome. This is an HR
+// assistant; the decoration cost three dots of noise and bought nothing.
 function CodeBlock({ children, className }: { children?: ReactNode; className?: string }) {
   const lang = (className?.match(/language-(\w+)/)?.[1] || "code").toLowerCase();
   return (
-    <div className="group/code my-2 overflow-hidden rounded-xl border border-slate-700/40 bg-[#0b0d12] shadow-[0_6px_22px_-12px_rgba(0,0,0,.55)]">
-      <div className="flex items-center justify-between border-b border-slate-700/40 bg-slate-800/40 px-3 py-1.5">
-        <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-rose-400/70" />
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400/70" />
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
-          </span>
-          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-400">{lang}</span>
-        </div>
+    <div className="my-2 overflow-hidden rounded-lg border border-slate-700/40 bg-[#0b0d12]">
+      <div className="border-b border-slate-700/40 px-3 py-1.5">
+        <span className="font-mono text-[11px] text-slate-400">{lang}</span>
       </div>
-      <pre className="overflow-x-auto px-3 py-2.5 text-[12px] leading-relaxed text-slate-100">
+      <pre className="overflow-x-auto px-3 py-2.5 text-[12.5px] leading-relaxed text-slate-100">
         <code className="font-mono">{children}</code>
       </pre>
     </div>
@@ -149,10 +140,10 @@ function CodeBlock({ children, className }: { children?: ReactNode; className?: 
 export const mdComponents: Components = {
   p: ({ children }) => <p className="mb-2 leading-[1.65] last:mb-0">{children}</p>,
   ul: ({ children }) => (
-    <ul className="mb-2 list-disc space-y-1 pl-5 marker:text-primary/70">{children}</ul>
+    <ul className="mb-2 list-disc space-y-1 pl-5 marker:text-slate-400">{children}</ul>
   ),
   ol: ({ children }) => (
-    <ol className="mb-2 list-decimal space-y-1 pl-5 marker:font-semibold marker:text-primary/80">{children}</ol>
+    <ol className="mb-2 list-decimal space-y-1 pl-5 marker:text-slate-500">{children}</ol>
   ),
   li: ({ children }) => <li className="leading-snug">{children}</li>,
   strong: ({ children }) => (
@@ -160,10 +151,7 @@ export const mdComponents: Components = {
   ),
   em: ({ children }) => <em className="italic text-slate-600 dark:text-slate-300">{children}</em>,
   h1: ({ children }) => (
-    <div className="mb-2 mt-3 first:mt-0">
-      <p className={TYPE.heading1}>{children}</p>
-      <div className="mt-1 h-px w-12 bg-gradient-to-r from-primary via-primary/60 to-transparent" />
-    </div>
+    <p className={`mb-2 mt-3 first:mt-0 ${TYPE.heading1}`}>{children}</p>
   ),
   h2: ({ children }) => (
     <p className={`mb-1 mt-2.5 first:mt-0 ${TYPE.heading2}`}>{children}</p>
@@ -171,9 +159,9 @@ export const mdComponents: Components = {
   h3: ({ children }) => (
     <p className={`mb-1 mt-2 first:mt-0 ${TYPE.heading3}`}>{children}</p>
   ),
-  hr: () => <div className="my-3 h-px bg-gradient-to-r from-transparent via-slate-300/70 to-transparent dark:via-slate-700/70" />,
+  hr: () => <hr className="my-3 border-slate-200 dark:border-slate-700" />,
   blockquote: ({ children }) => (
-    <div className="my-2 flex gap-2 rounded-lg border border-primary/25 bg-primary/[0.06] px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200">
+    <div className="my-2 flex gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-700 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200">
       <svg className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
@@ -183,7 +171,7 @@ export const mdComponents: Components = {
   code: ({ children, className }) => {
     if (className) return <CodeBlock className={className}>{children}</CodeBlock>;
     return (
-      <code className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[0.85em] text-primary dark:bg-primary/20 dark:text-purple-300">
+      <code className="rounded bg-violet-50 px-1.5 py-0.5 font-mono text-[0.9em] text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
         {children}
       </code>
     );
@@ -193,7 +181,7 @@ export const mdComponents: Components = {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-baseline gap-0.5 text-primary underline decoration-primary/40 underline-offset-2 transition-colors hover:decoration-primary"
+      className="inline-flex items-baseline gap-0.5 text-violet-700 underline underline-offset-2 dark:text-violet-300"
     >
       {children}
       <svg className="h-2.5 w-2.5 self-center opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -3,7 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Block } from "@/shared/types/chatResponse";
-import { AgentOrb, CopyButton, SURFACE } from "./ui";
+import { AgentOrb, CopyButton, SURFACE, TYPE } from "./ui";
 import StructuredResponse from "./renderers/StructuredResponse";
 import { mdComponents } from "./renderers/markdown";
 
@@ -12,9 +12,10 @@ interface Props {
   content: string;
   fullscreen?: boolean;
   blocks?: Block[];
+  onAction?: (text: string) => void;
 }
 
-export default function ChatMessage({ role, content, fullscreen = false, blocks }: Props) {
+export default function ChatMessage({ role, content, fullscreen = false, blocks, onAction }: Props) {
   const isUser = role === "user";
   const bubbleMax = fullscreen
     ? isUser
@@ -31,30 +32,25 @@ export default function ChatMessage({ role, content, fullscreen = false, blocks 
       )}
 
       <div className={`flex min-w-0 max-w-full flex-col ${isUser ? "" : "flex-1"}`}>
+        {/* The one mono-uppercase role left in the component. */}
         <div className={`mb-1 flex items-center gap-2 px-1 ${isUser ? "justify-end" : ""}`}>
-          <span
-            className={`font-mono text-[9px] uppercase tracking-[0.22em] ${
-              isUser ? "text-slate-400 dark:text-slate-500" : "text-primary/75"
-            }`}
-          >
-            {isUser ? "You" : "Agent · Dharwin"}
-          </span>
+          <span className={TYPE.author}>{isUser ? "You" : "Dharwin"}</span>
         </div>
 
         <div
           className={[
             bubbleMax,
-            "relative min-w-0 max-w-full overflow-hidden box-border px-3.5 py-2.5 text-[13px] leading-relaxed break-words [overflow-wrap:anywhere]",
+            "relative min-w-0 max-w-full overflow-hidden box-border text-[13px] leading-relaxed break-words [overflow-wrap:anywhere]",
             isUser
-              ? `${SURFACE.bubbleUser} whitespace-pre-wrap`
-              : `${SURFACE.bubbleAgent} w-full`,
+              ? `${SURFACE.bubbleUser} whitespace-pre-wrap px-3.5 py-2.5`
+              : `${SURFACE.bubbleAgent} w-full px-1`,
           ].join(" ")}
         >
           <div className="relative">
             {isUser ? (
               content
             ) : blocks && blocks.length > 0 ? (
-              <StructuredResponse blocks={blocks} compact={!fullscreen} />
+              <StructuredResponse blocks={blocks} compact={!fullscreen} onAction={onAction} />
             ) : (
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
                 {content}
@@ -62,9 +58,11 @@ export default function ChatMessage({ role, content, fullscreen = false, blocks 
             )}
           </div>
 
+          {/* Reveal on hover OR keyboard focus — opacity-0 alone made this
+              unreachable for keyboard users and invisible on touch. */}
           {!isUser && content && (
-            <div className="mt-2 -mb-0.5 flex items-center justify-end opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100">
-              <CopyButton text={content} compact />
+            <div className="mt-2 -mb-0.5 flex items-center justify-end opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/msg:opacity-100">
+              <CopyButton text={content} />
             </div>
           )}
         </div>

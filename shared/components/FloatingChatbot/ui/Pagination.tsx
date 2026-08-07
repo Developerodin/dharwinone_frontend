@@ -48,7 +48,7 @@ function NavBtn({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
-      className="inline-flex items-center gap-1 rounded-md border border-slate-200/80 bg-white px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-slate-600 transition-all hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200/80 disabled:hover:text-slate-600 dark:border-slate-700/60 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:border-primary/40"
+      className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-white dark:border-slate-700/60 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:bg-slate-800"
     >
       {children}
     </button>
@@ -71,7 +71,7 @@ function PageDots({ count, active, onPick }: { count: number; active: number; on
     <div className="flex items-center gap-1">
       {slots.map((s, i) =>
         s === "…" ? (
-          <span key={`e-${i}`} className={`px-1 ${TYPE.meta} text-slate-400 dark:text-slate-600`}>·</span>
+          <span key={`e-${i}`} className={`px-1 ${TYPE.meta}`}>…</span>
         ) : (
           <button
             key={s}
@@ -80,10 +80,10 @@ function PageDots({ count, active, onPick }: { count: number; active: number; on
             aria-label={`Page ${s + 1}`}
             aria-current={s === active}
             className={[
-              "h-5 min-w-[1.25rem] rounded-md px-1.5 font-mono text-[10px] tracking-[0.04em] transition-all",
+              "h-6 min-w-[1.5rem] rounded-md px-1.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
               s === active
-                ? "bg-gradient-to-br from-primary to-purple-600 text-white shadow-[0_2px_8px_-3px_rgb(132_90_223_/_0.6)]"
-                : "border border-slate-200/80 bg-white text-slate-500 hover:border-primary/40 hover:text-primary dark:border-slate-700/60 dark:bg-slate-900/60 dark:text-slate-400 dark:hover:border-primary/40",
+                ? "bg-primary text-white"
+                : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700/60 dark:bg-slate-900/60 dark:text-slate-400 dark:hover:bg-slate-800",
             ].join(" ")}
           >
             {s + 1}

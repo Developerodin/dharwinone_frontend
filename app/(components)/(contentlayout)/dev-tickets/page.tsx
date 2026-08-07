@@ -851,7 +851,6 @@ export default function DevTicketsPage() {
           } catch { showToast("Could not open linked ticket"); }
         }}
         currentUserId={userId ?? ""}
-        isAdmin={isAdmin}
         canEdit={drawerTicket ? canEditDevTicket(drawerTicket, userId, isAdmin) : false}
       />
 

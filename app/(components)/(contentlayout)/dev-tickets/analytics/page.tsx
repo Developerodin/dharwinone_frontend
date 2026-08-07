@@ -441,7 +441,6 @@ export default function DevTicketsAnalyticsPage() {
           setDrawerTicket(null);
         }}
         currentUserId={userId}
-        isAdmin={isAdmin}
         canEdit={drawerTicket ? canEditDevTicket(drawerTicket, userId, isAdmin) : false}
         onTicketUpdated={handleTicketUpdated}
       />

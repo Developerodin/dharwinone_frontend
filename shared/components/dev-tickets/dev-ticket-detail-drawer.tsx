@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Swal from "sweetalert2";
 import {
   addComment,
+  updateComment,
+  deleteComment,
   getDevTicket,
   linkTicket,
   react,
@@ -66,7 +68,6 @@ export interface DevTicketDetailDrawerProps {
   open: boolean;
   onClose: () => void;
   currentUserId: string;
-  isAdmin: boolean;
   canEdit: boolean;
   onTicketUpdated: (ticket: DevTicket) => void;
   onOpenLinkedTicket?: (ticketDbId: string) => void;
@@ -79,7 +80,6 @@ export function DevTicketDetailDrawer({
   onTicketUpdated,
   onOpenLinkedTicket,
   currentUserId,
-  isAdmin,
   canEdit,
 }: DevTicketDetailDrawerProps) {
   const [detail, setDetail] = useState<DevTicket | null>(ticket);
@@ -87,6 +87,9 @@ export function DevTicketDetailDrawer({
   const [commentAttachments, setCommentAttachments] = useState<File[]>([]);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [addingComment, setAddingComment] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentText, setEditingCommentText] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [updateForm, setUpdateForm] = useState({
     title: "",
@@ -225,6 +228,55 @@ export function DevTicketDetailDrawer({
       await Swal.fire({ icon: "error", title: "Failed", text: e?.response?.data?.message ?? e?.message ?? "Could not add comment." });
     } finally {
       setAddingComment(false);
+    }
+  };
+
+  const cancelEditComment = () => {
+    setEditingCommentId(null);
+    setEditingCommentText("");
+  };
+
+  const handleUpdateComment = async (commentId: string) => {
+    const next = editingCommentText.trim();
+    if (!ticketId || !next) return;
+    try {
+      setCommentBusy(true);
+      const latest = await updateComment(ticketId, commentId, next);
+      setDetail(latest);
+      onTicketUpdated(latest);
+      cancelEditComment();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      await Swal.fire({ icon: "error", title: "Failed", text: e?.response?.data?.message ?? e?.message ?? "Could not update comment." });
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string, hasFiles: boolean) => {
+    if (!ticketId) return;
+    const confirmed = await Swal.fire({
+      icon: "warning",
+      title: "Delete comment?",
+      text: hasFiles
+        ? "The comment and the files attached to it will be removed. This cannot be undone."
+        : "This comment will be removed. This cannot be undone.",
+      showCancelButton: true,
+      confirmButtonText: "Delete",
+      confirmButtonColor: "#ef4444",
+    });
+    if (!confirmed.isConfirmed) return;
+    try {
+      setCommentBusy(true);
+      const latest = await deleteComment(ticketId, commentId);
+      setDetail(latest);
+      onTicketUpdated(latest);
+      if (editingCommentId === commentId) cancelEditComment();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      await Swal.fire({ icon: "error", title: "Failed", text: e?.response?.data?.message ?? e?.message ?? "Could not delete comment." });
+    } finally {
+      setCommentBusy(false);
     }
   };
 
@@ -899,6 +951,10 @@ export function DevTicketDetailDrawer({
                   const isOwn = currentUserId && String(authorId) === String(currentUserId);
                   const hasAttachments = (c.attachments ?? []).length > 0;
                   const hasText = Boolean(c.content?.trim());
+                  const isEditing = editingCommentId === cid;
+                  // Own words, own controls: only the author may edit or delete a comment.
+                  const canEditComment = Boolean(isOwn);
+                  const canDeleteComment = canEditComment;
                   const imageAttachments = (c.attachments ?? []).filter((a) => isImage(a.mimeType));
                   const fileAttachments = (c.attachments ?? []).filter((a) => !isImage(a.mimeType));
                   return (
@@ -945,27 +1001,94 @@ export function DevTicketDetailDrawer({
                           </div>
                         )}
 
-                        {(hasText || c.createdAt) && (
-                          <div className={`flex flex-col gap-1 overflow-visible ${isOwn ? "items-end" : "items-start"}`}>
-                            {hasText && (
-                              <div
-                                className={`box-border max-w-[min(100%,22rem)] overflow-visible px-4 py-3 text-left text-[0.875rem] leading-[1.55] tracking-normal break-words whitespace-pre-wrap shadow-[0_1px_2px_rgba(15,23,42,0.08)] ${
-                                  isOwn
-                                    ? "rounded-[1.125rem] rounded-br-[0.375rem] bg-primary text-white dark:shadow-[0_1px_3px_rgba(0,0,0,0.25)] [&_span]:!font-semibold [&_span]:!text-white/95"
-                                    : "rounded-[1.125rem] rounded-bl-[0.375rem] bg-slate-100 text-defaulttextcolor dark:bg-white/[0.08] dark:text-white/90"
-                                }`}
+                        {isEditing ? (
+                          <div className="w-[min(100%,22rem)] min-w-[14rem]">
+                            <label htmlFor={`dev-ticket-edit-comment-${cid}`} className="sr-only">
+                              Edit comment
+                            </label>
+                            <textarea
+                              id={`dev-ticket-edit-comment-${cid}`}
+                              value={editingCommentText}
+                              onChange={(e) => setEditingCommentText(e.target.value)}
+                              rows={3}
+                              maxLength={2000}
+                              autoFocus
+                              className={EDIT_TEXTAREA}
+                            />
+                            <div className="mt-2 flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={cancelEditComment}
+                                disabled={commentBusy}
+                                className="inline-flex h-8 items-center rounded-lg px-3 text-[0.75rem] font-medium text-slate-500 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50 dark:text-white/50 dark:hover:bg-white/10"
                               >
-                                {highlightMentions(c.content)}
-                              </div>
-                            )}
-                            <time
-                              dateTime={c.createdAt}
-                              className="px-1 text-[0.6875rem] text-slate-400 dark:text-white/40"
-                              title={formatDate(c.createdAt)}
-                            >
-                              {formatRelative(c.createdAt)}
-                            </time>
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateComment(cid)}
+                                disabled={commentBusy || !editingCommentText.trim() || editingCommentText.trim() === c.content}
+                                aria-busy={commentBusy}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[0.75rem] font-semibold text-white transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50"
+                              >
+                                <i className={commentBusy ? "ri-loader-4-line animate-spin" : "ri-check-line"} />
+                                Save
+                              </button>
+                            </div>
                           </div>
+                        ) : (
+                          (hasText || c.createdAt) && (
+                            <div className={`flex flex-col gap-1 overflow-visible ${isOwn ? "items-end" : "items-start"}`}>
+                              {hasText && (
+                                <div
+                                  className={`box-border max-w-[min(100%,22rem)] overflow-visible px-4 py-3 text-left text-[0.875rem] leading-[1.55] tracking-normal break-words whitespace-pre-wrap shadow-[0_1px_2px_rgba(15,23,42,0.08)] ${
+                                    isOwn
+                                      ? "rounded-[1.125rem] rounded-br-[0.375rem] bg-primary text-white dark:shadow-[0_1px_3px_rgba(0,0,0,0.25)] [&_span]:!font-semibold [&_span]:!text-white/95"
+                                      : "rounded-[1.125rem] rounded-bl-[0.375rem] bg-slate-100 text-defaulttextcolor dark:bg-white/[0.08] dark:text-white/90"
+                                  }`}
+                                >
+                                  {highlightMentions(c.content)}
+                                </div>
+                              )}
+                              <div className={`flex items-center gap-0.5 ${isOwn ? "flex-row-reverse" : ""}`}>
+                                <time
+                                  dateTime={c.createdAt}
+                                  className="px-1 text-[0.6875rem] text-slate-400 dark:text-white/40"
+                                  title={c.editedAt ? `${formatDate(c.createdAt)} · edited ${formatDate(c.editedAt)}` : formatDate(c.createdAt)}
+                                >
+                                  {formatRelative(c.createdAt)}
+                                  {c.editedAt ? " · edited" : ""}
+                                </time>
+                                {canEditComment && hasText && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingCommentId(cid);
+                                      setEditingCommentText(c.content);
+                                    }}
+                                    disabled={commentBusy}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[0.8rem] text-slate-400 transition hover:bg-slate-100 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-50 dark:text-white/40 dark:hover:bg-white/10"
+                                    aria-label="Edit comment"
+                                    title="Edit comment"
+                                  >
+                                    <i className="ri-pencil-line" />
+                                  </button>
+                                )}
+                                {canDeleteComment && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteComment(cid, hasAttachments)}
+                                    disabled={commentBusy}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[0.8rem] text-slate-400 transition hover:bg-red-500/10 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30 disabled:opacity-50 dark:text-white/40"
+                                    aria-label="Delete comment"
+                                    title="Delete comment"
+                                  >
+                                    <i className="ri-delete-bin-line" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )
                         )}
 
                         <div className={`flex flex-wrap items-center gap-1 ${isOwn ? "justify-end" : ""}`}>

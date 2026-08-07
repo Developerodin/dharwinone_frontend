@@ -444,7 +444,6 @@ export default function DevTicketsBoardPage() {
           }
         }}
         currentUserId={userId ?? ""}
-        isAdmin={isAdmin}
         canEdit={drawerTicket ? canEditDevTicket(drawerTicket, userId, isAdmin) : false}
       />
     </Fragment>

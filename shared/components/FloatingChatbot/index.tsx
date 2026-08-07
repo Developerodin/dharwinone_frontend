@@ -51,6 +51,7 @@ const SIDEBAR_WIDTH = 420;
  */
 const SIDEBAR_PUSH_BREAKPOINT = 1280;
 const SIDEBAR_TRANSITION_MS = 320;
+const UNDO_WINDOW_MS = 8000;
 
 const SUGGESTED_QUESTIONS = [
   { q: "How many employees do we have?", k: "PEOPLE" },
@@ -66,10 +67,12 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [clearedMessages, setClearedMessages] = useState<Message[] | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const storageKey = `dharwin_chat_${userId}`;
   const fabPosKey = `dharwin_chat_fab_pos_${userId}`;
@@ -145,10 +148,28 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
     };
   }, [viewMode]);
 
+  // Clearing wipes localStorage AND the server-side conversation, and the
+  // trash icon sits next to Expand/Close. It used to be one irreversible
+  // click. Hold the thread in memory for UNDO_WINDOW_MS so a misclick is
+  // recoverable; the server call is deferred until that window closes.
   const clearHistory = () => {
+    if (messages.length === 0) return;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setClearedMessages(messages);
     setMessages([]);
     try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
-    void clearChatConversation();
+    undoTimerRef.current = setTimeout(() => {
+      setClearedMessages(null);
+      undoTimerRef.current = null;
+      void clearChatConversation();
+    }, UNDO_WINDOW_MS);
+  };
+
+  const undoClear = () => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = null;
+    if (clearedMessages) setMessages(clearedMessages);
+    setClearedMessages(null);
   };
 
   const stopStreaming = () => {
@@ -249,57 +270,32 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
       {/* Agent console */}
       <div
         className={[
-          "fixed top-0 right-0 z-[11000] flex flex-col overflow-hidden",
+          "agent-console fixed top-0 right-0 z-[11000] flex flex-col overflow-hidden",
           "bg-white dark:bg-slate-950",
-          "border-l border-slate-200/70 dark:border-slate-800/80",
-          "shadow-[-12px_0_40px_-14px_rgba(15,23,42,0.28)] dark:shadow-[-12px_0_40px_-14px_rgba(0,0,0,0.7)]",
+          "border-l border-slate-200 dark:border-slate-800",
+          "shadow-[-12px_0_40px_-14px_rgba(15,23,42,0.18)] dark:shadow-[-12px_0_40px_-14px_rgba(0,0,0,0.7)]",
           "transition-transform duration-[320ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
           isFullscreen ? "w-screen h-screen" : "h-screen w-[94vw] max-w-[420px]",
           isOpen ? "translate-x-0" : "translate-x-full",
         ].join(" ")}
         role="dialog"
-        aria-label="Dharwin Agent Console"
+        aria-label="Dharwin Assistant"
         aria-hidden={!isOpen}
       >
-        <div className="agent-grid-bg pointer-events-none absolute inset-0 opacity-60 dark:opacity-100" aria-hidden />
-        <div
-          className="pointer-events-none absolute inset-0 opacity-60 dark:opacity-50"
-          style={{
-            background:
-              "radial-gradient(800px 400px at 100% -10%, rgba(132,90,223,0.18), transparent 60%), radial-gradient(600px 380px at -10% 110%, rgba(34,211,238,0.12), transparent 65%)",
-          }}
-          aria-hidden
-        />
-
         {/* Header */}
-        <div className="relative z-10 flex flex-shrink-0 items-center justify-between gap-2 border-b border-slate-200/70 bg-white/70 px-3.5 py-3 backdrop-blur-xl dark:border-slate-800/70 dark:bg-slate-950/60">
-          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-cyan-400/60" />
-          <span aria-hidden className="pointer-events-none absolute inset-x-0 -top-px h-[2px] overflow-hidden">
-            <span
-              className="block h-full w-1/3 bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent"
-              style={{ animation: "agent-shimmer 4.5s linear infinite" }}
-            />
-          </span>
-
+        <div className="relative z-10 flex flex-shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3.5 py-3 dark:border-slate-800 dark:bg-slate-950">
           <div className="flex min-w-0 items-center gap-3">
             <AgentOrb size="md" pulse={isPreparing || isStreaming} />
 
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-[13.5px] font-semibold text-slate-900 dark:text-slate-50">Dharwin Agent</span>
-                <span className="rounded-md border border-primary/25 bg-primary/[0.08] px-1 py-px font-mono text-[8.5px] uppercase tracking-[0.2em] text-primary/80">v1</span>
-              </div>
+              <span className="block truncate text-[15px] font-semibold text-slate-900 dark:text-slate-50">Dharwin</span>
               <div className="mt-0.5 flex items-center gap-1.5">
-                <span className={`relative h-1.5 w-1.5 rounded-full ${isPreparing || isStreaming ? "bg-cyan-400" : "bg-emerald-400"}`}>
-                  <span className={`absolute inset-0 rounded-full ${isPreparing || isStreaming ? "bg-cyan-400" : "bg-emerald-400"} animate-ping opacity-60`} />
-                </span>
-                <span className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                  {statusLabel}
-                </span>
+                <span className={`h-1.5 w-1.5 rounded-full ${isPreparing || isStreaming ? "bg-primary" : "bg-emerald-500"}`} />
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">{statusLabel}</span>
                 {(isPreparing || isStreaming) && (
-                  <span className="ml-1 inline-flex h-[3px] w-12 origin-left overflow-hidden rounded-full bg-slate-200/60 dark:bg-slate-800">
+                  <span className="ml-1 inline-flex h-[3px] w-12 origin-left overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
                     <span
-                      className="block h-full w-full bg-gradient-to-r from-primary via-purple-400 to-cyan-400"
+                      className="block h-full w-full bg-primary"
                       style={{ animation: "agent-bar 1.4s ease-in-out infinite" }}
                     />
                   </span>
@@ -309,13 +305,18 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
           </div>
 
           <div className="relative flex items-center gap-0.5">
-            {messages.length > 0 && !isLoading && (
-              <IconButton onClick={clearHistory} label="Clear conversation">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </IconButton>
-            )}
+            {/* Always rendered, disabled when there is nothing to clear —
+                conditional rendering made Expand and Close jump sideways
+                under the cursor whenever the thread state changed. */}
+            <IconButton
+              onClick={clearHistory}
+              label="Clear conversation"
+              disabled={messages.length === 0 || isLoading}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </IconButton>
             <IconButton
               onClick={() => setViewMode(isFullscreen ? "widget" : "fullscreen")}
               label={isFullscreen ? "Collapse" : "Expand to fullscreen"}
@@ -352,7 +353,14 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
 
             {messages.map((msg) =>
               msg.role === "assistant" && msg.content === "" ? null : (
-                <ChatMessage key={msg.id} role={msg.role} content={msg.content} fullscreen={isFullscreen} blocks={msg.blocks} />
+                <ChatMessage
+                  key={msg.id}
+                  role={msg.role}
+                  content={msg.content}
+                  fullscreen={isFullscreen}
+                  blocks={msg.blocks}
+                  onAction={(text) => handleSend(text)}
+                />
               )
             )}
 
@@ -363,23 +371,22 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
         </div>
 
         {/* Composer */}
-        <div className={`relative z-10 flex-shrink-0 border-t border-slate-200/70 bg-white/80 backdrop-blur-xl dark:border-slate-800/70 dark:bg-slate-950/70 ${isFullscreen ? "px-4 sm:px-8 md:px-16 py-4" : "px-3 py-3"}`}>
+        <div className={`relative z-10 flex-shrink-0 border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950 ${isFullscreen ? "px-4 sm:px-8 md:px-16 py-4" : "px-3 py-3"}`}>
           <div className={isFullscreen ? "mx-auto max-w-3xl" : ""}>
+            {clearedMessages && (
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                <span>Conversation cleared.</span>
+                <button
+                  type="button"
+                  onClick={undoClear}
+                  className="rounded font-semibold text-violet-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:text-violet-300"
+                >
+                  Undo
+                </button>
+              </div>
+            )}
             <div className="group relative">
-              <span
-                aria-hidden
-                className="pointer-events-none absolute -inset-px rounded-2xl bg-gradient-to-br from-primary/40 via-purple-400/25 to-cyan-400/40 opacity-0 transition-opacity duration-300 group-focus-within:opacity-100"
-                style={{
-                  WebkitMask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
-                  WebkitMaskComposite: "xor",
-                  maskComposite: "exclude",
-                  padding: "1px",
-                }}
-              />
-              <div className="relative flex items-end gap-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-2.5 py-1.5 transition-colors focus-within:border-primary/30 focus-within:bg-white dark:border-slate-800 dark:bg-slate-900/70 dark:focus-within:border-primary/40 dark:focus-within:bg-slate-900">
-                <span aria-hidden className="mb-2 ml-0.5 hidden select-none font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/70 sm:inline">
-                  ›_
-                </span>
+              <div className="relative flex items-end gap-2 rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 transition-colors focus-within:border-primary focus-within:ring-1 focus-within:ring-primary dark:border-slate-700 dark:bg-slate-900">
                 <textarea
                   ref={textareaRef}
                   value={input}
@@ -403,11 +410,10 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
                   <button
                     onClick={() => handleSend()}
                     disabled={!input.trim()}
-                    className="group/btn relative mb-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-purple-600 text-white shadow-[0_4px_14px_-4px_rgb(132_90_223_/_0.55)] transition-all hover:shadow-[0_6px_18px_-4px_rgb(132_90_223_/_0.7)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none"
+                    className="group/btn relative mb-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-colors hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
                     aria-label="Send"
                     title="Send"
                   >
-                    <span className="absolute inset-0 rounded-xl bg-gradient-to-br from-white/25 to-transparent opacity-60" />
                     <svg
                       className="relative h-4 w-4 -translate-x-px translate-y-px transition-transform group-hover/btn:translate-x-0 group-hover/btn:translate-y-0"
                       fill="none"
@@ -421,12 +427,15 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
                 )}
               </div>
             </div>
-            <div className="mt-1.5 flex items-center justify-between gap-2 px-1 text-[10px] text-slate-400 dark:text-slate-500">
-              <span className="inline-flex items-center gap-1.5 truncate">
-                <svg className="h-3 w-3 flex-shrink-0 text-amber-500/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            {/* Safety copy: was 10px slate-400 (2.56:1, fails AA) and
+                `truncate`d mid-sentence. Now 11px slate-600 (7.6:1) and
+                allowed to wrap. */}
+            <div className="mt-2 flex items-start justify-between gap-3 px-1 text-[11px] text-slate-600 dark:text-slate-400">
+              <span className="inline-flex items-start gap-1.5">
+                <svg className="mt-px h-3 w-3 flex-shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />
                 </svg>
-                <span className="truncate">AI replies may be inaccurate. Verify before acting.</span>
+                <span>AI replies may be inaccurate. Verify before acting.</span>
               </span>
               <span className="hidden flex-shrink-0 items-center gap-1 sm:inline-flex">
                 <Kbd>Enter</Kbd>
@@ -456,37 +465,19 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
         aria-hidden={isOpen}
         tabIndex={isOpen ? -1 : 0}
         className={[
-          "z-[11001] select-none touch-manipulation",
+          "agent-fab z-[11001] select-none touch-manipulation",
           "h-14 w-14 rounded-full text-white",
           "relative overflow-visible",
           "transition-[transform,opacity] duration-200",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
           isOpen ? "pointer-events-none scale-75 opacity-0" : "scale-100 opacity-100",
           fab.isDragging ? "cursor-grabbing scale-110" : "cursor-grab hover:scale-105 active:scale-95",
         ].join(" ")}
       >
-        {!fab.isDragging && !isOpen && (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-full bg-primary/35"
-            style={{ animation: "agent-pulse-ring 2.4s ease-out infinite" }}
-          />
-        )}
         <span
           aria-hidden
-          className="pointer-events-none absolute -inset-[2px] rounded-full"
-          style={{
-            background:
-              "conic-gradient(from 0deg, rgba(132,90,223,0.85), rgba(34,211,238,0.7), rgba(132,90,223,0.85))",
-            animation: "agent-orbit 6s linear infinite",
-            WebkitMask: "radial-gradient(circle, transparent 62%, black 63%)",
-            mask: "radial-gradient(circle, transparent 62%, black 63%)",
-          }}
+          className="absolute inset-0 rounded-full bg-primary shadow-[0_8px_24px_-8px_rgb(132_90_223_/_0.6)]"
         />
-        <span
-          aria-hidden
-          className="absolute inset-[3px] rounded-full bg-gradient-to-br from-primary via-purple-500 to-cyan-400 shadow-[0_10px_30px_-8px_rgb(132_90_223_/_0.7)] ring-1 ring-white/15"
-        />
-        <span aria-hidden className="absolute inset-[3px] rounded-full bg-gradient-to-br from-white/30 to-transparent" />
         <span className="relative flex h-full w-full items-center justify-center">
           <svg className="h-6 w-6 drop-shadow-sm" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
