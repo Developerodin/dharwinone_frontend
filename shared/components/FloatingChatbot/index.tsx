@@ -26,7 +26,22 @@ import {
   IconButton,
   Kbd,
   ReasoningIndicator,
+  TABLE_PAGE_SIZE,
 } from "./ui";
+
+/** Wide tables / long lists are cramped in the 420px dock — promote to full page. */
+function blocksNeedFullscreen(blocks?: Block[]): boolean {
+  if (!blocks?.length) return false;
+  for (const b of blocks) {
+    if (b.type === "table") {
+      if ((b.columns?.length ?? 0) >= 4) return true;
+      if ((b.rows?.length ?? 0) > TABLE_PAGE_SIZE) return true;
+    }
+    if (b.type === "cards" && (b.items?.length ?? 0) > 6) return true;
+    if (b.type === "group" && blocksNeedFullscreen(b.blocks)) return true;
+  }
+  return false;
+}
 
 interface Message {
   id: string;
@@ -208,6 +223,9 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, blocks: env.blocks } : m))
             );
+            if (blocksNeedFullscreen(env.blocks)) {
+              setViewMode((v) => (v === "widget" ? "fullscreen" : v));
+            }
           }
         }
       );
@@ -274,8 +292,11 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
           "bg-white dark:bg-slate-950",
           "border-l border-slate-200 dark:border-slate-800",
           "shadow-[-12px_0_40px_-14px_rgba(15,23,42,0.18)] dark:shadow-[-12px_0_40px_-14px_rgba(0,0,0,0.7)]",
-          "transition-transform duration-[320ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-          isFullscreen ? "w-screen h-screen" : "h-screen w-[94vw] max-w-[420px]",
+          "transition-[transform,width] duration-[320ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+          // Full page = near-viewport slide-over (left gutter keeps backdrop dismissible).
+          isFullscreen
+            ? "h-screen w-[min(100vw,calc(100vw-1.25rem))] sm:w-[min(100vw,calc(100vw-2.5rem))] max-w-none"
+            : "h-screen w-[94vw] max-w-[420px]",
           isOpen ? "translate-x-0" : "translate-x-full",
         ].join(" ")}
         role="dialog"

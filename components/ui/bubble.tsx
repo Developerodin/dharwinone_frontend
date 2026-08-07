@@ -13,34 +13,32 @@ type BubbleVariant =
 
 type BubbleAlign = "start" | "end";
 
-const bubbleVariantClass: Record<BubbleVariant, string> = {
-  default:
-    "*:data-[slot=bubble-content]:bg-primary *:data-[slot=bubble-content]:text-violet-50 " +
-    "[&>[data-slot=bubble-content]:is(button,a):hover]:bg-primary/90",
-  secondary:
-    "*:data-[slot=bubble-content]:bg-secondary *:data-[slot=bubble-content]:text-white " +
-    "[&>[data-slot=bubble-content]:is(button,a):hover]:bg-secondary/90",
+/**
+ * Fills live on BubbleContent itself. Tailwind 3.4 composes
+ * `*:data-[slot=bubble-content]:bg-*` as
+ * `[data-slot=bubble-content] > *` on the *parent* — so backgrounds never
+ * painted when the class sat on Bubble. Direct utilities avoid that.
+ */
+const bubbleContentFillClass: Record<BubbleVariant, string> = {
+  default: "bg-primary text-violet-50 [button,a]:hover:bg-primary/90",
+  secondary: "bg-secondary text-white [button,a]:hover:bg-secondary/90",
   muted:
-    "*:data-[slot=bubble-content]:bg-slate-100 *:data-[slot=bubble-content]:text-slate-800 " +
-    "dark:*:data-[slot=bubble-content]:bg-slate-800/70 dark:*:data-[slot=bubble-content]:text-slate-100 " +
-    "[&>[data-slot=bubble-content]:is(button,a):hover]:bg-slate-200 dark:[&>[data-slot=bubble-content]:is(button,a):hover]:bg-slate-700",
+    "bg-slate-100 text-slate-800 dark:bg-slate-800/70 dark:text-slate-100 " +
+    "[button,a]:hover:bg-slate-200 dark:[button,a]:hover:bg-slate-700",
   tinted:
-    "*:data-[slot=bubble-content]:bg-primary/10 *:data-[slot=bubble-content]:text-slate-900 " +
-    "dark:*:data-[slot=bubble-content]:bg-primary/20 dark:*:data-[slot=bubble-content]:text-slate-50 " +
-    "[&>[data-slot=bubble-content]:is(button,a):hover]:bg-primary/15",
+    "bg-primary/10 text-slate-900 dark:bg-primary/20 dark:text-slate-50 " +
+    "[button,a]:hover:bg-primary/15",
   outline:
-    "*:data-[slot=bubble-content]:border-slate-200 *:data-[slot=bubble-content]:bg-white " +
-    "dark:*:data-[slot=bubble-content]:border-slate-700 dark:*:data-[slot=bubble-content]:bg-slate-950 " +
-    "[&>[data-slot=bubble-content]:is(button,a):hover]:bg-slate-50 dark:[&>[data-slot=bubble-content]:is(button,a):hover]:bg-slate-900",
+    "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950 " +
+    "[button,a]:hover:bg-slate-50 dark:[button,a]:hover:bg-slate-900",
   ghost:
-    "border-none *:data-[slot=bubble-content]:rounded-none *:data-[slot=bubble-content]:bg-transparent " +
-    "*:data-[slot=bubble-content]:p-0 " +
-    "[&>[data-slot=bubble-content]:is(button,a):hover]:bg-slate-100 dark:[&>[data-slot=bubble-content]:is(button,a):hover]:bg-slate-800/50",
+    "rounded-none border-none bg-transparent p-0 " +
+    "[button,a]:hover:bg-slate-100 dark:[button,a]:hover:bg-slate-800/50",
   destructive:
-    "*:data-[slot=bubble-content]:bg-danger/10 *:data-[slot=bubble-content]:text-danger " +
-    "dark:*:data-[slot=bubble-content]:bg-danger/20 " +
-    "[&>[data-slot=bubble-content]:is(button,a):hover]:bg-danger/20",
+    "bg-danger/10 text-danger dark:bg-danger/20 [button,a]:hover:bg-danger/20",
 };
+
+const BubbleVariantContext = React.createContext<BubbleVariant>("default");
 
 function BubbleGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
@@ -62,19 +60,20 @@ function Bubble({
   align?: BubbleAlign;
 }) {
   return (
-    <div
-      data-slot="bubble"
-      data-variant={variant}
-      data-align={align}
-      className={cn(
-        "group/bubble relative flex w-fit max-w-[80%] min-w-0 flex-col gap-1",
-        "group-data-[align=end]/message:self-end data-[align=end]:self-end",
-        "data-[variant=ghost]:max-w-full",
-        bubbleVariantClass[variant],
-        className
-      )}
-      {...props}
-    />
+    <BubbleVariantContext.Provider value={variant}>
+      <div
+        data-slot="bubble"
+        data-variant={variant}
+        data-align={align}
+        className={cn(
+          "group/bubble relative flex w-fit max-w-[80%] min-w-0 flex-col gap-1",
+          "group-data-[align=end]/message:self-end data-[align=end]:self-end",
+          "data-[variant=ghost]:max-w-full",
+          className
+        )}
+        {...props}
+      />
+    </BubbleVariantContext.Provider>
   );
 }
 
@@ -86,6 +85,8 @@ function BubbleContent({
 }: React.ComponentProps<"div"> & {
   asChild?: boolean;
 }) {
+  const variant = React.useContext(BubbleVariantContext);
+
   // Padding lives on the painted surface so text never kisses the radius.
   // box-border + wrap utilities keep long lines inside the fill.
   const classes = cn(
@@ -95,6 +96,7 @@ function BubbleContent({
     "group-data-[align=end]/bubble:self-end",
     "[button]:text-left [button,a]:transition-colors",
     "[button,a]:outline-none [button,a]:focus-visible:ring-2 [button,a]:focus-visible:ring-primary/50",
+    bubbleContentFillClass[variant],
     className
   );
 
@@ -102,7 +104,6 @@ function BubbleContent({
     return React.cloneElement(children, {
       ...props,
       className: cn(classes, children.props.className),
-      // Preserve slot targeting used by Bubble variant styles.
       ...({ "data-slot": "bubble-content" } as const),
     } as Partial<typeof children.props> & { className?: string });
   }
