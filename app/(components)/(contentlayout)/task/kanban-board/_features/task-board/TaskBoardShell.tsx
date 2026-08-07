@@ -6,6 +6,7 @@ import { deleteTask, getTaskId } from "@/shared/lib/api/tasks";
 import type { TaskStatus } from "@/shared/lib/api/tasks";
 import { compilePredicate } from "./lib/filter-predicates";
 import { getTaskBoardCapabilities } from "./lib/task-board-capabilities";
+import { setChatUiContext } from "@/shared/lib/chatUiContext";
 import { toast } from "./lib/toast";
 import { trackTaskBoard } from "./lib/telemetry";
 import { useTaskFilters } from "./hooks/useTaskFilters";
@@ -60,6 +61,46 @@ export function TaskBoardShell(): React.JSX.Element {
     () => tasks.filter((t) => predicate(t)).length,
     [tasks, predicate]
   );
+  const visibleCounts = useMemo(() => {
+    const filtered = tasks.filter((t) => predicate(t));
+    const counts = {
+      total: filtered.length,
+      new: 0,
+      todo: 0,
+      ongoing: 0,
+      review: 0,
+      completed: 0,
+    };
+    for (const t of filtered) {
+      if (t.status === "new") counts.new += 1;
+      else if (t.status === "todo") counts.todo += 1;
+      else if (t.status === "on_going") counts.ongoing += 1;
+      else if (t.status === "in_review") counts.review += 1;
+      else if (t.status === "completed") counts.completed += 1;
+    }
+    return counts;
+  }, [tasks, predicate]);
+
+  const currentProjectLabel = useMemo(() => {
+    const pid = filters.projectIds?.[0];
+    if (!pid || pid === "all") return "All Projects";
+    const p = projects.find((proj) => String(proj.id) === String(pid));
+    return p?.name ?? "All Projects";
+  }, [filters.projectIds, projects]);
+
+  useEffect(() => {
+    setChatUiContext({
+      currentModule: "TaskBoard",
+      currentProject: currentProjectLabel,
+      activeFilters: {
+        assignee: filters.assignedToMe ? "me" : filters.unassigned ? "unassigned" : null,
+        stage: filters.statuses?.[0] ?? null,
+        search: filters.q || null,
+      },
+      visibleCounts,
+    });
+    return () => setChatUiContext(null);
+  }, [currentProjectLabel, filters, visibleCounts]);
   // True total across all pages (server-computed, scoped), not just the loaded page.
   const leavingCount = leavingTotal;
 

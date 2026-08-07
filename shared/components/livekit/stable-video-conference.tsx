@@ -1,17 +1,84 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import {
   useTracks,
   useSpeakingParticipants,
   ParticipantTile,
+  Chat,
+  ChatIcon,
+  ChatToggle,
   ControlBar,
   ConnectionStateToast,
+  LayoutContextProvider,
   isTrackReference,
   type TrackReferenceOrPlaceholder,
+  type WidgetState,
+  useConnectionState,
+  useCreateLayoutContext,
 } from "@livekit/components-react";
-import { Track } from "livekit-client";
+import { ConnectionState, Track } from "livekit-client";
 import { MEETING_CONTROL_BAR_RESPONSIVE_CSS } from "./meeting-control-bar-responsive.css";
+
+/** ControlBar chat is disabled — we inject ChatToggle beside screen share instead. */
+export const MEETING_CONTROL_BAR_CONTROLS = {
+  microphone: true,
+  camera: true,
+  screenShare: true,
+  chat: false,
+  leave: true,
+} as const;
+
+export const MEETING_CHAT_BUTTON_SLOT_ID = "chat-button-slot";
+
+const LEAVE_BUTTON_SELECTOR =
+  ".lk-disconnect-button, [data-lk-disconnect], button[aria-label*='Leave'], button[aria-label*='Disconnect']";
+
+/** Portals ChatToggle into `.lk-control-bar` (after screen share, before leave). */
+function MeetingControlBarChatToggle() {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const tryInject = () => {
+      const bar = document.querySelector(
+        ".lk-video-conference > .lk-control-bar"
+      ) as HTMLElement | null;
+      if (!bar) return false;
+
+      let chatSlot = document.getElementById(MEETING_CHAT_BUTTON_SLOT_ID);
+      if (!chatSlot) {
+        chatSlot = document.createElement("div");
+        chatSlot.id = MEETING_CHAT_BUTTON_SLOT_ID;
+        chatSlot.style.cssText =
+          "display:flex;align-items:center;order:80;flex-shrink:0;";
+        const leaveBtn = bar.querySelector(LEAVE_BUTTON_SELECTOR);
+        if (leaveBtn) {
+          bar.insertBefore(chatSlot, leaveBtn);
+        } else {
+          bar.appendChild(chatSlot);
+        }
+      }
+      setSlot(chatSlot);
+      return true;
+    };
+
+    if (tryInject()) return;
+    const timer = window.setInterval(() => {
+      if (tryInject()) window.clearInterval(timer);
+    }, 300);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  if (!slot) return null;
+
+  return createPortal(
+    <ChatToggle aria-label="Toggle chat">
+      <ChatIcon />
+    </ChatToggle>,
+    slot
+  );
+}
 
 function useNarrowControlBar(breakpointPx = 760) {
   const [narrow, setNarrow] = useState(false);
@@ -167,6 +234,13 @@ function LayoutToggle({
 }
 
 export function StableVideoConference() {
+  const [widgetState, setWidgetState] = useState<WidgetState>({
+    showChat: false,
+    unreadMessages: 0,
+    showSettings: false,
+  });
+  const layoutContext = useCreateLayoutContext();
+
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -272,6 +346,45 @@ export function StableVideoConference() {
 
   const narrowControlBar = useNarrowControlBar();
 
+  // Chat is a right-anchored drawer over the stage. It stays mounted while
+  // closed so `useChat`'s in-memory history and the unread counter survive a
+  // close/open cycle — LiveKit does not persist messages, unmounting loses them.
+  const chatOpen = widgetState.showChat === true;
+  const chatPanelRef = useRef<HTMLElement>(null);
+
+  // Opening the drawer means the user intends to type. Sending focus straight
+  // to the input saves a click and lands after the slide-in.
+  useEffect(() => {
+    if (!chatOpen) return;
+    const input = chatPanelRef.current?.querySelector<HTMLInputElement>(
+      ".lk-chat-form-input"
+    );
+    const t = setTimeout(() => input?.focus(), 280);
+    return () => clearTimeout(t);
+  }, [chatOpen]);
+
+  // LiveKit's <Chat> submit handler awaits send() with no catch, so submitting
+  // while the room is down rejects with `UnexpectedConnectionState: PC manager
+  // is closed` — an unhandled rejection that shows the dev error overlay and,
+  // in production, drops the message with no feedback at all. Intercept submit
+  // in the CAPTURE phase (before React's handler) whenever we're not connected:
+  // the typed text stays in the input and the drawer says why it didn't send.
+  // ponytail: guards the disconnected case only; other send rejections still
+  // belong to the prefab. Owning the markup via useChat is the upgrade path.
+  const connectionState = useConnectionState();
+  const chatOffline = connectionState !== ConnectionState.Connected;
+
+  useEffect(() => {
+    const panel = chatPanelRef.current;
+    if (!panel || !chatOffline) return;
+    const blockSubmit = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    panel.addEventListener("submit", blockSubmit, true);
+    return () => panel.removeEventListener("submit", blockSubmit, true);
+  }, [chatOffline]);
+
   // Memoize the control bar so re-renders from pin / spotlight / active-speaker
   // state never reconcile <ControlBar>. The page injects #recording-button-slot
   // into .lk-control-bar via raw DOM; a parent-driven reconcile would wipe that
@@ -281,7 +394,7 @@ export function StableVideoConference() {
       <>
         <ControlBar
           variation={narrowControlBar ? "minimal" : "verbose"}
-          controls={{ microphone: true, camera: true, screenShare: true, leave: true }}
+          controls={MEETING_CONTROL_BAR_CONTROLS}
         />
         <ConnectionStateToast />
       </>
@@ -290,7 +403,17 @@ export function StableVideoConference() {
   );
 
   return (
-    <div className="lk-video-conference">
+    <LayoutContextProvider
+      value={layoutContext}
+      onWidgetChange={setWidgetState}
+    >
+    <div
+      className="lk-video-conference"
+      data-chat-open={chatOpen ? "true" : undefined}
+      data-unread={
+        !chatOpen && (widgetState.unreadMessages ?? 0) > 0 ? "true" : undefined
+      }
+    >
       <style>{SVC_CSS}</style>
       <div className="lk-video-conference-inner">
         {/* Layout toggle hidden when screensharing (forced spotlight) or <2 cams. */}
@@ -355,9 +478,28 @@ export function StableVideoConference() {
             ))}
           </div>
         )}
+
+        <aside
+          ref={chatPanelRef}
+          className="lk-chat-panel"
+          data-open={chatOpen ? "true" : undefined}
+          data-offline={chatOffline ? "true" : undefined}
+          aria-label="Meeting chat"
+        >
+          <Chat />
+          {chatOffline && (
+            <p className="lk-chat-offline" role="status">
+              {connectionState === ConnectionState.Reconnecting
+                ? "Reconnecting. Messages you send now won't go through."
+                : "You're not connected to the meeting. Rejoin to send messages."}
+            </p>
+          )}
+        </aside>
       </div>
       {controls}
+      <MeetingControlBarChatToggle />
     </div>
+    </LayoutContextProvider>
   );
 }
 
@@ -530,9 +672,266 @@ const SVC_CSS = `
   }
 }
 
+/* Chat drawer --------------------------------------------------------------
+ * Overlays the stage instead of shrinking it: the grid keeps its geometry, so
+ * opening chat never re-lays-out tiles (no reflow, no visual-stable-update).
+ * Animates transform/opacity only. Visibility (not display) toggles so the
+ * closed panel leaves the tab order without killing the slide transition. */
+.lk-chat-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(360px, 100%);
+  padding: 0.75rem 0.75rem 0.75rem 0;
+  transform: translateX(100%);
+  opacity: 0;
+  visibility: hidden;
+  /* Exit is quicker than enter — dismissal should feel instant. */
+  transition: transform 180ms cubic-bezier(0.4, 0, 1, 1),
+    opacity 140ms linear,
+    visibility 0s linear 180ms;
+}
+.lk-chat-panel[data-open="true"] {
+  transform: translateX(0);
+  opacity: 1;
+  visibility: visible;
+  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 180ms linear,
+    visibility 0s;
+}
+
+/* The layout toggle lives under the drawer — slide it clear while chat is open. */
+.lk-layout-toggle { transition: background 160ms ease, border-color 160ms ease, transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 160ms ease; }
+.lk-video-conference[data-chat-open="true"] .lk-layout-toggle { transform: translateX(calc(-1 * min(360px, 100%))); }
+
+.lk-chat-panel > .lk-chat {
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  background: rgba(15, 17, 19, 0.82) !important;
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 12px 48px -12px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05);
+  overflow: hidden;
+}
+
+.lk-chat-panel .lk-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.5rem 0.5rem 0.5rem 0.875rem;
+  font-family: var(--obs-font-mono, 'JetBrains Mono'), monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.6);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.lk-chat-panel .lk-chat-header .lk-close-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255,255,255,0.65);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+.lk-chat-panel .lk-chat-header .lk-close-button:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.lk-chat-panel .lk-chat-header .lk-close-button:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: -2px;
+}
+
+.lk-chat-panel .lk-chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0.875rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  scrollbar-width: thin;
+}
+.lk-chat-panel .lk-chat-messages::-webkit-scrollbar { width: 6px; }
+.lk-chat-panel .lk-chat-messages::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 999px;
+}
+/* Empty state: an empty chat should invite a first message, not read as broken. */
+.lk-chat-panel .lk-chat-messages:empty::after {
+  content: "No messages yet. Say hello.";
+  margin: auto;
+  padding: 0 1rem;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+  color: rgba(255,255,255,0.35);
+}
+
+.lk-chat-panel .lk-chat-entry {
+  max-width: 88%;
+  margin: 0;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.055);
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.92);
+  overflow-wrap: anywhere;
+  animation: lkChatIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.lk-chat-panel .lk-chat-entry[data-lk-message-origin="local"] {
+  align-self: flex-end;
+  background: rgba(0,230,195,0.13);
+  border-color: rgba(0,230,195,0.26);
+}
+.lk-chat-panel .lk-meta-data {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.15rem;
+}
+/* The meeting pages style every .lk-participant-name as a mono glass tile badge.
+ * Inside chat that treatment reads as a chip, not a sender — undo it here. */
+.lk-chat-panel .lk-chat-entry .lk-participant-name {
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  font-family: inherit !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  color: var(--obs-accent, #00E6C3) !important;
+}
+.lk-chat-panel .lk-timestamp {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,0.4);
+}
+.lk-chat-panel .lk-message-body { display: block; }
+
+.lk-chat-panel .lk-chat-form {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.lk-chat-panel .lk-chat-form-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+.lk-chat-panel .lk-chat-form-input::placeholder { color: rgba(255,255,255,0.36); }
+.lk-chat-panel .lk-chat-form-input:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+.lk-chat-panel .lk-chat-form-button {
+  min-height: 44px;
+  padding: 0 1rem;
+  border: 0;
+  border-radius: 12px;
+  background: var(--obs-accent, #00E6C3);
+  color: #06231f;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 160ms ease;
+}
+.lk-chat-panel .lk-chat-form-button:hover:not(:disabled) { filter: brightness(1.08); }
+.lk-chat-panel .lk-chat-form-input:disabled,
+.lk-chat-panel .lk-chat-form-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Offline: submit is blocked upstream, so the form must not look ready to send. */
+.lk-chat-panel[data-offline="true"] .lk-chat-form-input,
+.lk-chat-panel[data-offline="true"] .lk-chat-form-button {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.lk-chat-offline {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(255,176,86,0.3);
+  border-radius: 12px;
+  background: rgba(255,176,86,0.12);
+  color: #ffce9a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Unread dot on the chat toggle — Chat only counts unreads while it is closed. */
+#chat-button-slot .lk-button { position: relative; }
+.lk-video-conference[data-unread="true"] #chat-button-slot .lk-button::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--obs-accent, #00E6C3);
+  box-shadow: 0 0 0 2px rgba(15,17,19,0.9);
+}
+
+@keyframes lkChatIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Phones: the drawer takes the full stage so the input is comfortably wide. */
+@media (max-width: 640px) {
+  .lk-chat-panel { width: 100%; padding: 0.5rem; }
+  .lk-video-conference[data-chat-open="true"] .lk-layout-toggle {
+    opacity: 0;
+    pointer-events: none;
+    transform: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lk-cam-tile { animation: none; }
   .lk-pin-btn { transition: none; }
+  .lk-chat-panel,
+  .lk-chat-panel[data-open="true"] {
+    transform: none;
+    transition: opacity 120ms linear, visibility 0s linear 120ms;
+  }
+  .lk-chat-panel[data-open="true"] { transition: opacity 120ms linear, visibility 0s; }
+  .lk-chat-panel .lk-chat-entry { animation: none; }
+  .lk-layout-toggle { transition: none; }
+  .lk-video-conference[data-chat-open="true"] .lk-layout-toggle { transform: none; opacity: 0; pointer-events: none; }
 }
 
 ${MEETING_CONTROL_BAR_RESPONSIVE_CSS}

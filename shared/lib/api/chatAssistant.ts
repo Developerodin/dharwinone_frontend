@@ -3,6 +3,7 @@
 import { apiClient, normalizeApiBase } from "@/shared/lib/api/client";
 import { AUTH_ENDPOINTS } from "@/shared/lib/constants";
 import type { ChatResponse, Block, ChatMeta } from "@/shared/types/chatResponse";
+import type { ChatUiContext } from "@/shared/lib/chatUiContext";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -92,8 +93,14 @@ async function readErrorMessage(res: Response): Promise<string> {
   }
 }
 
-export async function sendChatMessage(messages: ChatMessage[]): Promise<ChatResponse> {
-  const res = await apiClient.post("/chat-assistant/message", { messages: prepareMessages(messages) });
+export async function sendChatMessage(
+  messages: ChatMessage[],
+  uiContext?: ChatUiContext | null
+): Promise<ChatResponse> {
+  const res = await apiClient.post("/chat-assistant/message", {
+    messages: prepareMessages(messages),
+    ...(uiContext ? { uiContext } : {}),
+  });
   return normalizeEnvelope(res.data?.data);
 }
 
@@ -111,12 +118,15 @@ export async function clearChatConversation(): Promise<{ deletedMemoryRow: boole
   }
 }
 
-async function fetchStream(url: string, messages: ChatMessage[], signal?: AbortSignal): Promise<Response> {
+async function fetchStream(url: string, messages: ChatMessage[], uiContext?: ChatUiContext | null, signal?: AbortSignal): Promise<Response> {
   return fetch(url, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: prepareMessages(messages) }),
+    body: JSON.stringify({
+      messages: prepareMessages(messages),
+      ...(uiContext ? { uiContext } : {}),
+    }),
     signal,
   });
 }
@@ -132,11 +142,12 @@ export async function streamChatMessage(
   messages: ChatMessage[],
   onToken: (token: string) => void,
   signal?: AbortSignal,
-  onDone?: (env: ChatResponse) => void
+  onDone?: (env: ChatResponse) => void,
+  uiContext?: ChatUiContext | null
 ): Promise<void> {
   const url = `${normalizeApiBase()}/chat-assistant/stream`;
 
-  let res = await fetchStream(url, messages, signal);
+  let res = await fetchStream(url, messages, uiContext, signal);
 
   if (res.status === 401) {
     try {
@@ -144,7 +155,7 @@ export async function streamChatMessage(
     } catch {
       throw new ChatbotRequestError(401, userMessageForStatus(401, ""));
     }
-    res = await fetchStream(url, messages, signal);
+    res = await fetchStream(url, messages, uiContext, signal);
   }
 
   if (!res.ok) {

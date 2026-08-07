@@ -11,6 +11,7 @@ import {
   type ChatMessage as ChatMsg,
   type ChatResponse,
 } from "@/shared/lib/api/chatAssistant";
+import { getChatUiContext } from "@/shared/lib/chatUiContext";
 import type { Block } from "@/shared/types/chatResponse";
 import {
   fetchChatbotSettings,
@@ -227,7 +228,8 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
               setViewMode((v) => (v === "widget" ? "fullscreen" : v));
             }
           }
-        }
+        },
+        getChatUiContext()
       );
     } catch (err: unknown) {
       const aborted = err instanceof Error && err.name === "AbortError";
