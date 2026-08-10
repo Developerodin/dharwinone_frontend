@@ -408,47 +408,62 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
                 </button>
               </div>
             )}
-            <div className="group relative">
-              <div className="relative flex items-end gap-2 rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 transition-colors focus-within:border-primary focus-within:ring-1 focus-within:ring-primary dark:border-slate-700 dark:bg-slate-900">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={isLoading ? "Generating reply…" : "Ask the agent anything…"}
-                  rows={1}
-                  disabled={isLoading}
-                  className="max-h-36 flex-1 resize-none overflow-y-auto bg-transparent px-1.5 py-2 text-[13px] leading-relaxed text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-60 dark:text-slate-100 dark:placeholder:text-slate-500"
-                />
-                {isLoading ? (
-                  <button
-                    onClick={stopStreaming}
-                    className="group/btn relative mb-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-rose-500 text-white shadow-[0_4px_14px_-4px_rgb(244_63_94_/_0.55)] transition-transform hover:bg-rose-600 active:scale-95"
-                    aria-label="Stop generating"
-                    title="Stop"
+            {/* Composer box. `items-end` pins the button to the last line as
+                the textarea grows. Both are 40px tall, so a single-line
+                composer reads as one row and the button no longer needs a
+                `mb-1` nudge to fake alignment. Send and Stop share a radius
+                and a footprint so the control keeps its shape mid-stream. */}
+            <div className="flex items-end gap-1.5 rounded-xl border border-slate-300 bg-white p-1.5 transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/25 dark:border-slate-700 dark:bg-slate-900">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                aria-label="Message the agent"
+                placeholder={isLoading ? "Generating reply…" : "Ask the agent anything…"}
+                rows={1}
+                disabled={isLoading}
+                enterKeyHint="send"
+                /* `border-0 focus:ring-0` is load-bearing: @tailwindcss/forms
+                   puts a 1px border + focus ring on every bare <textarea> in
+                   the base layer, which drew a second rectangle inside the
+                   composer box. The box owns the frame; the field is bare.
+
+                   py + leading = 40px, matching the button. max-h mirrors the
+                   140px cap the auto-resize effect writes inline; `max-h-36`
+                   (144px) never applied. */
+                className="min-h-10 max-h-[140px] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-2 py-[9px] text-[13px] leading-[22px] text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0 disabled:opacity-60 dark:text-slate-100 dark:placeholder:text-slate-500"
+              />
+              {isLoading ? (
+                <button
+                  onClick={stopStreaming}
+                  className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-rose-500 text-white transition-[background-color,transform] duration-150 hover:bg-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-1 active:scale-95"
+                  aria-label="Stop generating"
+                  title="Stop"
+                >
+                  <span className="block h-3 w-3 rounded-sm bg-current" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleSend()}
+                  disabled={!input.trim()}
+                  /* Disabled was white-on-slate-300 (~1.6:1) — the icon
+                     vanished. Dim the ink with the fill so it still reads. */
+                  className="group/btn flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-[background-color,transform] duration-150 hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+                  aria-label="Send"
+                  title="Send"
+                >
+                  <svg
+                    className="h-4 w-4 -translate-x-px translate-y-px transition-transform duration-150 group-hover/btn:translate-x-0 group-hover/btn:translate-y-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
                   >
-                    <span className="block h-3 w-3 rounded-sm bg-white" />
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleSend()}
-                    disabled={!input.trim()}
-                    className="group/btn relative mb-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-colors hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
-                    aria-label="Send"
-                    title="Send"
-                  >
-                    <svg
-                      className="relative h-4 w-4 -translate-x-px translate-y-px transition-transform group-hover/btn:translate-x-0 group-hover/btn:translate-y-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 12l14-7-7 14-2-5-5-2z" />
-                    </svg>
-                  </button>
-                )}
-              </div>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 12l14-7-7 14-2-5-5-2z" />
+                  </svg>
+                </button>
+              )}
             </div>
             {/* Safety copy: was 10px slate-400 (2.56:1, fails AA) and
                 `truncate`d mid-sentence. Now 11px slate-600 (7.6:1) and

@@ -12,6 +12,8 @@ export interface AttendanceDashboardProps {
   historyLoading: boolean
   historySearch?: string
   setHistorySearch?: (v: string) => void
+  historyMonthLabel?: string
+  historyTotal?: number
 }
 
 export default function AttendanceDashboard({
@@ -19,6 +21,8 @@ export default function AttendanceDashboard({
   historyLoading,
   historySearch = "",
   setHistorySearch,
+  historyMonthLabel,
+  historyTotal,
 }: AttendanceDashboardProps) {
   if (historyLoading) {
     return (
@@ -166,7 +170,9 @@ export default function AttendanceDashboard({
                 />
               </div>
               <span className="text-[0.6875rem] text-[#8c9097] dark:text-white/50">
-                {historyList.length} record{historyList.length !== 1 ? "s" : ""} in view
+                {historyTotal != null
+                  ? `${historyTotal} record${historyTotal !== 1 ? "s" : ""}${historyMonthLabel ? ` in ${historyMonthLabel}` : " in view"}`
+                  : `${historyList.length} record${historyList.length !== 1 ? "s" : ""} in view`}
               </span>
             </div>
           </div>
@@ -228,7 +234,7 @@ export default function AttendanceDashboard({
           <div className="box !mb-0">
             <div className="box-header">
               <div className="box-title text-[0.8125rem]">Hours Per Day</div>
-              <span className="text-[0.6875rem] text-[#8c9097] dark:text-white/50 ms-auto">Last 14 days</span>
+              <span className="text-[0.6875rem] text-[#8c9097] dark:text-white/50 ms-auto">{historyMonthLabel ?? "Selected period"}</span>
             </div>
             <div className="box-body !pt-0">
               {dateLabels.length ? (

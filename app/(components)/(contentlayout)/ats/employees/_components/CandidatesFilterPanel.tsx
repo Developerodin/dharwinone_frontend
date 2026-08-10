@@ -2,14 +2,20 @@
 import React, { useMemo, useRef, useLayoutEffect, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { AgentOption } from '@/shared/lib/api/candidates'
+import {
+  COMPENSATION_TYPE_OPTIONS,
+  EMPLOYMENT_STATUS_OPTIONS,
+  type EmployeeCompensationType,
+  type EmployeeEmploymentStatus,
+} from '@/shared/schemas/employeeFilter.generated'
 
 interface CandidatesFilterPanelProps {
   layoutOpen: boolean
   onCloseLayout: () => void
   filters: {
     agentIds: string[]
-    employmentStatus: 'current' | 'resigned' | 'all'
-    compensationType: '' | 'paid' | 'unpaid'
+    employmentStatus: EmployeeEmploymentStatus
+    compensationType: '' | EmployeeCompensationType
   }
   setFilters: React.Dispatch<React.SetStateAction<any>>
   agentOptions: AgentOption[]
@@ -35,6 +41,17 @@ const SECTION_LABEL = 'block text-[0.7rem] font-semibold uppercase tracking-wide
 const DROPDOWN_MENU = 'max-h-40 overflow-y-auto rounded-lg border border-defaultborder/70 bg-white py-1 shadow-lg dark:border-white/15 dark:bg-bodybg ring-1 ring-black/5'
 const DROPDOWN_ITEM_BASE = 'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs font-medium transition-colors'
 const CHIP_BASE = 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.7rem] font-medium max-w-full'
+
+const EMPLOYMENT_STATUS_LABELS: Record<EmployeeEmploymentStatus, string> = {
+  current: 'Current',
+  resigned: 'Resigned',
+  all: 'All',
+}
+
+const COMPENSATION_TYPE_LABELS: Record<EmployeeCompensationType, string> = {
+  paid: 'Paid',
+  unpaid: 'Unpaid',
+}
 
 interface PortalDropdownProps {
   open: boolean
@@ -155,11 +172,13 @@ const CandidatesFilterPanel: React.FC<CandidatesFilterPanelProps> = ({
             <select
               className={COMPACT_SELECT}
               value={filters.employmentStatus}
-              onChange={(e) => setFilters((prev: any) => ({ ...prev, employmentStatus: e.target.value as 'current' | 'resigned' | 'all' }))}
+              onChange={(e) => setFilters((prev: any) => ({ ...prev, employmentStatus: e.target.value as EmployeeEmploymentStatus }))}
             >
-              <option value="current">Current</option>
-              <option value="resigned">Resigned</option>
-              <option value="all">All</option>
+              {EMPLOYMENT_STATUS_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {EMPLOYMENT_STATUS_LABELS[value]}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -170,11 +189,14 @@ const CandidatesFilterPanel: React.FC<CandidatesFilterPanelProps> = ({
             <select
               className={COMPACT_SELECT}
               value={filters.compensationType ?? ''}
-              onChange={(e) => setFilters((prev: any) => ({ ...prev, compensationType: e.target.value as '' | 'paid' | 'unpaid' }))}
+              onChange={(e) => setFilters((prev: any) => ({ ...prev, compensationType: e.target.value as '' | EmployeeCompensationType }))}
             >
               <option value="">All</option>
-              <option value="paid">Paid</option>
-              <option value="unpaid">Unpaid</option>
+              {COMPENSATION_TYPE_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {COMPENSATION_TYPE_LABELS[value]}
+                </option>
+              ))}
             </select>
           </div>
 

@@ -22,6 +22,23 @@ const ELAPSED_UPDATE_MS = 1000;
 const SEARCH_DEBOUNCE_MS = 350;
 const AUTO_PUNCH_OUT_HOURS = 12;
 const AUTO_PUNCH_OUT_WARNING_BEFORE_MS = 15 * 60 * 1000;
+const HISTORY_PAGE_SIZE = 20;
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function formatHistoryMonthLabel(year: number, month: number): string {
+  return `${MONTH_NAMES[month - 1]} ${year}`;
+}
+
+/** Local calendar year/month (1–12). Uses Intl parts — not UTC — so "Current month" matches the user's calendar. */
+function getLocalCalendarMonthYear(date = new Date()): { year: number; month: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(date);
+  const year = Number(parts.find((p) => p.type === "year")?.value);
+  const month = Number(parts.find((p) => p.type === "month")?.value);
+  return { year, month };
+}
 
 function getDetectedTimezone(): string {
   if (typeof window === "undefined") return "UTC";
@@ -116,11 +133,6 @@ function getLocalDateKey(isoDateStr: string): string {
   return `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Calendar year dropdown range (inclusive) */
@@ -132,6 +144,7 @@ export default function AttendanceTracking() {
   const [myStudentId, setMyStudentId] = useState<string | null>(null);
   const [isUserBased, setIsUserBased] = useState(false);
   const [myWeekOff, setMyWeekOff] = useState<string[]>([]);
+  const [myJoiningDateStart, setMyJoiningDateStart] = useState<Date | null>(null);
   const [myShift, setMyShift] = useState<{ name?: string; startTime?: string; endTime?: string; timezone?: string } | null>(null);
   const [loadingStudent, setLoadingStudent] = useState(true);
   const [status, setStatus] = useState<attendanceApi.PunchStatusResponse | null>(null);
@@ -144,7 +157,15 @@ export default function AttendanceTracking() {
   const [trackListLoading, setTrackListLoading] = useState(false);
   const [historyList, setHistoryList] = useState<attendanceApi.AttendanceTrackHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyRange, setHistoryRange] = useState<"7d" | "30d" | "all">("30d");
+  const [historyYear, setHistoryYear] = useState(() => getLocalCalendarMonthYear().year);
+  const [historyMonth, setHistoryMonth] = useState(() => getLocalCalendarMonthYear().month);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPagination, setHistoryPagination] = useState<attendanceApi.AttendanceTrackHistoryPagination>({
+    page: 1,
+    limit: HISTORY_PAGE_SIZE,
+    total: 0,
+    totalPages: 0,
+  });
   const [trackSearch, setTrackSearch] = useState("");
   const [debouncedTrackSearch, setDebouncedTrackSearch] = useState("");
   const [attendanceView, setAttendanceView] = useState<"track" | "history" | "dashboard">("track");
@@ -229,9 +250,20 @@ export default function AttendanceTracking() {
             if (Array.isArray(wo)) setMyWeekOff(wo);
             const shift = (identity as { shift?: { name?: string; startTime?: string; endTime?: string; timezone?: string } }).shift;
             setMyShift(shift && typeof shift === "object" ? shift : null);
+            const joiningRaw = (identity as { joiningDate?: string | Date | null }).joiningDate;
+            if (joiningRaw) {
+              const parsed =
+                typeof joiningRaw === "string"
+                  ? parseYmdLocal(joiningRaw.slice(0, 10))
+                  : new Date(joiningRaw);
+              setMyJoiningDateStart(parsed && !Number.isNaN(parsed.getTime()) ? parsed : null);
+            } else {
+              setMyJoiningDateStart(null);
+            }
           } else {
             setMyWeekOff([]);
             setMyShift(null);
+            setMyJoiningDateStart(null);
           }
         }
       } catch (e: unknown) {
@@ -330,6 +362,10 @@ export default function AttendanceTracking() {
     const t = setTimeout(() => setDebouncedTrackSearch(trackSearch), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [trackSearch]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [historyYear, historyMonth, debouncedTrackSearch]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -586,23 +622,44 @@ export default function AttendanceTracking() {
     return () => { cancelled = true; };
   }, [myStudentId, canTrackAll, debouncedTrackSearch]);
 
+  const buildHistoryParams = useCallback(
+    (page = historyPage): attendanceApi.AttendanceTrackHistoryParams => ({
+      year: historyYear,
+      month: historyMonth,
+      page,
+      limit: HISTORY_PAGE_SIZE,
+      search: debouncedTrackSearch || undefined,
+    }),
+    [historyYear, historyMonth, historyPage, debouncedTrackSearch]
+  );
+
   const handleAdminPunchOut = useCallback(async (studentId: string) => {
     setPunchOutLoadingId(studentId);
     try {
       await attendanceApi.punchOutAttendance(studentId, {});
       await attendanceApi.getAttendanceTrackList({ search: debouncedTrackSearch || undefined }).then((res) => setTrackList(res.results ?? []));
-      const params = historyRange === "7d" ? { startDate: new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), search: debouncedTrackSearch || undefined } : historyRange === "30d" ? { startDate: new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), search: debouncedTrackSearch || undefined } : { search: debouncedTrackSearch || undefined };
-      attendanceApi.getAttendanceTrackHistory(params).then((res) => setHistoryList(res.results ?? []));
+      attendanceApi.getAttendanceTrackHistory(buildHistoryParams()).then((res) => {
+        setHistoryList(res.data ?? []);
+        setHistoryPagination(res.pagination);
+      });
     } catch { /* keep as is */ } finally { setPunchOutLoadingId(null); }
-  }, [historyRange, debouncedTrackSearch]);
+  }, [buildHistoryParams, debouncedTrackSearch]);
 
   const fetchHistoryList = useCallback(() => {
     if (!canTrackAll || myStudentId !== null) return;
-    const params = historyRange === "7d" ? { startDate: new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), limit: 500, search: debouncedTrackSearch || undefined }
-      : historyRange === "30d" ? { startDate: new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10), endDate: new Date().toISOString().slice(0, 10), limit: 500, search: debouncedTrackSearch || undefined } : { limit: 500, search: debouncedTrackSearch || undefined };
     setHistoryLoading(true);
-    attendanceApi.getAttendanceTrackHistory(params).then((res) => setHistoryList(res.results ?? [])).catch(() => setHistoryList([])).finally(() => setHistoryLoading(false));
-  }, [canTrackAll, myStudentId, historyRange, debouncedTrackSearch]);
+    attendanceApi
+      .getAttendanceTrackHistory(buildHistoryParams())
+      .then((res) => {
+        setHistoryList(res.data ?? []);
+        setHistoryPagination(res.pagination);
+      })
+      .catch(() => {
+        setHistoryList([]);
+        setHistoryPagination({ page: 1, limit: HISTORY_PAGE_SIZE, total: 0, totalPages: 0 });
+      })
+      .finally(() => setHistoryLoading(false));
+  }, [canTrackAll, myStudentId, buildHistoryParams]);
 
   useEffect(() => { fetchHistoryList(); }, [fetchHistoryList]);
 
@@ -661,23 +718,35 @@ export default function AttendanceTracking() {
     });
   }, [sortedAttendanceList]);
 
-  const buildHistoryExportParams = useCallback((): attendanceApi.AttendanceHistoryExportParams => {
-    if (historyRange === "7d") {
-      return {
-        startDate: new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10),
-        endDate: new Date().toISOString().slice(0, 10),
-        search: debouncedTrackSearch || undefined,
-      };
+  const buildHistoryExportParams = useCallback((): attendanceApi.AttendanceHistoryExportParams => ({
+    year: historyYear,
+    month: historyMonth,
+    search: debouncedTrackSearch || undefined,
+  }), [historyYear, historyMonth, debouncedTrackSearch]);
+
+  const goToPreviousHistoryMonth = useCallback(() => {
+    if (historyMonth === 1) {
+      setHistoryYear((y) => y - 1);
+      setHistoryMonth(12);
+    } else {
+      setHistoryMonth((m) => m - 1);
     }
-    if (historyRange === "30d") {
-      return {
-        startDate: new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10),
-        endDate: new Date().toISOString().slice(0, 10),
-        search: debouncedTrackSearch || undefined,
-      };
+  }, [historyMonth]);
+
+  const goToNextHistoryMonth = useCallback(() => {
+    if (historyMonth === 12) {
+      setHistoryYear((y) => y + 1);
+      setHistoryMonth(1);
+    } else {
+      setHistoryMonth((m) => m + 1);
     }
-    return { search: debouncedTrackSearch || undefined };
-  }, [historyRange, debouncedTrackSearch]);
+  }, [historyMonth]);
+
+  const goToCurrentHistoryMonth = useCallback(() => {
+    const { year, month } = getLocalCalendarMonthYear();
+    setHistoryYear(year);
+    setHistoryMonth(month);
+  }, []);
 
   const exportTrackExcel = useCallback(
     async (punchStatus: "all" | "in" | "out") => {
@@ -741,10 +810,13 @@ export default function AttendanceTracking() {
       const isWeekOff = weekOffSet.has(dayName);
       const isPast = date < todayStart;
       const isTodayCell = date.getTime() === todayStart.getTime();
+      const isBeforeJoining =
+        myJoiningDateStart != null && date.getTime() < myJoiningDateStart.getTime();
       /** Past scheduled workdays with no punch / leave / holiday row: treat as absent (same idea as StudentAttendanceOverlay). */
       const inferredAbsent =
         isPast &&
         !isTodayCell &&
+        !isBeforeJoining &&
         !isWeekOff &&
         !info.holiday &&
         !info.leave &&
@@ -755,7 +827,7 @@ export default function AttendanceTracking() {
       cells.push({ day, date, present: info.present, incomplete: info.incomplete && !info.present, holiday: info.holiday, leave: info.leave, leaveType: info.leaveType, absent: cellAbsent, weekOff: isWeekOff, durationLabel: displayMs > 0 ? formatDuration(displayMs) : "", holidayName: info.holidayName });
     }
     return cells;
-  }, [attendanceList, myCalendarYear, myCalendarMonth, myWeekOff]);
+  }, [attendanceList, myCalendarYear, myCalendarMonth, myWeekOff, myJoiningDateStart]);
 
   const refreshMyAttendanceList = useCallback(() => { refetchMyMonth(); }, [refetchMyMonth]);
 
@@ -1318,27 +1390,49 @@ export default function AttendanceTracking() {
                       />
                     </div>
                     <div className="h-5 w-px bg-defaultborder/80 flex-shrink-0 hidden sm:block" aria-hidden />
-                    <div className="inline-flex rounded-xl border border-defaultborder/80 bg-gray-50/60 dark:bg-white/5 p-0.5 flex-shrink-0">
+                    <div className="inline-flex items-center gap-1 rounded-xl border border-defaultborder/80 bg-gray-50/60 dark:bg-white/5 p-0.5 flex-shrink-0">
                       <button
                         type="button"
-                        onClick={() => setHistoryRange("7d")}
-                        className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg py-2 px-3 text-[0.75rem] font-semibold transition-all duration-200 ${historyRange === "7d" ? "bg-primary text-white shadow-sm" : "text-defaulttextcolor dark:text-white/80 hover:text-defaulttextcolor hover:bg-white/80 dark:hover:bg-white/10"}`}
+                        onClick={goToPreviousHistoryMonth}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-defaulttextcolor/80 hover:bg-white/80 dark:hover:bg-white/10 transition-all duration-200"
+                        aria-label="Previous month"
                       >
-                        <span>7 days</span>
+                        <i className="ri-arrow-left-s-line text-[1.1rem]" aria-hidden />
+                      </button>
+                      <select
+                        value={historyMonth}
+                        onChange={(e) => setHistoryMonth(Number(e.target.value))}
+                        aria-label="History month"
+                        className="rounded-lg border-0 bg-transparent py-2 px-2 text-[0.75rem] font-semibold text-defaulttextcolor dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      >
+                        {MONTH_NAMES.map((name, idx) => (
+                          <option key={name} value={idx + 1}>{name}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={historyYear}
+                        onChange={(e) => setHistoryYear(Number(e.target.value))}
+                        aria-label="History year"
+                        className="rounded-lg border-0 bg-transparent py-2 px-2 text-[0.75rem] font-semibold text-defaulttextcolor dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      >
+                        {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - 5 + i).map((y) => (
+                          <option key={y} value={y}>{y}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={goToNextHistoryMonth}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-defaulttextcolor/80 hover:bg-white/80 dark:hover:bg-white/10 transition-all duration-200"
+                        aria-label="Next month"
+                      >
+                        <i className="ri-arrow-right-s-line text-[1.1rem]" aria-hidden />
                       </button>
                       <button
                         type="button"
-                        onClick={() => setHistoryRange("30d")}
-                        className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg py-2 px-3 text-[0.75rem] font-semibold transition-all duration-200 ${historyRange === "30d" ? "bg-primary text-white shadow-sm" : "text-defaulttextcolor dark:text-white/80 hover:text-defaulttextcolor hover:bg-white/80 dark:hover:bg-white/10"}`}
+                        onClick={goToCurrentHistoryMonth}
+                        className="inline-flex items-center whitespace-nowrap rounded-lg py-2 px-3 text-[0.75rem] font-semibold text-defaulttextcolor dark:text-white/80 hover:bg-white/80 dark:hover:bg-white/10 transition-all duration-200"
                       >
-                        <span>30 days</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setHistoryRange("all")}
-                        className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg py-2 px-3 text-[0.75rem] font-semibold transition-all duration-200 ${historyRange === "all" ? "bg-primary text-white shadow-sm" : "text-defaulttextcolor dark:text-white/80 hover:text-defaulttextcolor hover:bg-white/80 dark:hover:bg-white/10"}`}
-                      >
-                        <span>All time</span>
+                        Current month
                       </button>
                     </div>
                     <div className="inline-flex items-center rounded-xl border border-defaultborder/80 bg-gray-50/60 dark:bg-white/5 p-0.5">
@@ -1373,10 +1467,13 @@ export default function AttendanceTracking() {
                         <i className="ri-history-line text-[1.5rem] text-primary/40" />
                       </div>
                       <p className="text-[0.8125rem] text-[#8c9097]">
-                        {historyList.length === 0 ? "No records in this period" : "No matches for your search"}
+                        {debouncedTrackSearch
+                          ? "No matches for your search"
+                          : `No attendance records found for ${formatHistoryMonthLabel(historyYear, historyMonth)}.`}
                       </p>
                     </div>
                   ) : (
+                    <>
                     <div className="table-responsive">
                       <table className="table table-hover whitespace-nowrap min-w-full">
                         <thead>
@@ -1435,13 +1532,49 @@ export default function AttendanceTracking() {
                         </tbody>
                       </table>
                     </div>
+                    {historyPagination.totalPages > 1 && (
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-defaultborder dark:border-defaultborder/10 px-4 py-3">
+                        <p className="text-[0.75rem] text-[#8c9097] mb-0">
+                          Showing {(historyPagination.page - 1) * historyPagination.limit + 1}–{Math.min(historyPagination.page * historyPagination.limit, historyPagination.total)} of {historyPagination.total}
+                        </p>
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                            disabled={historyPagination.page <= 1}
+                            className="ti-btn ti-btn-sm ti-btn-soft-primary disabled:opacity-50"
+                          >
+                            Previous
+                          </button>
+                          <span className="px-2 text-[0.75rem] text-defaulttextcolor dark:text-white">
+                            Page {historyPagination.page} of {historyPagination.totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setHistoryPage((p) => Math.min(historyPagination.totalPages, p + 1))}
+                            disabled={historyPagination.page >= historyPagination.totalPages}
+                            className="ti-btn ti-btn-sm ti-btn-soft-primary disabled:opacity-50"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    </>
                   )}
                 </div>
               </div>
             )}
 
             {attendanceView === "dashboard" && (
-              <AttendanceDashboard historyList={filteredHistoryList} historyLoading={historyLoading} historySearch={trackSearch} setHistorySearch={setTrackSearch} />
+              <AttendanceDashboard
+                historyList={filteredHistoryList}
+                historyLoading={historyLoading}
+                historySearch={trackSearch}
+                setHistorySearch={setTrackSearch}
+                historyMonthLabel={formatHistoryMonthLabel(historyYear, historyMonth)}
+                historyTotal={historyPagination.total}
+              />
             )}
           </>
         )}

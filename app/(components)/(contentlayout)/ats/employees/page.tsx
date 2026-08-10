@@ -10,6 +10,8 @@ import Link from 'next/link'
 import { resolveEmployeeJobTitleLabel } from '@/shared/lib/employee-job-title'
 import CallNowButton from '@/shared/components/CallNowButton'
 import CandidatesFilterPanel from './_components/CandidatesFilterPanel'
+import { setChatUiContext } from '@/shared/lib/chatUiContext'
+import type { EmployeeCompensationType, EmployeeEmploymentStatus } from '@/shared/schemas/employeeFilter.generated'
 import CandidateFeedbackPanel from './_components/CandidateFeedbackPanel'
 import {
   listCandidates,
@@ -380,9 +382,9 @@ function CandidateAvatar({ candidate, className = 'w-10 h-10 rounded-full' }: { 
 interface FilterState {
   /** Assigned agent user ids (from checklist) */
   agentIds: string[]
-  /** 'current' | 'resigned' | 'all' - default current */
-  employmentStatus: 'current' | 'resigned' | 'all'
-  compensationType: '' | 'paid' | 'unpaid'
+  /** Default: current */
+  employmentStatus: EmployeeEmploymentStatus
+  compensationType: '' | EmployeeCompensationType
 }
 
 // Note type for candidate notes
@@ -600,6 +602,18 @@ const Candidates = () => {
     const t = setTimeout(() => setDebouncedEmployeeSearch(employeeSearch), 400)
     return () => clearTimeout(t)
   }, [employeeSearch])
+
+  useEffect(() => {
+    setChatUiContext({
+      currentModule: 'Employees',
+      activeFilters: {
+        employmentStatus: filters.employmentStatus,
+        compensationType: filters.compensationType,
+        search: debouncedEmployeeSearch.trim() || null,
+      },
+    })
+    return () => setChatUiContext(null)
+  }, [filters.employmentStatus, filters.compensationType, debouncedEmployeeSearch])
 
   useEffect(() => {
     if (!employeesToolbarMenu) return

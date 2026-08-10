@@ -223,6 +223,8 @@ export interface OnLeaveTodayItem {
   name: string;
   startDate: string;
   endDate: string;
+  /** casual | sick | unpaid — comma-joined when the day carries more than one. */
+  leaveType?: string | null;
 }
 
 export type OnLeaveScope = "all" | "referrals" | "self";
@@ -341,18 +343,28 @@ export interface AttendanceTrackHistoryItem {
 }
 
 export interface AttendanceTrackHistoryParams {
-  startDate?: string;
-  endDate?: string;
+  year: number;
+  month: number;
+  page?: number;
   limit?: number;
   search?: string;
+  studentId?: string;
+}
+
+export interface AttendanceTrackHistoryPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
 }
 
 export interface AttendanceTrackHistoryResponse {
-  results: AttendanceTrackHistoryItem[];
+  data: AttendanceTrackHistoryItem[];
+  pagination: AttendanceTrackHistoryPagination;
 }
 
 export async function getAttendanceTrackHistory(
-  params?: AttendanceTrackHistoryParams
+  params: AttendanceTrackHistoryParams
 ): Promise<AttendanceTrackHistoryResponse> {
   const { data } = await apiClient.get<AttendanceTrackHistoryResponse>(
     "/training/attendance/track/history",
@@ -361,15 +373,17 @@ export async function getAttendanceTrackHistory(
   return data;
 }
 
-export type AttendanceHistoryExportParams = Omit<AttendanceTrackHistoryParams, "limit" | "page">;
+export type AttendanceHistoryExportParams = Pick<
+  AttendanceTrackHistoryParams,
+  "year" | "month" | "search" | "studentId"
+>;
 
 /** GET /training/attendance/track/history/export — same filters as history list (omit limit). */
 export async function downloadAttendanceHistoryExport(
-  params: AttendanceHistoryExportParams = {}
+  params: AttendanceHistoryExportParams
 ): Promise<void> {
-  const { limit: _limit, ...filters } = params as AttendanceTrackHistoryParams;
   const { data } = await apiClient.get<Blob>("/training/attendance/track/history/export", {
-    params: filters,
+    params,
     responseType: "blob",
   });
   const dateStamp = new Date().toISOString().slice(0, 10);
