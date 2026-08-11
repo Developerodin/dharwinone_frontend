@@ -29,14 +29,19 @@ export interface IncomingCallData {
   supportInviteToken?: string;
   conversationId: string;
   callId: string;
-  /** Present for legacy incoming_call and support_camera; absent for socket-initiated chat calls */
+  /** Shared LiveKit room name — present on group invites and REST-initiated calls */
   roomName?: string;
   callType: "audio" | "video";
   caller: { id: string; name: string; email?: string };
+  /** Explicit direct vs group — set by server; never infer from participant count alone */
+  callScope?: "direct" | "group";
   /** From server when call is in a group conversation */
   conversationType?: "direct" | "group";
   /** Present for group calls; display as secondary context under caller */
   groupName?: string;
+  /** Shared LiveKit room all invitees join */
+  participantIds?: string[];
+  participantCount?: number;
 }
 
 export interface CallStartData {
@@ -437,13 +442,31 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
           callEndedListeners.current.forEach((cb) => cb(data));
         });
 
-        sock.on("call:incoming", (data: { callId: string; conversationId: string; callType: "audio" | "video"; caller: { id: string; name: string } }) => {
+        sock.on("call:incoming", (data: {
+          callId: string;
+          conversationId: string;
+          callType: "audio" | "video";
+          callScope?: "direct" | "group";
+          conversationType?: "direct" | "group";
+          groupName?: string;
+          roomName?: string;
+          participantIds?: string[];
+          participantCount?: number;
+          caller: { id: string; name: string };
+        }) => {
+          const scope = data.callScope ?? data.conversationType;
           const callData: IncomingCallData = {
             callId: data.callId,
             conversationId: data.conversationId,
             callType: data.callType,
             caller: data.caller,
             callSource: "chat",
+            callScope: scope,
+            conversationType: data.conversationType ?? scope,
+            groupName: data.groupName,
+            roomName: data.roomName,
+            participantIds: data.participantIds,
+            participantCount: data.participantCount,
           };
           incomingCallListeners.current.forEach((cb) => cb(callData));
         });

@@ -4,7 +4,7 @@
 // UI primitives (../ui). Each block branch is a few lines — the heavy
 // layout lives in the primitives, never duplicated here.
 
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type {
@@ -83,15 +83,28 @@ function formatClass(col: Column): string {
   return "";
 }
 
+const COLUMN_PRIORITY: Record<string, number> = { primary: 0, secondary: 1 };
+
+function displayColumns(columns: Column[]): Column[] {
+  return [...columns].sort(
+    (a, b) =>
+      (COLUMN_PRIORITY[a.priority ?? "secondary"] ?? 1) -
+      (COLUMN_PRIORITY[b.priority ?? "secondary"] ?? 1)
+  );
+}
+
 // ── Public API ──────────────────────────────────────────────────────────
 
 export function StructuredResponse({
-  blocks, compact = false, onAction,
-}: { blocks: Block[]; compact?: boolean; onAction?: (text: string) => void }) {
+  blocks, compact = false, onAction, queryId,
+}: { blocks: Block[]; compact?: boolean; onAction?: (text: string) => void; queryId?: string | null }) {
   if (!blocks?.length) return null;
+  const scopeKey = queryId ?? "blocks";
   return (
     <div className={`space-y-2.5 ${CONTAINMENT} ${WRAP_ANYWHERE}`}>
-      {blocks.map((b, i) => <BlockRenderer key={i} block={b} compact={compact} onAction={onAction} />)}
+      {blocks.map((b, i) => (
+        <BlockRenderer key={`${scopeKey}:${i}:${b.type}`} block={b} compact={compact} onAction={onAction} />
+      ))}
     </div>
   );
 }
@@ -157,6 +170,11 @@ function BadgeRowView({ block }: { block: BadgeRowBlock }) {
 function TableBlockView({ block, compact = false }: { block: TableBlock; compact?: boolean }) {
   const [page, setPage] = useState(0);
   const total = block.rows.length;
+  const pageIdentity = `${block.queryId ?? block.id ?? ""}:${block.title ?? ""}:${total}:${block.pagination?.total ?? ""}`;
+
+  useEffect(() => {
+    setPage(0);
+  }, [pageIdentity]);
 
   if (total === 0) {
     return <EmptyState noun={block.title || "records"} />;
@@ -169,7 +187,8 @@ function TableBlockView({ block, compact = false }: { block: TableBlock; compact
   const slice = block.rows.slice(start, end);
   const showPagination = total > TABLE_PAGE_SIZE;
 
-  const compactSafe = !compact && block.columns.length <= 3;
+  const columns = displayColumns(block.columns);
+  const compactSafe = !compact && columns.length <= 3;
 
   return (
     <div className={`space-y-2 ${CONTAINMENT}`}>
@@ -184,9 +203,9 @@ function TableBlockView({ block, compact = false }: { block: TableBlock; compact
         </div>
       )}
 
-      {compactSafe && <RealTable columns={block.columns} rows={slice} startIndex={start} />}
+      {compactSafe && <RealTable columns={columns} rows={slice} startIndex={start} />}
       <CardStack
-        columns={block.columns}
+        columns={columns}
         rows={slice}
         startIndex={start}
         hiddenOnDesktop={compactSafe}

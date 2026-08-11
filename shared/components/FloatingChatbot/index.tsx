@@ -49,6 +49,8 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   blocks?: Block[];
+  entityType?: string | null;
+  queryId?: string | null;
 }
 
 type ViewMode = "closed" | "widget" | "fullscreen";
@@ -220,13 +222,20 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
         },
         controller.signal,
         (env: ChatResponse) => {
-          if (env.blocks && env.blocks.length > 0) {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, blocks: env.blocks } : m))
-            );
-            if (blocksNeedFullscreen(env.blocks)) {
-              setViewMode((v) => (v === "widget" ? "fullscreen" : v));
-            }
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    blocks: env.blocks ?? [],
+                    entityType: env.meta?.entityType ?? env.meta?.kind ?? null,
+                    queryId: env.meta?.queryId ?? null,
+                  }
+                : m
+            )
+          );
+          if (env.blocks && env.blocks.length > 0 && blocksNeedFullscreen(env.blocks)) {
+            setViewMode((v) => (v === "widget" ? "fullscreen" : v));
           }
         },
         getChatUiContext()
@@ -382,6 +391,8 @@ function FloatingChatbotInner({ userId }: { userId: string }) {
                   content={msg.content}
                   fullscreen={isFullscreen}
                   blocks={msg.blocks}
+                  entityType={msg.entityType}
+                  queryId={msg.queryId}
                   onAction={(text) => handleSend(text)}
                 />
               )

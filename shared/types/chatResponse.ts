@@ -90,6 +90,8 @@ export type Block =
 
 export interface ChatMeta {
   kind: string | null;
+  entityType?: string | null;
+  queryId?: string | null;
   total: number | null;
   deterministic: boolean;
   tookMs: number | null;

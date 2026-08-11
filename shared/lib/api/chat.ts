@@ -37,7 +37,7 @@ export interface Message {
   conversation: string;
   sender: { id: string; name: string; email: string };
   content: string;
-  type: "text" | "image" | "file" | "audio";
+  type: "text" | "image" | "file" | "audio" | "video";
   attachments?: Attachment[];
   replyTo?: { id: string; content: string; type: string; sender?: { name: string }; createdAt: string };
   reactions?: { user: { id: string; name?: string }; emoji: string }[];
@@ -170,6 +170,18 @@ export async function deleteMessage(
   const { data } = await apiClient.delete(`${BASE}/conversations/${conversationId}/messages/${messageId}`, {
     data: { deleteFor },
   });
+  return data;
+}
+
+export async function forwardMessage(
+  conversationId: string,
+  messageId: string,
+  targetConversationIds: string[]
+): Promise<{ count: number; messages: Message[] }> {
+  const { data } = await apiClient.post(
+    `${BASE}/conversations/${conversationId}/messages/${messageId}/forward`,
+    { targetConversationIds }
+  );
   return data;
 }
 

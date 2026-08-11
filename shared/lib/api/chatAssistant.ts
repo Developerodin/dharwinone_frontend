@@ -13,7 +13,7 @@ export interface ChatMessage {
 export type { ChatResponse, Block, ChatMeta } from "@/shared/types/chatResponse";
 
 function emptyMeta(): ChatMeta {
-  return { kind: null, total: null, deterministic: false, tookMs: null };
+  return { kind: null, entityType: null, queryId: null, total: null, deterministic: false, tookMs: null };
 }
 
 function normalizeEnvelope(input: Partial<ChatResponse> | { reply?: string } | null | undefined): ChatResponse {
@@ -24,6 +24,8 @@ function normalizeEnvelope(input: Partial<ChatResponse> | { reply?: string } | n
     meta: raw.meta
       ? {
           kind: raw.meta.kind ?? null,
+          entityType: raw.meta.entityType ?? raw.meta.kind ?? null,
+          queryId: raw.meta.queryId ?? null,
           total: typeof raw.meta.total === "number" ? raw.meta.total : null,
           deterministic: !!raw.meta.deterministic,
           tookMs: typeof raw.meta.tookMs === "number" ? raw.meta.tookMs : null,

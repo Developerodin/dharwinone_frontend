@@ -13,11 +13,22 @@ interface Props {
   content: string;
   fullscreen?: boolean;
   blocks?: Block[];
+  entityType?: string | null;
+  queryId?: string | null;
   onAction?: (text: string) => void;
 }
 
-export default function ChatMessage({ role, content, fullscreen = false, blocks, onAction }: Props) {
+function blocksMatchEntity(blocks: Block[] | undefined, entityType: string | null | undefined): Block[] {
+  if (!blocks?.length) return [];
+  if (entityType === "job" || entityType === "jobs") {
+    return blocks.filter((b) => !(b.type === "table" && b.tableType === "employees"));
+  }
+  return blocks;
+}
+
+export default function ChatMessage({ role, content, fullscreen = false, blocks, entityType, queryId, onAction }: Props) {
   const isUser = role === "user";
+  const visibleBlocks = blocksMatchEntity(blocks, entityType);
 
   // Widen the primitive's default max-w-[80%] for this panel's measure.
   const bubbleWidth = fullscreen
@@ -70,12 +81,24 @@ export default function ChatMessage({ role, content, fullscreen = false, blocks,
             >
               {isUser ? (
                 content
-              ) : blocks && blocks.length > 0 ? (
-                <StructuredResponse blocks={blocks} compact={!fullscreen} onAction={onAction} />
               ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                  {content}
-                </ReactMarkdown>
+                <div className="space-y-3">
+                  {content ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                      {content}
+                    </ReactMarkdown>
+                  ) : null}
+                  {visibleBlocks.length > 0 ? (
+                    <StructuredResponse
+                      blocks={visibleBlocks}
+                      compact={!fullscreen}
+                      onAction={onAction}
+                      queryId={queryId}
+                    />
+                  ) : !content ? (
+                    <span className="text-slate-400">…</span>
+                  ) : null}
+                </div>
               )}
             </BubbleContent>
           </Bubble>

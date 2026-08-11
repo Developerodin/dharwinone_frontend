@@ -23,6 +23,7 @@ import {
   getActiveCallForConversation,
   getCallsForConversation,
   deleteMessage,
+  forwardMessage,
   reactToMessage,
   uploadChatFiles,
   deleteConversation as deleteConversationApi,
@@ -35,10 +36,31 @@ import { useChatSocket } from "@/shared/contexts/ChatSocketContext";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { format, formatDistanceToNow } from "date-fns";
 import chatStyles from "./chats.module.scss";
-import { myReactionEmoji, reactionToggleEmoji } from "./_utils/chatHelpers";
+import { myReactionEmoji, reactionToggleEmoji, splitTextLinks, conversationPreviewText } from "./_utils/chatHelpers";
 import { ChatToast, useChatToast } from "./_components/ChatToast";
 
 const DEFAULT_AVATAR = "/assets/images/faces/1.jpg";
+
+/** Message body text with bare URLs turned into real anchors. */
+const MessageText = ({ text, className }: { text: string; className?: string }) => (
+  <p className={className}>
+    {splitTextLinks(text).map((s, i) =>
+      s.href ? (
+        <a
+          key={i}
+          href={s.href}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {s.text}
+        </a>
+      ) : (
+        <span key={i}>{s.text}</span>
+      )
+    )}
+  </p>
+);
 
 function callLogStatusLabel(status: string | undefined): string {
   if (!status || status === "ongoing") return "";
@@ -47,6 +69,37 @@ function callLogStatusLabel(status: string | undefined): string {
   if (status === "declined") return "Declined";
   if (status === "initiated") return "Started";
   return status;
+}
+
+type DeleteConfirmMode = "me" | "everyone" | "chat";
+
+function getDeleteConfirmCopy(mode: DeleteConfirmMode, isGroup: boolean) {
+  if (mode === "me") {
+    return {
+      title: "Remove message?",
+      message: "This message will be removed from your view. Others can still see it.",
+      confirmLabel: "Remove",
+    };
+  }
+  if (mode === "everyone") {
+    return {
+      title: "Delete for everyone?",
+      message: "This message will be removed for all participants. This can't be undone.",
+      confirmLabel: "Delete",
+    };
+  }
+  if (isGroup) {
+    return {
+      title: "Delete group chat?",
+      message: "This group chat will be permanently deleted for everyone. This can't be undone.",
+      confirmLabel: "Delete chat",
+    };
+  }
+  return {
+    title: "Delete chat?",
+    message: "This chat will be removed for both participants.",
+    confirmLabel: "Delete chat",
+  };
 }
 
 /** Short line for merged thread timeline (enriched calls from getCallsForConversation). */
@@ -610,6 +663,95 @@ const Chat = () => {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const [deleteMenuFor, setDeleteMenuFor] = useState<string | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<Set<string>>(new Set());
+  const [forwardSearch, setForwardSearch] = useState("");
+  const [forwarding, setForwarding] = useState(false);
+  const closeForwardModal = useCallback(() => {
+    setForwardingMessage(null);
+    setForwardTargets(new Set());
+    setForwardSearch("");
+  }, []);
+
+  const [deleteConfirm, setDeleteConfirm] = useState<{ mode: DeleteConfirmMode; messageId?: string } | null>(null);
+  const [deletingMessage, setDeletingMessage] = useState(false);
+  const [deletingChat, setDeletingChat] = useState(false);
+  const deleteConfirmCancelRef = useRef<HTMLButtonElement>(null);
+
+  const closeDeleteConfirm = useCallback(() => {
+    if (deletingMessage || deletingChat) return;
+    setDeleteConfirm(null);
+  }, [deletingMessage, deletingChat]);
+
+  const executeDeleteConfirm = async () => {
+    if (!deleteConfirm) return;
+    const cid = getId(selectedConversation);
+    if (!cid) return;
+
+    if (deleteConfirm.mode === "chat") {
+      setDeletingChat(true);
+      setError(null);
+      try {
+        await deleteConversationApi(cid);
+        setDeleteConfirm(null);
+        setSelectedConversation(null);
+        setIsOpen(false);
+        await fetchConversations();
+      } catch (e: any) {
+        const message = e?.response?.data?.message || "Failed to delete chat.";
+        setError(message);
+      } finally {
+        setDeletingChat(false);
+      }
+      return;
+    }
+
+    const mid = deleteConfirm.messageId;
+    if (!mid) return;
+    setDeletingMessage(true);
+    try {
+      if (deleteConfirm.mode === "me") {
+        await deleteMessage(cid, mid, "me");
+        setMessages((prev) => prev.filter((x) => String((x as any).id || (x as any)._id) !== mid));
+      } else {
+        await deleteMessage(cid, mid, "everyone");
+        setMessages((prev) =>
+          prev.map((x) =>
+            String((x as any).id || (x as any)._id) === mid
+              ? { ...x, deletedAt: new Date().toISOString(), deletedFor: "everyone" as const }
+              : x
+          )
+        );
+        const latestId =
+          messages.length > 0
+            ? String(
+                (messages[messages.length - 1] as any).id ||
+                  (messages[messages.length - 1] as any)._id
+              )
+            : null;
+        if (latestId === mid) {
+          setConversations((prev) =>
+            prev.map((c) =>
+              getId(c) === cid
+                ? {
+                    ...c,
+                    lastMessage: {
+                      ...(c.lastMessage || { createdAt: new Date().toISOString() }),
+                      content: "This message was deleted",
+                    },
+                  }
+                : c
+            )
+          );
+        }
+      }
+      setDeleteConfirm(null);
+    } catch (e: any) {
+      showToast(e?.response?.data?.message || "Could not delete message.");
+    } finally {
+      setDeletingMessage(false);
+    }
+  };
   const reactionPickerRef = useRef<HTMLDivElement>(null);
   const deleteMenuRef = useRef<HTMLSpanElement>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -967,6 +1109,9 @@ const Chat = () => {
 
   useEffect(() => {
     const unsub = onMessageDeleted((data) => {
+      if (data.deleteFor === "everyone") {
+        fetchConversations();
+      }
       if (data.conversationId && String(data.conversationId) === String(convId) && data.deleteFor === "everyone") {
         setMessages((prev) =>
           prev.map((m) => {
@@ -980,17 +1125,26 @@ const Chat = () => {
       }
     });
     return unsub;
-  }, [onMessageDeleted, convId]);
+  }, [onMessageDeleted, convId, fetchConversations]);
 
-  // Escape key to close lightbox
+  // Escape key to close lightbox, forward modal, or delete confirm
   useEffect(() => {
-    if (!imagePreview) return;
+    if (!imagePreview && !forwardingMessage && !deleteConfirm) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setImagePreview(null);
+      if (e.key === "Escape") {
+        if (imagePreview) setImagePreview(null);
+        if (forwardingMessage) closeForwardModal();
+        if (deleteConfirm) closeDeleteConfirm();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [imagePreview]);
+  }, [imagePreview, forwardingMessage, deleteConfirm, closeForwardModal, closeDeleteConfirm]);
+
+  useEffect(() => {
+    if (!deleteConfirm) return;
+    deleteConfirmCancelRef.current?.focus();
+  }, [deleteConfirm]);
 
   // Close the reaction bar / delete menu on outside-click or Escape.
   useEffect(() => {
@@ -1044,10 +1198,23 @@ const Chat = () => {
     }
   };
 
+  const CHAT_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
+  const uploadErrorMessage = (err: unknown): string => {
+    const data = (err as { response?: { data?: { message?: string; error?: string } } })?.response?.data;
+    return data?.message || data?.error || "Upload failed. Try again.";
+  };
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const cid = getId(selectedConversation);
     if (!files.length || !cid) return;
+    const tooLarge = files.find((f) => f.size > CHAT_UPLOAD_MAX_BYTES);
+    if (tooLarge) {
+      showToast(`"${tooLarge.name}" is too large. Maximum 100MB per file.`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     setUploading(true);
     try {
       const replyToId = replyingTo ? String((replyingTo as any).id || (replyingTo as any)._id) : undefined;
@@ -1055,8 +1222,8 @@ const Chat = () => {
       setMessages((prev) => addMessageIfNew(prev, msg));
       setReplyingTo(null);
       fetchConversations();
-    } catch {
-      showToast("Upload failed. Try again.");
+    } catch (err) {
+      showToast(uploadErrorMessage(err));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1128,28 +1295,10 @@ const Chat = () => {
     emitCallInitiate(cid, callType, { calleeName: selectedConversation ? displayName(selectedConversation) : undefined });
   };
 
-  const [deletingChat, setDeletingChat] = useState(false);
-  const handleDeleteChat = async () => {
+  const handleDeleteChat = () => {
     const cid = getId(selectedConversation);
     if (!cid) return;
-    const isGroup = selectedConversation?.type === "group";
-    const msg = isGroup
-      ? "Permanently delete this group chat for everyone? This cannot be undone."
-      : "Delete this chat? It will be removed for both participants.";
-    if (!window.confirm(msg)) return;
-    setDeletingChat(true);
-    setError(null);
-    try {
-      await deleteConversationApi(cid);
-      setSelectedConversation(null);
-      setIsOpen(false);
-      await fetchConversations();
-    } catch (e: any) {
-      const message = e?.response?.data?.message || "Failed to delete chat.";
-      setError(message);
-    } finally {
-      setDeletingChat(false);
-    }
+    setDeleteConfirm({ mode: "chat" });
   };
 
   const handleSearchUsers = async () => {
@@ -1284,6 +1433,45 @@ const Chat = () => {
   const recentConvs = conversations.filter((c) => c.type === "direct" || c.type === "group");
   const groupConvs = conversations.filter((c) => c.type === "group");
 
+  const toggleForwardTarget = (conversationId: string) => {
+    setForwardTargets((prev) => {
+      const next = new Set(prev);
+      if (next.has(conversationId)) next.delete(conversationId);
+      else next.add(conversationId);
+      return next;
+    });
+  };
+
+  const handleForwardSubmit = async () => {
+    const cid = getId(selectedConversation);
+    const mid = forwardingMessage
+      ? String((forwardingMessage as any).id || (forwardingMessage as any)._id)
+      : "";
+    if (!cid || !mid || forwardTargets.size === 0 || forwarding) return;
+    setForwarding(true);
+    try {
+      await forwardMessage(cid, mid, Array.from(forwardTargets));
+      showToast(`Forwarded to ${forwardTargets.size} chat${forwardTargets.size > 1 ? "s" : ""}.`);
+      closeForwardModal();
+      fetchConversations();
+    } catch (e: any) {
+      showToast(e?.response?.data?.message || "Could not forward message.");
+    } finally {
+      setForwarding(false);
+    }
+  };
+
+  const forwardableConversations = React.useMemo(() => {
+    const currentId = getId(selectedConversation);
+    const q = forwardSearch.trim().toLowerCase();
+    return recentConvs.filter((c) => {
+      const id = getId(c);
+      if (!id || id === currentId) return false;
+      if (!q) return true;
+      return displayName(c).toLowerCase().includes(q);
+    });
+  }, [recentConvs, selectedConversation, forwardSearch]);
+
   const formatDateSeparatorForList = (d: Date) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1314,6 +1502,7 @@ const Chat = () => {
   const getReplyPreviewText = (r: { content?: string; type?: string }) => {
     if (!r) return "";
     if (r.type === "image") return "Photo";
+    if (r.type === "video") return "Video";
     if (r.type === "file") return "File";
     if (r.type === "audio") return "Voice note";
     return (r.content || "").slice(0, 60) + ((r.content || "").length > 60 ? "…" : "");
@@ -1323,7 +1512,7 @@ const Chat = () => {
     const isDeleted = !!(m as any).deletedAt;
     if (isDeleted) {
       return (
-        <p className="mb-0 italic text-[#8c9097]">
+        <p className={chatStyles.deletedMessage}>
           {(m as any).deletedFor === "everyone"
             ? "This message was deleted"
             : "You deleted this message"}
@@ -1332,11 +1521,11 @@ const Chat = () => {
     }
     const replyTo = (m as any).replyTo;
     const replyBlock = replyTo ? (
-      <div className="mb-2 pb-2 border-l-2 border-primary/50 pl-2 text-[0.8rem]">
-        <p className="mb-0 font-medium text-primary/90 truncate">
+      <div className={chatStyles.replyPreview}>
+        <p className={chatStyles.replyPreviewName}>
           {(replyTo.sender as any)?.name || "Unknown"}
         </p>
-        <p className="mb-0 text-[#8c9097] truncate">{getReplyPreviewText(replyTo)}</p>
+        <p className={chatStyles.replyPreviewText}>{getReplyPreviewText(replyTo)}</p>
       </div>
     ) : null;
     if (m.type === "image" && m.attachments?.length) {
@@ -1352,7 +1541,9 @@ const Chat = () => {
               onClick={(e) => { e.stopPropagation(); setImagePreview(a.url); }}
             />
           ))}
-          {m.content && m.content !== "\ud83d\udcf7 Image" && <p className="mb-0 mt-1">{m.content}</p>}
+          {m.content && m.content !== "\ud83d\udcf7 Image" && (
+            <MessageText text={m.content} className="mb-0 mt-1 whitespace-pre-wrap" />
+          )}
         </div>
       );
     }
@@ -1363,9 +1554,28 @@ const Chat = () => {
           {m.attachments.map((a, i) => (
             <div key={i} className="flex items-center gap-2 p-2 rounded bg-white/10">
               <audio controls className="max-w-[200px] h-9" src={a.url} />
-              <span className="text-[0.7rem] text-[#8c9097]">Voice note</span>
+              <span className={chatStyles.bubbleMutedText}>Voice note</span>
             </div>
           ))}
+        </div>
+      );
+    }
+    if (m.type === "video" && m.attachments?.length) {
+      return (
+        <div>
+          {replyBlock}
+          {m.attachments.map((a, i) => (
+            <video
+              key={i}
+              controls
+              className="rounded max-w-[280px] max-h-[200px] mb-1"
+              src={a.url}
+              preload="metadata"
+            />
+          ))}
+          {m.content && !/^Sent (a video|\d+ videos)$/i.test(m.content) && (
+            <MessageText text={m.content} className="mb-0 mt-1 whitespace-pre-wrap" />
+          )}
         </div>
       );
     }
@@ -1385,7 +1595,7 @@ const Chat = () => {
               <div className="min-w-0">
                 <p className="mb-0 text-sm font-medium truncate">{a.originalName || "File"}</p>
                 {a.size ? (
-                  <p className="mb-0 text-[0.7rem] text-[#8c9097]">
+                  <p className={`mb-0 ${chatStyles.bubbleMutedText}`}>
                     {a.size >= 1048576
                       ? `${(a.size / 1048576).toFixed(1)} MB`
                       : `${(a.size / 1024).toFixed(1)} KB`}
@@ -1395,14 +1605,16 @@ const Chat = () => {
               <i className="ri-download-2-line ms-auto" />
             </a>
           ))}
-          {m.content && m.content !== "\ud83d\udcce File" && <p className="mb-0 mt-1">{m.content}</p>}
+          {m.content && m.content !== "\ud83d\udcce File" && (
+            <MessageText text={m.content} className="mb-0 mt-1 whitespace-pre-wrap" />
+          )}
         </div>
       );
     }
     return (
       <div>
         {replyBlock}
-        <p className="mb-0 whitespace-pre-wrap">{m.content}</p>
+        <MessageText text={m.content || ""} className="mb-0 whitespace-pre-wrap" />
       </div>
     );
   };
@@ -1610,7 +1822,7 @@ const Chat = () => {
                                     )}
                                   </p>
                                   <p className={`${chatStyles.convPreview} truncate`}>
-                                    {c.lastMessage?.content || "No messages yet"}
+                                    {conversationPreviewText(c.lastMessage)}
                                   </p>
                                 </div>
                                 {(c.unreadCount || 0) > 0 && (
@@ -1843,7 +2055,6 @@ const Chat = () => {
               )}
               <PerfectScrollbar
                 className={chatStyles.transcript}
-                style={{ height: "calc(100vh - 18rem)" }}
                 containerRef={(el) => { chatContainerRef.current = el; }}
               >
                 <div className={`chat-content ${chatStyles.transcriptInner}`}>
@@ -1949,75 +2160,75 @@ const Chat = () => {
                               </span>
                               <div className={`min-w-0 flex-1 ${isMe ? "text-end" : ""}`}>
                                 <span className={`${chatStyles.msgMeta} ${isMe ? chatStyles.msgMetaMe : ""}`}>
-                                  {isMe && !(m as any).deletedAt && (
-                                    <span
-                                      ref={deleteMenuFor === String((m as any).id || (m as any)._id) ? deleteMenuRef : undefined}
-                                      className="relative inline-flex"
-                                    >
+                                  {!(m as any).deletedAt && (
+                                    <>
                                       <button
                                         type="button"
                                         className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded hover:bg-white/10 transition-opacity shrink-0"
-                                        title="Delete"
-                                        aria-label="Delete message"
-                                        aria-haspopup="menu"
-                                        aria-expanded={deleteMenuFor === String((m as any).id || (m as any)._id)}
-                                        onClick={() =>
-                                          setDeleteMenuFor((prev) =>
-                                            prev === String((m as any).id || (m as any)._id)
-                                              ? null
-                                              : String((m as any).id || (m as any)._id)
-                                          )
-                                        }
+                                        title="Forward"
+                                        aria-label="Forward message"
+                                        onClick={() => {
+                                          setDeleteMenuFor(null);
+                                          setForwardTargets(new Set());
+                                          setForwardSearch("");
+                                          setForwardingMessage(m);
+                                        }}
                                       >
-                                        <i className="ri-delete-bin-line text-sm" />
+                                        <i className="ri-share-forward-line text-sm" />
                                       </button>
-                                      {deleteMenuFor === String((m as any).id || (m as any)._id) && (
-                                        <div className="absolute top-full right-0 mt-1 z-20 min-w-[11rem] rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-black/5 dark:border-white/10 py-1 text-start">
-                                          <button
-                                            type="button"
-                                            className="w-full text-start px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
-                                            onClick={() => {
-                                              const cid = getId(selectedConversation);
-                                              const mid = String((m as any).id || (m as any)._id);
-                                              setDeleteMenuFor(null);
-                                              if (!cid) return;
-                                              if (!window.confirm("Delete this message for you? It stays visible for others.")) return;
-                                              deleteMessage(cid, mid, "me")
-                                                .then(() => {
-                                                  setMessages((prev) => prev.filter((x) => String((x as any).id || (x as any)._id) !== mid));
-                                                })
-                                                .catch(() => {});
-                                            }}
-                                          >
-                                            Delete for me
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="w-full text-start px-3 py-1.5 text-sm text-danger hover:bg-black/5 dark:hover:bg-white/10"
-                                            onClick={() => {
-                                              const cid = getId(selectedConversation);
-                                              const mid = String((m as any).id || (m as any)._id);
-                                              setDeleteMenuFor(null);
-                                              if (!cid) return;
-                                              if (!window.confirm("Delete this message for everyone? This cannot be undone.")) return;
-                                              deleteMessage(cid, mid, "everyone")
-                                                .then(() => {
-                                                  setMessages((prev) =>
-                                                    prev.map((x) =>
-                                                      String((x as any).id || (x as any)._id) === mid
-                                                        ? { ...x, deletedAt: new Date().toISOString(), deletedFor: "everyone" as const }
-                                                        : x
-                                                    )
-                                                  );
-                                                })
-                                                .catch(() => {});
-                                            }}
-                                          >
-                                            Delete for everyone
-                                          </button>
-                                        </div>
-                                      )}
-                                    </span>
+                                      <span
+                                        ref={deleteMenuFor === String((m as any).id || (m as any)._id) ? deleteMenuRef : undefined}
+                                        className="relative inline-flex"
+                                      >
+                                        <button
+                                          type="button"
+                                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded hover:bg-white/10 transition-opacity shrink-0"
+                                          title="Delete"
+                                          aria-label="Delete message"
+                                          aria-haspopup="menu"
+                                          aria-expanded={deleteMenuFor === String((m as any).id || (m as any)._id)}
+                                          onClick={() =>
+                                            setDeleteMenuFor((prev) =>
+                                              prev === String((m as any).id || (m as any)._id)
+                                                ? null
+                                                : String((m as any).id || (m as any)._id)
+                                            )
+                                          }
+                                        >
+                                          <i className="ri-delete-bin-line text-sm" />
+                                        </button>
+                                        {deleteMenuFor === String((m as any).id || (m as any)._id) && (
+                                          <div className={`absolute top-full right-0 mt-1 min-w-[11rem] rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-black/5 dark:border-white/10 py-1 text-start ${chatStyles.messageActionMenu}`}>
+                                            <button
+                                              type="button"
+                                              className="w-full text-start px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
+                                              onClick={() => {
+                                                const mid = String((m as any).id || (m as any)._id);
+                                                setDeleteMenuFor(null);
+                                                if (!getId(selectedConversation)) return;
+                                                setDeleteConfirm({ mode: "me", messageId: mid });
+                                              }}
+                                            >
+                                              Delete for me
+                                            </button>
+                                            {isMe && (
+                                              <button
+                                                type="button"
+                                                className="w-full text-start px-3 py-1.5 text-sm text-danger hover:bg-black/5 dark:hover:bg-white/10"
+                                                onClick={() => {
+                                                  const mid = String((m as any).id || (m as any)._id);
+                                                  setDeleteMenuFor(null);
+                                                  if (!getId(selectedConversation)) return;
+                                                  setDeleteConfirm({ mode: "everyone", messageId: mid });
+                                                }}
+                                              >
+                                                Delete for everyone
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
+                                      </span>
+                                    </>
                                   )}
                                   <button
                                     type="button"
@@ -2471,6 +2682,185 @@ const Chat = () => {
                   )}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete confirmation modal ── */}
+      {deleteConfirm && (() => {
+        const copy = getDeleteConfirmCopy(deleteConfirm.mode, selectedConversation?.type === "group");
+        const confirmBusy = deletingMessage || deletingChat;
+        return (
+          <div
+            className={chatStyles.modalBackdrop}
+            onClick={closeDeleteConfirm}
+            role="presentation"
+          >
+            <div
+              className={`${chatStyles.modalPanel} ${chatStyles.confirmPanel}`}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-confirm-title"
+              aria-describedby="delete-confirm-desc"
+            >
+              <div className={chatStyles.modalHead}>
+                <div className={chatStyles.modalHeadRow}>
+                  <h5 id="delete-confirm-title" className={chatStyles.confirmTitle}>
+                    <i className="ri-delete-bin-line me-2 text-danger" aria-hidden />
+                    {copy.title}
+                  </h5>
+                  <button
+                    type="button"
+                    className={chatStyles.modalCloseBtn}
+                    onClick={closeDeleteConfirm}
+                    disabled={confirmBusy}
+                    aria-label="Close"
+                  >
+                    <i className="ri-close-line text-lg" aria-hidden />
+                  </button>
+                </div>
+              </div>
+              <div className={chatStyles.modalBody}>
+                <p id="delete-confirm-desc" className={chatStyles.confirmMessage}>
+                  {copy.message}
+                </p>
+              </div>
+              <div className={chatStyles.modalFoot}>
+                <button
+                  ref={deleteConfirmCancelRef}
+                  type="button"
+                  className={chatStyles.confirmCancelBtn}
+                  onClick={closeDeleteConfirm}
+                  disabled={confirmBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={chatStyles.confirmDangerBtn}
+                  onClick={() => void executeDeleteConfirm()}
+                  disabled={confirmBusy}
+                >
+                  {confirmBusy ? (
+                    <>
+                      <i className="ri-loader-4-line animate-spin me-1.5" aria-hidden />
+                      Deleting...
+                    </>
+                  ) : (
+                    copy.confirmLabel
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Forward message modal ── */}
+      {forwardingMessage && (
+        <div className={chatStyles.modalBackdrop} onClick={closeForwardModal} role="presentation">
+          <div
+            className={chatStyles.modalPanel}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-labelledby="forward-message-title"
+          >
+            <div className={chatStyles.modalHead}>
+              <h5 id="forward-message-title" className={chatStyles.modalTitle}>
+                Forward message
+              </h5>
+            </div>
+            <div className={chatStyles.modalBody}>
+              <div className="mb-4 rounded-lg border border-black/5 dark:border-white/10 bg-black/[0.03] dark:bg-white/[0.04] px-3 py-2 text-sm">
+                <p className="mb-0 text-defaulttextcolor/70 truncate">
+                  {forwardingMessage.type === "image"
+                    ? "Photo"
+                    : forwardingMessage.type === "file"
+                      ? "File"
+                      : forwardingMessage.type === "audio"
+                        ? "Voice note"
+                        : (forwardingMessage.content || "").slice(0, 120) +
+                          ((forwardingMessage.content || "").length > 120 ? "…" : "")}
+                </p>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-defaulttextcolor/80 mb-1.5" htmlFor="forward-chat-search">
+                  Forward to
+                </label>
+                <input
+                  id="forward-chat-search"
+                  className="form-control rounded-lg"
+                  placeholder="Search chats…"
+                  value={forwardSearch}
+                  onChange={(e) => setForwardSearch(e.target.value)}
+                />
+              </div>
+              <ul className={chatStyles.userPickList}>
+                {forwardableConversations.length === 0 ? (
+                  <li className="py-8 text-center text-defaulttextcolor/60 text-sm px-3">
+                    {forwardSearch.trim() ? "No chats match your search." : "No other chats available."}
+                  </li>
+                ) : (
+                  forwardableConversations.map((c) => {
+                    const convId = getId(c);
+                    if (!convId) return null;
+                    const isSelected = forwardTargets.has(convId);
+                    return (
+                      <li
+                        key={convId}
+                        className={`${chatStyles.userPickItem} ${isSelected ? chatStyles.userPickSelected : ""}`}
+                        onClick={() => toggleForwardTarget(convId)}
+                      >
+                        <span
+                          className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center ${
+                            isSelected ? "bg-primary border-primary" : "border-defaultborder dark:border-white/20"
+                          }`}
+                        >
+                          {isSelected && <i className="ri-check-line text-white text-xs" />}
+                        </span>
+                        <span className="avatar avatar-sm avatar-rounded flex-shrink-0">
+                          <img src={conversationAvatar(c)} alt="" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="mb-0 font-medium truncate">{displayName(c)}</p>
+                          <p className="text-[0.75rem] text-defaulttextcolor/60 truncate">
+                            {c.type === "group" ? "Group" : "Direct message"}
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+            </div>
+            <div className={chatStyles.modalFoot}>
+              <button
+                type="button"
+                className="ti-btn ti-btn-outline-secondary rounded-lg"
+                onClick={closeForwardModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ti-btn ti-btn-primary rounded-lg min-w-[140px]"
+                onClick={() => void handleForwardSubmit()}
+                disabled={forwardTargets.size === 0 || forwarding}
+              >
+                {forwarding ? (
+                  <>
+                    <i className="ri-loader-4-line animate-spin me-1.5" />
+                    Forwarding...
+                  </>
+                ) : (
+                  <>
+                    <i className="ri-share-forward-line me-1.5" />
+                    Forward {forwardTargets.size > 0 && `(${forwardTargets.size})`}
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

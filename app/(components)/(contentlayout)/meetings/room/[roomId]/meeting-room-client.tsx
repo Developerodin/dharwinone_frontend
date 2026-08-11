@@ -714,15 +714,19 @@ function RoomContent({
           }}
         />
       )}
-      {isHost && !isChatCall && onEndForAll && (
+      {onEndForAll && (isHost || isChatCall) && (
         <button
           type="button"
           onClick={onEndForAll}
-          title="End the meeting for everyone (closes the room and invalidates the link)"
+          title={
+            isChatCall
+              ? "End the call for everyone (disconnects all participants)"
+              : "End the meeting for everyone (closes the room and invalidates the link)"
+          }
           className="absolute top-4 right-4 z-[120] ti-btn ti-btn-danger rounded-xl shadow-lg"
         >
           <i className="ti ti-phone-off me-2" />
-          End meeting for all
+          {isChatCall ? "End call for all" : "End meeting for all"}
         </button>
       )}
       {reconnecting && (
@@ -842,7 +846,8 @@ export default function MeetingRoomClient() {
   const handleLeave = useCallback(async () => {
     const roomName = decodeURIComponent(roomId);
     if (fromChat && roomName.startsWith("chat-")) {
-      await endCallByRoom(roomName).catch(() => {});
+      // Participant leave only disconnects locally (LiveKit CLIENT_INITIATED). Do NOT
+      // endCallByRoom here — that deletes the LiveKit room and kicks everyone else.
       try {
         window.close();
       } catch {
@@ -863,9 +868,17 @@ export default function MeetingRoomClient() {
 
   const handleEndForAll = useCallback(async () => {
     const roomName = decodeURIComponent(roomId);
-    await updateMeeting(roomName, { status: "ended" }).catch(() => {});
-    router.push("/meetings/pre-join/");
-  }, [router, roomId]);
+    if (fromChat && roomName.startsWith("chat-")) {
+      await endCallByRoom(roomName).catch(() => {});
+      const returnUrl = returnConvId
+        ? `/communication/chats?conv=${encodeURIComponent(returnConvId)}`
+        : "/communication/chats";
+      router.push(returnUrl);
+    } else {
+      await updateMeeting(roomName, { status: "ended" }).catch(() => {});
+      router.push("/meetings/pre-join/");
+    }
+  }, [router, roomId, fromChat, returnConvId]);
 
   const handleDisconnect = useCallback(() => {
     console.log("Disconnected from room - RoomContent will handle reconnection");

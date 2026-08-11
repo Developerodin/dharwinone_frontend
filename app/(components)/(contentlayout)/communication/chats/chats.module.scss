@@ -661,8 +661,38 @@
   border: 1px solid rgba(244, 63, 94, 0.2);
 }
 
+/* Template _chat.scss pins .chat-footer absolute with a fixed white bar — keep footer in flow */
+.shell :global(.main-chart-wrapper .main-chat-area) {
+  display: flex !important;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.shell :global(.main-chart-wrapper .main-chat-area .chat-footer) {
+  position: static !important;
+  inset: auto !important;
+  bottom: auto !important;
+  height: auto !important;
+  flex-shrink: 0;
+}
+
+.shell :global(.main-chart-wrapper .main-chat-area .scrollbar-container) {
+  height: auto !important;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.shell :global(.main-chart-wrapper .main-chat-area .chat-content) {
+  max-height: none !important;
+  padding: 0 !important;
+  background: none !important;
+  background-attachment: scroll !important;
+}
+
 .transcript {
   position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   background:
     radial-gradient(circle at 20% 20%, rgba(13, 148, 136, 0.03) 0%, transparent 45%),
     radial-gradient(circle at 80% 80%, rgba(14, 165, 233, 0.04) 0%, transparent 40%),
@@ -809,6 +839,87 @@
   color: #99f6e4;
 }
 
+.bubbleRecv :global(a) {
+  color: var(--chat-accent);
+}
+
+.replyPreview {
+  margin-bottom: 0.5rem;
+  padding: 0.35rem 0.5rem 0.35rem 0.6rem;
+  border-left: 2px solid var(--chat-accent);
+  border-radius: 0 0.25rem 0.25rem 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.replyPreviewName {
+  margin: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replyPreviewText {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bubbleRecv .replyPreview {
+  background: var(--chat-accent-soft);
+  border-left-color: var(--chat-accent);
+
+  .replyPreviewName {
+    color: var(--chat-accent);
+  }
+
+  .replyPreviewText {
+    color: var(--chat-ink-muted);
+  }
+}
+
+.bubbleSent .replyPreview {
+  background: rgba(0, 0, 0, 0.18);
+  border-left-color: rgba(255, 255, 255, 0.55);
+
+  .replyPreviewName {
+    color: #99f6e4;
+  }
+
+  .replyPreviewText {
+    color: rgba(236, 253, 245, 0.82);
+  }
+}
+
+:global(.dark) .bubbleSent .replyPreview {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.deletedMessage {
+  margin: 0;
+  font-style: italic;
+}
+
+.bubbleMutedText {
+  font-size: 0.7rem;
+}
+
+.bubbleRecv {
+  .deletedMessage,
+  .bubbleMutedText {
+    color: var(--chat-ink-muted);
+  }
+}
+
+.bubbleSent {
+  .deletedMessage,
+  .bubbleMutedText {
+    color: rgba(236, 253, 245, 0.82);
+  }
+}
+
 .replyStrip {
   display: flex;
   align-items: center;
@@ -826,6 +937,12 @@
   padding: 0.85rem 1rem 1rem;
   border-top: 1px solid var(--chat-border);
   background: var(--chat-elevated);
+  position: relative;
+  z-index: 1;
+}
+
+.messageActionMenu {
+  z-index: 30;
 }
 
 .composerInput {
@@ -1124,6 +1241,127 @@
   padding: 1rem 1.25rem;
   border-top: 1px solid var(--chat-border);
   background: var(--chat-surface);
+}
+
+/* ── Delete confirmation modal ── */
+.confirmPanel {
+  max-width: 24rem;
+  animation: confirmFadeIn 0.2s ease-out;
+}
+
+@keyframes confirmFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modalHeadRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.confirmTitle {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--chat-ink);
+  display: flex;
+  align-items: center;
+}
+
+.modalCloseBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin: -0.35rem -0.35rem 0 0;
+  border: none;
+  border-radius: var(--chat-radius-md);
+  background: transparent;
+  color: var(--chat-ink-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.modalCloseBtn:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--chat-ink);
+}
+
+:global(.dark) .modalCloseBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.modalCloseBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.confirmMessage {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--chat-ink-muted);
+}
+
+.confirmCancelBtn {
+  min-height: 2.75rem;
+  min-width: 5.5rem;
+  padding: 0.5rem 1.125rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: var(--chat-radius-md);
+  border: 1px solid var(--chat-border);
+  background: transparent;
+  color: var(--chat-ink);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.confirmCancelBtn:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+:global(.dark) .confirmCancelBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.confirmCancelBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.confirmDangerBtn {
+  min-height: 2.75rem;
+  min-width: 5.5rem;
+  padding: 0.5rem 1.125rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: var(--chat-radius-md);
+  border: none;
+  background: #dc2626;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.confirmDangerBtn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.confirmDangerBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* ── Group / contact side content ── */

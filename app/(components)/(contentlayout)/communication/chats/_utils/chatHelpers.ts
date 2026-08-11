@@ -6,10 +6,26 @@ export function getId(x: { id?: string; _id?: string } | null | undefined): stri
   return x.id || (x as { _id?: { toString?: () => string } })._id?.toString?.() || null;
 }
 
+/** Sidebar / list preview line for a conversation's last message. */
+export function conversationPreviewText(lastMessage?: Conversation["lastMessage"] | null): string {
+  const content = lastMessage?.content?.trim();
+  return content || "No messages yet";
+}
+
 /** Build sidebar preview from a message after send/upload. */
 export function lastMessageFromMsg(msg: Message): NonNullable<Conversation["lastMessage"]> {
+  const isDeleted = !!(msg as { deletedAt?: string | null }).deletedAt;
+  const deletedFor = (msg as { deletedFor?: "me" | "everyone" }).deletedFor;
+  if (isDeleted && deletedFor === "everyone") {
+    return {
+      content: "This message was deleted",
+      sender: msg.sender?.name,
+      createdAt: msg.createdAt,
+    };
+  }
   let content = msg.content || "";
   if (msg.type === "image") content = "📷 Image";
+  else if (msg.type === "video") content = "🎬 Video";
   else if (msg.type === "audio") content = "🎤 Voice note";
   else if (msg.type === "file") content = "📎 File";
   return {
@@ -51,6 +67,38 @@ export function timelineCallPillText(call: {
   }
   if (status) chunks.push(status);
   return chunks.join(" · ");
+}
+
+export type TextSegment = { text: string; href?: string };
+
+// ponytail: http(s)/www only — no scheme-agnostic match, so javascript:/data: can never become an href.
+const URL_RE = /(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+
+/** Split message text into plain + link segments so bubbles can render real anchors. */
+export function splitTextLinks(text: string | null | undefined): TextSegment[] {
+  if (!text) return [];
+  const out: TextSegment[] = [];
+  let last = 0;
+  URL_RE.lastIndex = 0;
+  for (let m = URL_RE.exec(text); m; m = URL_RE.exec(text)) {
+    let url = m[0];
+    // Trailing chars that are almost always sentence punctuation, not part of the URL.
+    // A ")" only counts as trailing when the URL has more ")" than "(".
+    for (;;) {
+      const tail = url[url.length - 1];
+      if (!tail) break;
+      if (".,!?;:".includes(tail)) url = url.slice(0, -1);
+      else if (tail === ")" && (url.match(/\(/g)?.length ?? 0) < (url.match(/\)/g)?.length ?? 0))
+        url = url.slice(0, -1);
+      else break;
+    }
+    if (m.index > last) out.push({ text: text.slice(last, m.index) });
+    out.push({ text: url, href: url.startsWith("www.") ? `https://${url}` : url });
+    last = m.index + url.length;
+    URL_RE.lastIndex = last;
+  }
+  if (last < text.length) out.push({ text: text.slice(last) });
+  return out;
 }
 
 /** The current user's applied reaction emoji on a message, or undefined. */

@@ -22,7 +22,9 @@ function clipNotificationText(text: string, max = NOTIFICATION_BODY_MAX): string
 }
 
 function isGroupIncomingCall(data: IncomingCallData): boolean {
-  return data.callSource !== "support_camera" && data.conversationType === "group" && Boolean(data.groupName?.trim());
+  if (data.callSource === "support_camera") return false;
+  if (data.callScope === "group") return true;
+  return data.conversationType === "group";
 }
 
 function isSupportCameraIncoming(data: IncomingCallData): boolean {
@@ -291,14 +293,20 @@ function GlobalIncomingCallInner() {
         const supportCam = isSupportCameraIncoming(data);
         const title = supportCam
           ? "Support camera request"
-          : data.callType === "audio"
-            ? "Incoming voice call"
-            : "Incoming video call";
+          : isGroupIncomingCall(data)
+            ? "Incoming group call"
+            : data.callType === "audio"
+              ? "Incoming voice call"
+              : "Incoming video call";
         const callerNm = data.caller?.name ?? "Someone";
         const body = supportCam
           ? clipNotificationText(`${callerNm} is asking you to join a support camera session`)
-          : isGroupIncomingCall(data) && data.groupName
-            ? clipNotificationText(`${callerNm} is calling you in ${data.groupName}`)
+          : isGroupIncomingCall(data)
+            ? clipNotificationText(
+                data.groupName
+                  ? `${callerNm} started a group call in ${data.groupName}`
+                  : `${callerNm} started a group call`
+              )
             : clipNotificationText(`${callerNm} is calling you`);
         const tag = supportCam ? `support-cam-${data.supportInviteToken}` : `incoming-call-${data.callId}`;
         if (Notification.permission === "granted") {
@@ -393,15 +401,22 @@ function GlobalIncomingCallInner() {
   if (!incomingCall) return <>{ringtoneAudio}</>;
 
   const supportCam = isSupportCameraIncoming(incomingCall);
+  const showGroupContext = isGroupIncomingCall(incomingCall);
   const callLabel = supportCam
     ? "Support camera request"
-    : incomingCall.callType === "audio"
-      ? "Incoming voice call"
-      : "Incoming video call";
+    : showGroupContext
+      ? "Incoming group call"
+      : incomingCall.callType === "audio"
+        ? "Incoming voice call"
+        : "Incoming video call";
   const isVideo = supportCam || incomingCall.callType === "video";
   const callKindShort = supportCam ? "Camera" : isVideo ? "Video" : "Voice";
-  const showGroupContext = isGroupIncomingCall(incomingCall);
   const groupDisplayName = incomingCall.groupName?.trim() || "Group";
+  const participantHint =
+    showGroupContext && incomingCall.participantCount != null && incomingCall.participantCount > 0
+      ? `${incomingCall.participantCount} participant${incomingCall.participantCount === 1 ? "" : "s"}`
+      : null;
+  const acceptLabel = showGroupContext ? "Join" : "Accept";
   const modalDescribedBy = showGroupContext
     ? "incoming-call-desc incoming-call-group-subtitle"
     : "incoming-call-desc";
@@ -458,6 +473,10 @@ function GlobalIncomingCallInner() {
         .ic-btn-accept:hover { transform: scale(1.06); }
         .ic-btn-accept:active { transform: scale(0.97); }
         .ic-chip { transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease; }
+        .ic-group-badge {
+          background: linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(14, 165, 233, 0.12));
+          border: 1px solid rgba(99, 102, 241, 0.22);
+        }
       `}</style>
       <div
         ref={modalRef}
@@ -471,11 +490,21 @@ function GlobalIncomingCallInner() {
         <p id="incoming-call-announce" className="sr-only" aria-live="assertive">
           {callLabel} from {incomingCall.caller?.name ?? "Unknown"}
           {showGroupContext ? `, group ${groupDisplayName}` : ""}
+          {participantHint ? `, ${participantHint}` : ""}
           {supportCam ? ". Open the session to share your camera with support." : ""}
         </p>
 
         <div className="relative px-6 pb-2 pt-8 text-center">
           <div className="ic-stagger-a relative mx-auto mb-5 inline-flex">
+            {showGroupContext && (
+              <span
+                className="ic-group-badge absolute -top-1 -right-1 z-10 flex h-8 w-8 items-center justify-center rounded-full text-indigo-700 shadow-sm dark:text-indigo-200"
+                title="Group call"
+                aria-hidden
+              >
+                <i className="ri-group-fill text-base" />
+              </span>
+            )}
             <span
               className="ic-avatar-ring-1 absolute -inset-3 rounded-full bg-primary/25 dark:bg-primary/20"
               aria-hidden
@@ -505,7 +534,7 @@ function GlobalIncomingCallInner() {
               {supportCam
                 ? "Support session · Camera"
                 : showGroupContext
-                  ? `Incoming group · ${callKindShort}`
+                  ? `Group call · ${callKindShort}`
                   : `Incoming · ${callKindShort}`}
             </span>
           </p>
@@ -519,18 +548,31 @@ function GlobalIncomingCallInner() {
           {showGroupContext && (
             <p
               id="incoming-call-group-subtitle"
-              className="ic-stagger-b -mt-1 mb-2 truncate px-1 text-sm font-medium text-[#64748b] dark:text-white/55"
+              className="ic-stagger-b -mt-1 mb-1 truncate px-1 text-sm font-medium text-[#64748b] dark:text-white/55"
+              title={groupDisplayName}
+            >
+              {incomingCall.caller?.name || "Someone"} started a group call
+            </p>
+          )}
+          {showGroupContext && (
+            <p
+              className="ic-stagger-b mb-2 truncate px-1 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700/90 dark:text-indigo-300/90"
               title={groupDisplayName}
             >
               {groupDisplayName}
+              {participantHint ? ` · ${participantHint}` : ""}
             </p>
           )}
           <p className="ic-stagger-c mx-auto max-w-[16rem] text-sm leading-relaxed text-[#64748b] dark:text-white/50">
             {supportCam
               ? "Platform support is requesting a consent-based camera session. Accept to open the join page."
-              : isVideo
-                ? "Video call — answer to join with camera and mic."
-                : "Voice call — answer to connect with audio only."}
+              : showGroupContext
+                ? isVideo
+                  ? "Join the group video call — camera and mic in a shared room."
+                  : "Join the group voice call — connect with everyone in the shared room."
+                : isVideo
+                  ? "Video call — answer to join with camera and mic."
+                  : "Voice call — answer to connect with audio only."}
           </p>
         </div>
 
@@ -554,15 +596,25 @@ function GlobalIncomingCallInner() {
                 id="incoming-call-accept"
                 className="ic-btn-accept flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 text-white shadow-lg shadow-emerald-900/25 ring-2 ring-emerald-300/50 ring-offset-2 ring-offset-white dark:from-emerald-500 dark:to-emerald-700 dark:ring-emerald-400/30 dark:ring-offset-[#14151a]"
                 onClick={acceptCall}
-                title="Accept"
-                aria-label={supportCam ? "Accept support camera session" : isVideo ? "Accept video call" : "Accept voice call"}
+                title={acceptLabel}
+                aria-label={
+                  supportCam
+                    ? "Accept support camera session"
+                    : showGroupContext
+                      ? isVideo
+                        ? "Join group video call"
+                        : "Join group voice call"
+                      : isVideo
+                        ? "Accept video call"
+                        : "Accept voice call"
+                }
               >
                 <i
-                  className={`text-[1.75rem] leading-none ${isVideo ? "ri-vidicon-fill" : "ri-phone-fill"}`}
+                  className={`text-[1.75rem] leading-none ${showGroupContext ? "ri-group-fill" : isVideo ? "ri-vidicon-fill" : "ri-phone-fill"}`}
                   aria-hidden
                 />
               </button>
-              <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400/90">Accept</span>
+              <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400/90">{acceptLabel}</span>
             </div>
           </div>
         </div>
@@ -673,6 +725,11 @@ function IncomingCallBarInner() {
   const callerName = incomingCall.caller?.name ?? "Someone";
   const showGroupBar = isGroupIncomingCall(incomingCall);
   const groupBarName = incomingCall.groupName?.trim() || "Group";
+  const participantBarHint =
+    showGroupBar && incomingCall.participantCount != null && incomingCall.participantCount > 0
+      ? `${incomingCall.participantCount} in call`
+      : null;
+  const joinLabel = showGroupBar ? "Join" : "Accept";
   const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(callerName)}&size=64&background=f1f5f9&color=334155`;
   const barAriaLabel = supportBar
     ? `Support camera request from ${callerName}`
@@ -769,15 +826,18 @@ function IncomingCallBarInner() {
                 className="truncate text-[0.6875rem] font-semibold text-slate-600 dark:text-white/55"
                 title={groupBarName}
               >
-                {groupBarName}
+                {callerName} started a group call · {groupBarName}
+                {participantBarHint ? ` · ${participantBarHint}` : ""}
               </p>
             )}
             <p className="truncate text-[0.6875rem] text-slate-500 dark:text-white/40">
               {supportBar
                 ? "Support session opens in a new tab"
-                : isVideo
-                  ? "Video meeting opens in a new tab"
-                  : "Voice only — opens in a new tab"}
+                : showGroupBar
+                  ? "Join the shared group room in a new tab"
+                  : isVideo
+                    ? "Video meeting opens in a new tab"
+                    : "Voice only — opens in a new tab"}
             </p>
           </div>
 
@@ -796,13 +856,23 @@ function IncomingCallBarInner() {
                 type="button"
                 className="inline-flex h-9 min-w-[2.25rem] items-center justify-center gap-1 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 px-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-900/15 transition hover:from-emerald-400 hover:to-teal-500 sm:px-3.5 dark:shadow-emerald-950/40"
                 onClick={acceptFromBar}
-                aria-label={supportBar ? "Accept support camera session" : isVideo ? "Accept video call" : "Accept voice call"}
+                aria-label={
+                  supportBar
+                    ? "Accept support camera session"
+                    : showGroupBar
+                      ? isVideo
+                        ? "Join group video call"
+                        : "Join group voice call"
+                      : isVideo
+                        ? "Accept video call"
+                        : "Accept voice call"
+                }
               >
                 <i
-                  className={`text-base sm:text-sm ${isVideo ? "ri-vidicon-fill" : "ri-phone-fill"}`}
+                  className={`text-base sm:text-sm ${showGroupBar ? "ri-group-fill" : isVideo ? "ri-vidicon-fill" : "ri-phone-fill"}`}
                   aria-hidden
                 />
-                <span className="hidden sm:inline">Accept</span>
+                <span className="hidden sm:inline">{joinLabel}</span>
               </button>
             </div>
           </div>
