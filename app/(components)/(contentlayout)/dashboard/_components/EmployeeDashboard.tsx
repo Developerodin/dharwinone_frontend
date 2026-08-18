@@ -12,8 +12,10 @@ import {
   listAttendance, listAttendanceMe,
   type AttendanceIdentity, type PunchStatusResponse, type AttendanceStatistics, type AttendanceRecord,
 } from "@/shared/lib/api/attendance";
+import { getAllLeaveRequests, type LeaveRequest } from "@/shared/lib/api/leave-requests";
 import DashboardCard from "./employee/DashboardCard";
 import TodayCard from "./employee/TodayCard";
+import LeaveCard from "./employee/LeaveCard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -39,6 +41,12 @@ export default function EmployeeDashboard(): JSX.Element {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [attLoading, setAttLoading] = useState(true);
   const [punching, setPunching] = useState(false);
+
+  const [leave, setLeave] = useState<LeaveRequest[]>([]);
+  const [leaveLoading, setLeaveLoading] = useState(true);
+
+  /** Leave requests are scoped by Student id, so agents on user-based attendance have none. */
+  const studentId = identity && identity.type !== "user" ? identity.id : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +76,17 @@ export default function EmployeeDashboard(): JSX.Element {
   }, [identity]);
 
   useEffect(() => { if (identityResolved) void loadAttendance(); }, [identityResolved, loadAttendance]);
+
+  useEffect(() => {
+    if (!identityResolved) return;
+    if (!studentId) { setLeave([]); setLeaveLoading(false); return; }
+    let cancelled = false;
+    getAllLeaveRequests({ student: studentId, limit: 100 })
+      .then((page) => { if (!cancelled) setLeave(page.results ?? []); })
+      .catch(() => { if (!cancelled) setLeave([]); })
+      .finally(() => { if (!cancelled) setLeaveLoading(false); });
+    return () => { cancelled = true; };
+  }, [identityResolved, studentId]);
 
   const handlePunch = useCallback(async () => {
     if (!identity) return;
@@ -107,7 +126,7 @@ export default function EmployeeDashboard(): JSX.Element {
         <div className="grid grid-cols-1 items-stretch gap-[18px] md:grid-cols-2 xl:grid-cols-[308px_minmax(0,1fr)_minmax(0,1fr)] 2xl:grid-cols-[340px_minmax(0,1fr)_minmax(0,1fr)]">
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
             <TodayCard status={status} stats={stats} records={records} loading={attLoading} onPunch={handlePunch} punching={punching} />
-            <DashboardCard title="Leave"><p>TODO Task 4</p></DashboardCard>
+            <LeaveCard requests={leave} loading={leaveLoading} />
             <DashboardCard title="Finish your profile"><p>TODO Task 5</p></DashboardCard>
             <DashboardCard title="Documents"><p>TODO Task 5</p></DashboardCard>
           </div>
