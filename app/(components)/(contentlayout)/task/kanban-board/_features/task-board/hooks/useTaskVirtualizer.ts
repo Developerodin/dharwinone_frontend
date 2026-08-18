@@ -22,6 +22,7 @@ export function useTaskVirtualizer({
     count: shouldVirtualize ? count : 0,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => estimateSize,
+    gap: 8,
     overscan: 6,
   });
 

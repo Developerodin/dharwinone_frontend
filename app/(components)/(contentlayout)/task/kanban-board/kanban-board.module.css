@@ -1386,14 +1386,6 @@
   box-shadow: var(--kb-card-elev);
 }
 
-/* Strict height lock — prevents metadata wrap from growing cards (§6.3/§6.4). */
-.kbRoot[data-density="compact"] .kbTaskCard {
-  max-height: var(--kb-card-min-h, 92px);
-}
-.kbRoot[data-density="comfortable"] .kbTaskCard {
-  max-height: var(--kb-card-min-h, 124px);
-}
-
 /* Column lane — minimal accent (§6.6, option A locked). */
 .kbColumnHeader {
   position: sticky;

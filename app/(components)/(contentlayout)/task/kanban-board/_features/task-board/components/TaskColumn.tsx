@@ -142,6 +142,8 @@ export function TaskColumn({
                 return (
                   <div
                     key={tid}
+                    data-index={vi.index}
+                    ref={virtualizer.measureElement}
                     className="absolute left-0 right-0"
                     style={{ transform: `translateY(${vi.start}px)` }}
                   >
