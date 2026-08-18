@@ -16,12 +16,15 @@ import {
 } from "@/shared/lib/api/attendance";
 import { getAllLeaveRequests, type LeaveRequest } from "@/shared/lib/api/leave-requests";
 import { listStudentCourses, type StudentCourseListItem } from "@/shared/lib/api/student-courses";
+import { listTasks, updateTaskStatus, type Task, type TaskStatus } from "@/shared/lib/api/tasks";
 import DashboardCard from "./employee/DashboardCard";
 import TodayCard from "./employee/TodayCard";
 import LeaveCard from "./employee/LeaveCard";
 import ProfileGapsCard from "./employee/ProfileGapsCard";
 import DocumentsCard from "./employee/DocumentsCard";
 import TrainingCard from "./employee/TrainingCard";
+import DueTodayCard from "./employee/DueTodayCard";
+import MyTasksCard from "./employee/MyTasksCard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -56,6 +59,9 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const [courses, setCourses] = useState<StudentCourseListItem[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
+
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(true);
 
   /** Leave requests are scoped by Student id, so agents on user-based attendance have none. */
   const studentId = identity && identity.type !== "user" ? identity.id : null;
@@ -119,6 +125,28 @@ export default function EmployeeDashboard(): JSX.Element {
       .finally(() => { if (!cancelled) setProfileLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  const loadTasks = useCallback(async () => {
+    try {
+      const r = await listTasks({ assignedToMe: true, limit: 200 });
+      setTasks(r.results ?? []);
+    } catch {
+      setTasks([]);
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadTasks(); }, [loadTasks]);
+
+  const handleToggle = useCallback(async (id: string, next: TaskStatus) => {
+    setTasks((prev) => prev.map((t) => (t._id === id ? { ...t, status: next } : t)));
+    try {
+      await updateTaskStatus(id, next);
+    } catch {
+      void loadTasks();
+    }
+  }, [loadTasks]);
 
   /** Only fields the employee can actually fill in on Settings → Personal information. */
   const gaps = useMemo(() => {
@@ -200,9 +228,9 @@ export default function EmployeeDashboard(): JSX.Element {
           </div>
 
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
-            <DashboardCard title="Due today"><p>TODO Task 7</p></DashboardCard>
+            <DueTodayCard tasks={tasks} loading={tasksLoading} onToggle={handleToggle} />
             <DashboardCard title="Meetings"><p>TODO Task 8</p></DashboardCard>
-            <DashboardCard title="All my tasks"><p>TODO Task 7</p></DashboardCard>
+            <MyTasksCard tasks={tasks} loading={tasksLoading} />
           </div>
 
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
