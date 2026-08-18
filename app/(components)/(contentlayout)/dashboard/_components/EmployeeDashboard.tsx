@@ -1,9 +1,19 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Seo from "@/shared/layout-components/seo/seo";
 import { useAuth } from "@/shared/contexts/auth-context";
+import {
+  getMyStudentForAttendance,
+  getPunchInOutStatus, getPunchInOutStatusMe,
+  punchInAttendance, punchInAttendanceMe,
+  punchOutAttendance, punchOutAttendanceMe,
+  getAttendanceStatistics, getAttendanceStatisticsMe,
+  listAttendance, listAttendanceMe,
+  type AttendanceIdentity, type PunchStatusResponse, type AttendanceStatistics, type AttendanceRecord,
+} from "@/shared/lib/api/attendance";
 import DashboardCard from "./employee/DashboardCard";
+import TodayCard from "./employee/TodayCard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -12,8 +22,73 @@ function greeting(): string {
   return "Good evening";
 }
 
+/** Employees with a Student profile must use the id-scoped attendance routes; the
+ *  `/me` routes are reserved for agents with no Student and 403 for everyone else. */
+function isUserBased(identity: AttendanceIdentity | null): boolean {
+  return identity?.type === "user";
+}
+
 export default function EmployeeDashboard(): JSX.Element {
   const { user } = useAuth();
+
+  const [identity, setIdentity] = useState<AttendanceIdentity | null>(null);
+  const [identityResolved, setIdentityResolved] = useState(false);
+
+  const [status, setStatus] = useState<PunchStatusResponse | null>(null);
+  const [stats, setStats] = useState<AttendanceStatistics | null>(null);
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [attLoading, setAttLoading] = useState(true);
+  const [punching, setPunching] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyStudentForAttendance()
+      .then((me) => { if (!cancelled) setIdentity(me); })
+      .catch(() => { if (!cancelled) setIdentity(null); })
+      .finally(() => { if (!cancelled) setIdentityResolved(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const loadAttendance = useCallback(async () => {
+    if (!identity) { setAttLoading(false); return; }
+    setAttLoading(true);
+    const userBased = isUserBased(identity);
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const range = { startDate: first.toISOString().slice(0, 10), endDate: now.toISOString().slice(0, 10) };
+    const [s, st, rec] = await Promise.allSettled([
+      userBased ? getPunchInOutStatusMe() : getPunchInOutStatus(identity.id),
+      userBased ? getAttendanceStatisticsMe(range) : getAttendanceStatistics(identity.id, range),
+      userBased ? listAttendanceMe({ ...range, limit: 31 }) : listAttendance(identity.id, { ...range, limit: 31 }),
+    ]);
+    if (s.status === "fulfilled") setStatus(s.value);
+    if (st.status === "fulfilled") setStats(st.value);
+    if (rec.status === "fulfilled") setRecords(rec.value.results ?? []);
+    setAttLoading(false);
+  }, [identity]);
+
+  useEffect(() => { if (identityResolved) void loadAttendance(); }, [identityResolved, loadAttendance]);
+
+  const handlePunch = useCallback(async () => {
+    if (!identity) return;
+    setPunching(true);
+    const userBased = isUserBased(identity);
+    try {
+      if (status?.isPunchedIn) {
+        if (userBased) await punchOutAttendanceMe();
+        else await punchOutAttendance(identity.id);
+      } else if (userBased) {
+        await punchInAttendanceMe();
+      } else {
+        await punchInAttendance(identity.id);
+      }
+      await loadAttendance();
+    } catch {
+      /* the card keeps the last known state; a reload surfaces the truth */
+    } finally {
+      setPunching(false);
+    }
+  }, [identity, status?.isPunchedIn, loadAttendance]);
 
   return (
     <Fragment>
@@ -31,7 +106,7 @@ export default function EmployeeDashboard(): JSX.Element {
 
         <div className="grid grid-cols-1 items-stretch gap-[18px] md:grid-cols-2 xl:grid-cols-[308px_minmax(0,1fr)_minmax(0,1fr)] 2xl:grid-cols-[340px_minmax(0,1fr)_minmax(0,1fr)]">
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
-            <DashboardCard title="Today"><p>TODO Task 3</p></DashboardCard>
+            <TodayCard status={status} stats={stats} records={records} loading={attLoading} onPunch={handlePunch} punching={punching} />
             <DashboardCard title="Leave"><p>TODO Task 4</p></DashboardCard>
             <DashboardCard title="Finish your profile"><p>TODO Task 5</p></DashboardCard>
             <DashboardCard title="Documents"><p>TODO Task 5</p></DashboardCard>
