@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import DashboardCard from "./DashboardCard";
 import { formatHoursMinutes, monthStripDays, shiftProgressPercent } from "@/shared/lib/dashboard/employeeDashboard";
 import type { AttendanceRecord, AttendanceStatistics, PunchStatusResponse } from "@/shared/lib/api/attendance";
@@ -12,6 +11,7 @@ type Props = {
   loading: boolean;
   onPunch: () => void;
   punching: boolean;
+  onBackdatedEntry?: () => void;
 };
 
 const KIND_CLASS: Record<string, string> = {
@@ -21,7 +21,7 @@ const KIND_CLASS: Record<string, string> = {
   leave: "bg-transparent ring-1 ring-inset ring-defaultborder dark:ring-white/15",
 };
 
-export default function TodayCard({ status, stats, records, loading, onPunch, punching }: Props) {
+export default function TodayCard({ status, stats, records, loading, onPunch, punching, onBackdatedEntry }: Props) {
   const shift = status?.shift ?? null;
   const isIn = status?.isPunchedIn ?? false;
   const workedMinutes = stats?.totalMinutes ?? 0;
@@ -103,9 +103,15 @@ export default function TodayCard({ status, stats, records, loading, onPunch, pu
         >
           {punching ? "Working…" : isIn ? "Punch out" : "Punch in"}
         </button>
-        <Link href="/training/attendance/" className="text-[0.75rem] font-semibold text-teal-600 hover:underline dark:text-teal-400">
-          Backdated entry
-        </Link>
+        {onBackdatedEntry ? (
+          <button
+            type="button"
+            onClick={onBackdatedEntry}
+            className="text-[0.75rem] font-semibold text-teal-600 hover:underline dark:text-teal-400"
+          >
+            Backdated entry
+          </button>
+        ) : null}
       </div>
 
       <p className="text-[0.65rem] font-semibold uppercase tracking-[0.06em] text-textmuted dark:text-white/50">

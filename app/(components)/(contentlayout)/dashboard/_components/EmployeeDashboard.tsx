@@ -34,6 +34,8 @@ import MyProjectsCard from "./employee/MyProjectsCard";
 import TeamPulseCard from "./employee/TeamPulseCard";
 import OpenRolesCard from "./employee/OpenRolesCard";
 import UpcomingHolidaysCard from "./UpcomingHolidaysCard";
+import BackdatedAttendanceRequestModal from "../../training/attendance/_components/BackdatedAttendanceRequestModal";
+import LeaveRequestModal from "../../training/attendance/_components/LeaveRequestModal";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -59,6 +61,8 @@ export default function EmployeeDashboard(): JSX.Element {
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [attLoading, setAttLoading] = useState(true);
   const [punching, setPunching] = useState(false);
+  const [showBackdatedModal, setShowBackdatedModal] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
 
   const [leave, setLeave] = useState<LeaveRequest[]>([]);
   const [leaveLoading, setLeaveLoading] = useState(true);
@@ -119,16 +123,20 @@ export default function EmployeeDashboard(): JSX.Element {
 
   useEffect(() => { if (identityResolved) void loadAttendance(); }, [identityResolved, loadAttendance]);
 
-  useEffect(() => {
-    if (!identityResolved) return;
+  const loadLeave = useCallback(async () => {
     if (!studentId) { setLeave([]); setLeaveLoading(false); return; }
-    let cancelled = false;
-    getAllLeaveRequests({ student: studentId, limit: 100 })
-      .then((page) => { if (!cancelled) setLeave(page.results ?? []); })
-      .catch(() => { if (!cancelled) setLeave([]); })
-      .finally(() => { if (!cancelled) setLeaveLoading(false); });
-    return () => { cancelled = true; };
-  }, [identityResolved, studentId]);
+    setLeaveLoading(true);
+    try {
+      const page = await getAllLeaveRequests({ student: studentId, limit: 100 });
+      setLeave(page.results ?? []);
+    } catch {
+      setLeave([]);
+    } finally {
+      setLeaveLoading(false);
+    }
+  }, [studentId]);
+
+  useEffect(() => { if (identityResolved) void loadLeave(); }, [identityResolved, loadLeave]);
 
   useEffect(() => {
     if (!identityResolved) return;
@@ -258,6 +266,28 @@ export default function EmployeeDashboard(): JSX.Element {
     ];
   }, [profile]);
 
+  const weekOffDays = useMemo(() => {
+    if (!identity || isUserBased(identity)) return [];
+    const wo = (identity as { weekOff?: string[] }).weekOff;
+    return Array.isArray(wo) ? wo : [];
+  }, [identity]);
+
+  const candidateTimezone = useMemo(() => {
+    if (status?.shift?.timezone) return status.shift.timezone;
+    if (identity && !isUserBased(identity)) {
+      const shift = (identity as { shift?: { timezone?: string } }).shift;
+      if (shift?.timezone) return shift.timezone;
+    }
+    if (typeof window !== "undefined") {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      } catch {
+        return "UTC";
+      }
+    }
+    return "UTC";
+  }, [status?.shift?.timezone, identity]);
+
   const handlePunch = useCallback(async () => {
     if (!identity) return;
     setPunching(true);
@@ -295,8 +325,20 @@ export default function EmployeeDashboard(): JSX.Element {
 
         <div className="grid grid-cols-1 items-stretch gap-[18px] md:grid-cols-2 xl:grid-cols-[308px_minmax(0,1fr)_minmax(0,1fr)] 2xl:grid-cols-[340px_minmax(0,1fr)_minmax(0,1fr)]">
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
-            <TodayCard status={status} stats={stats} records={records} loading={attLoading} onPunch={handlePunch} punching={punching} />
-            <LeaveCard requests={leave} loading={leaveLoading} />
+            <TodayCard
+              status={status}
+              stats={stats}
+              records={records}
+              loading={attLoading}
+              onPunch={handlePunch}
+              punching={punching}
+              onBackdatedEntry={identity ? () => setShowBackdatedModal(true) : undefined}
+            />
+            <LeaveCard
+              requests={leave}
+              loading={leaveLoading}
+              onApplyLeave={studentId ? () => setShowLeaveModal(true) : undefined}
+            />
             {profileLoading || gaps.length > 0
               ? <ProfileGapsCard gaps={gaps} totalSections={5} loading={profileLoading} />
               : null}
@@ -326,6 +368,23 @@ export default function EmployeeDashboard(): JSX.Element {
 
         <MyProjectsCard projects={projects} loading={projectsLoading} />
       </div>
+
+      <BackdatedAttendanceRequestModal
+        open={showBackdatedModal}
+        onClose={() => setShowBackdatedModal(false)}
+        studentId={identity?.id ?? null}
+        isUserBased={identity ? isUserBased(identity) : false}
+        candidateTimezone={candidateTimezone}
+        weekOffDays={weekOffDays}
+      />
+
+      <LeaveRequestModal
+        open={showLeaveModal}
+        onClose={() => setShowLeaveModal(false)}
+        studentId={studentId}
+        weekOffDays={weekOffDays}
+        onSuccess={() => void loadLeave()}
+      />
     </Fragment>
   );
 }

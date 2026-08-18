@@ -4,8 +4,6 @@ import Seo from "@/shared/layout-components/seo/seo";
 import React, { Fragment, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
 import * as attendanceApi from "@/shared/lib/api/attendance";
-import { createBackdatedAttendanceRequest, createBackdatedAttendanceRequestMe } from "@/shared/lib/api/backdated-attendance-requests";
-import { createLeaveRequest } from "@/shared/lib/api/leave-requests";
 import * as rolesApi from "@/shared/lib/api/roles";
 import type { Role } from "@/shared/lib/types";
 import { useAuth } from "@/shared/contexts/auth-context";
@@ -13,6 +11,8 @@ import { downloadCsv } from "@/shared/lib/csv-export";
 import AdminTrackView from "./_components/AdminTrackView";
 import AttendanceDashboard from "./_components/AttendanceDashboard";
 import HolidayPunchBlockNotice from "./_components/HolidayPunchBlockNotice";
+import BackdatedAttendanceRequestModal from "./_components/BackdatedAttendanceRequestModal";
+import LeaveRequestModal from "./_components/LeaveRequestModal";
 import { capDayTotalMs, countsTowardWorkedMs, sessionDurationMsForDisplay } from "@/shared/lib/attendance-display";
 import Swal from "sweetalert2";
 
@@ -183,23 +183,7 @@ export default function AttendanceTracking() {
   const [myCalendarMonth, setMyCalendarMonth] = useState(() => new Date().getMonth());
   const [trackLiveTick, setTrackLiveTick] = useState(0);
   const [showRequestModal, setShowRequestModal] = useState(false);
-  const [requestForm, setRequestForm] = useState<{ fromDate: string; toDate: string; punchInTime: string; punchOutTime: string; notes: string; timezone: string }>({
-    fromDate: "",
-    toDate: "",
-    punchInTime: "",
-    punchOutTime: "",
-    notes: "",
-    timezone: "UTC",
-  });
-  const [submittingRequest, setSubmittingRequest] = useState(false);
   const [showLeaveRequestModal, setShowLeaveRequestModal] = useState(false);
-  const [leaveRequestForm, setLeaveRequestForm] = useState<{ fromDate: string; toDate: string; leaveType: "casual" | "sick" | "unpaid"; notes: string }>({
-    fromDate: "",
-    toDate: "",
-    leaveType: "casual",
-    notes: "",
-  });
-  const [submittingLeaveRequest, setSubmittingLeaveRequest] = useState(false);
   const [todayIsHoliday, setTodayIsHoliday] = useState(false);
   const [todayHolidayTitle, setTodayHolidayTitle] = useState<string | null>(null);
 
@@ -432,146 +416,12 @@ export default function AttendanceTracking() {
   const defaultTimezone = getDetectedTimezone();
   const candidateTimezone = myShift?.timezone || defaultTimezone;
   const weekOffDays = myWeekOff ?? [];
-  const isWeekOffDay = useCallback(
-    (date: Date) => {
-      const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
-      if (weekOffDays.length === 0) return dayName === "Saturday" || dayName === "Sunday";
-      return weekOffDays.includes(dayName);
-    },
-    [weekOffDays]
-  );
   const openRequestModal = () => {
-    setRequestForm({ fromDate: "", toDate: "", punchInTime: "", punchOutTime: "", notes: "", timezone: candidateTimezone });
     setShowRequestModal(true);
   };
-  const updateRequestForm = (field: keyof typeof requestForm, value: string) => {
-    setRequestForm((prev) => ({ ...prev, [field]: value }));
-  };
-  const handleSubmitRequest = async () => {
-    if (!myStudentId) return;
-    const { fromDate, toDate, punchInTime, punchOutTime, notes, timezone } = requestForm;
-    if (!fromDate || !toDate || !punchInTime || !punchOutTime) {
-      await Swal.fire({ icon: "warning", title: "Validation", text: "Please fill in From date, To date, Punch In, and Punch Out." });
-      return;
-    }
-    const from = parseYmdLocal(fromDate);
-    const to = parseYmdLocal(toDate);
-    if (!from || !to || isNaN(from.getTime()) || isNaN(to.getTime())) {
-      await Swal.fire({ icon: "warning", title: "Validation", text: "Invalid date range." });
-      return;
-    }
-    if (to < from) {
-      await Swal.fire({ icon: "warning", title: "Validation", text: "To date must be on or after From date." });
-      return;
-    }
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (from >= today) {
-      await Swal.fire({ icon: "warning", title: "Validation", text: "From date must be in the past." });
-      return;
-    }
-    const pIn = punchInTime.includes(":") ? punchInTime : punchInTime + ":00";
-    const pOut = punchOutTime.includes(":") ? punchOutTime : punchOutTime + ":00";
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const attendanceEntries: Array<{ date: string; punchIn: string; punchOut: string; timezone: string }> = [];
-    const current = new Date(from);
-    current.setHours(0, 0, 0, 0);
-    const end = new Date(to);
-    end.setHours(0, 0, 0, 0);
-    while (current <= end) {
-      if (!isWeekOffDay(current)) {
-        const dateKey = `${current.getFullYear()}-${pad(current.getMonth() + 1)}-${pad(current.getDate())}`;
-        const punchInDt = new Date(dateKey + "T" + pIn);
-        let punchOutDt = new Date(dateKey + "T" + pOut);
-        if (punchOutDt <= punchInDt) punchOutDt = new Date(punchOutDt.getTime() + 86400000);
-        attendanceEntries.push({
-          date: dateKey,
-          punchIn: punchInDt.toISOString(),
-          punchOut: punchOutDt.toISOString(),
-          timezone: timezone || candidateTimezone,
-        });
-      }
-      current.setDate(current.getDate() + 1);
-    }
-    if (attendanceEntries.length === 0) {
-      await Swal.fire({ icon: "warning", title: "No working days", text: "The selected date range has no working days (weekends excluded)." });
-      return;
-    }
-    setSubmittingRequest(true);
-    try {
-      const payload = {
-        attendanceEntries: attendanceEntries.map((e) => ({ date: e.date, punchIn: e.punchIn, punchOut: e.punchOut, timezone: e.timezone })),
-        notes: notes.trim() || undefined,
-      };
-      if (isUserBased) {
-        await createBackdatedAttendanceRequestMe(payload);
-      } else {
-        await createBackdatedAttendanceRequest(myStudentId!, payload);
-      }
-      await Swal.fire({ icon: "success", title: "Request Submitted", text: "An admin will review it shortly.", confirmButtonText: "OK" });
-      setShowRequestModal(false);
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (e as Error).message ?? "Failed to submit request.";
-      await Swal.fire({ icon: "error", title: "Error", text: msg });
-    } finally { setSubmittingRequest(false); }
-  };
 
-  /* Leave request handlers - date range, leave type, notes; skip weekends/week-off like backdated */
   const openLeaveRequestModal = () => {
-    setLeaveRequestForm({ fromDate: "", toDate: "", leaveType: "casual", notes: "" });
     setShowLeaveRequestModal(true);
-  };
-  const updateLeaveRequestForm = (field: keyof typeof leaveRequestForm, value: string) => {
-    setLeaveRequestForm((prev) => ({ ...prev, [field]: value }));
-  };
-  const handleSubmitLeaveRequest = async () => {
-    if (!myStudentId) return;
-    const { fromDate, toDate, leaveType, notes } = leaveRequestForm;
-    if (!fromDate || !toDate) {
-      await Swal.fire({ icon: "warning", title: "Validation", text: "Please select From date and To date." });
-      return;
-    }
-    const from = parseYmdLocal(fromDate);
-    const to = parseYmdLocal(toDate);
-    if (!from || !to || isNaN(from.getTime()) || isNaN(to.getTime())) {
-      await Swal.fire({ icon: "warning", title: "Validation", text: "Invalid date range." });
-      return;
-    }
-    if (to < from) {
-      await Swal.fire({ icon: "warning", title: "Validation", text: "To date must be on or after From date." });
-      return;
-    }
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const dates: string[] = [];
-    const current = new Date(from);
-    current.setHours(0, 0, 0, 0);
-    const end = new Date(to);
-    end.setHours(0, 0, 0, 0);
-    while (current <= end) {
-      if (!isWeekOffDay(current)) {
-        dates.push(`${current.getFullYear()}-${pad(current.getMonth() + 1)}-${pad(current.getDate())}`);
-      }
-      current.setDate(current.getDate() + 1);
-    }
-    if (dates.length === 0) {
-      await Swal.fire({ icon: "warning", title: "No working days", text: "The selected range has no working days (weekends/week-off excluded)." });
-      return;
-    }
-    setSubmittingLeaveRequest(true);
-    try {
-      await createLeaveRequest(myStudentId, {
-        dates,
-        leaveType,
-        notes: notes.trim() || undefined,
-      });
-      await Swal.fire({ icon: "success", title: "Request Submitted", text: "Your leave request has been submitted. An admin will review it shortly.", confirmButtonText: "OK" });
-      setShowLeaveRequestModal(false);
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (e as Error).message ?? "Failed to submit leave request.";
-      await Swal.fire({ icon: "error", title: "Error", text: msg });
-    } finally {
-      setSubmittingLeaveRequest(false);
-    }
   };
 
   /* Admin data: canTrackAll = only for Administrator or students.manage (not for agents with attendance.manage) */
@@ -1592,331 +1442,22 @@ export default function AttendanceTracking() {
       </div>
 
       {/* ═══ BACKDATED REQUEST MODAL ═══ */}
-      {showRequestModal && myStudentId && (
-        <div className="fixed inset-0 z-[105] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="backdated-modal-title">
-          <style>{`
-            @keyframes backdated-modal-backdrop { from { opacity: 0; } to { opacity: 1; } }
-            @keyframes backdated-modal-enter {
-              from { opacity: 0; transform: scale(0.96) translateY(-8px); }
-              to { opacity: 1; transform: scale(1) translateY(0); }
-            }
-            @keyframes backdated-modal-stagger { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-            .backdated-modal-backdrop { animation: backdated-modal-backdrop 0.2s ease-out forwards; }
-            .backdated-modal-panel { animation: backdated-modal-enter 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
-            .backdated-modal-stagger-1 { animation: backdated-modal-stagger 0.35s ease-out 0.05s both; }
-            .backdated-modal-stagger-2 { animation: backdated-modal-stagger 0.35s ease-out 0.1s both; }
-            .backdated-modal-stagger-3 { animation: backdated-modal-stagger 0.35s ease-out 0.15s both; }
-            .backdated-modal-stagger-4 { animation: backdated-modal-stagger 0.35s ease-out 0.2s both; }
-            .backdated-modal-stagger-5 { animation: backdated-modal-stagger 0.35s ease-out 0.25s both; }
-          `}</style>
-          <div className="flex min-h-full items-start justify-center p-4 pt-[8vh] pb-8">
-            <div
-              className="fixed inset-0 bg-black/55 backdrop-blur-[2px] backdated-modal-backdrop"
-              onClick={() => { if (!submittingRequest) setShowRequestModal(false); }}
-              aria-hidden
-            />
-            <div className="relative w-full max-w-[28rem] flex flex-col max-h-[85vh] backdated-modal-panel rounded-2xl border border-defaultborder/80 bg-white dark:bg-bodybg shadow-xl dark:shadow-black/30 overflow-hidden">
-              {/* Header with accent – primary to match trigger icon */}
-              <div className="relative border-b border-defaultborder/60 bg-gradient-to-br from-primary/10 to-transparent dark:from-primary/20 dark:to-transparent">
-                <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" aria-hidden />
-                <div className="flex items-start justify-between gap-4 pl-5 pr-4 py-5">
-                  <div className="flex items-start gap-4 min-w-0">
-                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/15 dark:bg-primary/25 text-primary shadow-inner">
-                      <i className="ri-calendar-check-line text-[1.5rem]" aria-hidden />
-                    </span>
-                    <div className="min-w-0">
-                      <h2 id="backdated-modal-title" className="text-lg font-semibold tracking-tight text-defaulttextcolor dark:text-white">
-                        Request Backdated Attendance
-                      </h2>
-                      <p className="mt-1 text-sm text-defaulttextcolor/65 dark:text-white/55">
-                        Submit for past dates you missed. An admin will review.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => { if (!submittingRequest) setShowRequestModal(false); }}
-                    className="shrink-0 flex h-9 w-9 items-center justify-center rounded-xl text-defaulttextcolor/70 hover:text-defaulttextcolor hover:bg-black/5 dark:hover:bg-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    aria-label="Close"
-                  >
-                    <i className="ri-close-line text-xl" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Body */}
-              <div className="p-5 overflow-y-auto flex-1 space-y-5">
-                <div className="backdated-modal-stagger-1 flex items-start gap-3 rounded-xl bg-primary/10 dark:bg-primary/15 border border-primary/20 dark:border-primary/30 p-3.5">
-                  <i className="ri-information-line text-primary text-lg shrink-0 mt-0.5" aria-hidden />
-                  <p className="text-sm text-defaulttextcolor/85 dark:text-white/75 leading-relaxed">
-                    Enter a date range (From and To). Punch In and Punch Out will be applied to all <strong>working days</strong>. Weekends are excluded.
-                  </p>
-                </div>
-
-                <div className="backdated-modal-stagger-2 space-y-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-defaulttextcolor/55 dark:text-white/50">Dates</span>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="backdated-from-date" className="block text-xs font-medium text-defaulttextcolor/80 mb-1.5">From <span className="text-rose-500">*</span></label>
-                      <input
-                        id="backdated-from-date"
-                        type="date"
-                        value={requestForm.fromDate}
-                        max={new Date().toISOString().slice(0, 10)}
-                        onChange={(e) => updateRequestForm("fromDate", e.target.value)}
-                        className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="backdated-to-date" className="block text-xs font-medium text-defaulttextcolor/80 mb-1.5">To <span className="text-rose-500">*</span></label>
-                      <input
-                        id="backdated-to-date"
-                        type="date"
-                        value={requestForm.toDate}
-                        max={new Date().toISOString().slice(0, 10)}
-                        onChange={(e) => updateRequestForm("toDate", e.target.value)}
-                        className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="backdated-modal-stagger-2 space-y-2">
-                  <label htmlFor="backdated-timezone" className="block text-xs font-semibold uppercase tracking-wider text-defaulttextcolor/55 dark:text-white/50">Timezone (candidate&apos;s)</label>
-                  <div id="backdated-timezone" className="rounded-xl border border-defaultborder/80 bg-gray-50/80 dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor/90 dark:text-white/80">
-                    {requestForm.timezone || candidateTimezone}
-                  </div>
-                </div>
-
-                <div className="backdated-modal-stagger-3 space-y-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-defaulttextcolor/55 dark:text-white/50">Punch times</span>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="backdated-punch-in" className="block text-xs font-medium text-defaulttextcolor/80 mb-1.5">Punch In <span className="text-rose-500">*</span></label>
-                      <input
-                        id="backdated-punch-in"
-                        type="time"
-                        value={requestForm.punchInTime}
-                        onChange={(e) => updateRequestForm("punchInTime", e.target.value)}
-                        className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="backdated-punch-out" className="block text-xs font-medium text-defaulttextcolor/80 mb-1.5">Punch Out <span className="text-rose-500">*</span></label>
-                      <input
-                        id="backdated-punch-out"
-                        type="time"
-                        value={requestForm.punchOutTime}
-                        onChange={(e) => updateRequestForm("punchOutTime", e.target.value)}
-                        className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="backdated-modal-stagger-4 space-y-2">
-                  <label htmlFor="backdated-notes" className="block text-xs font-semibold uppercase tracking-wider text-defaulttextcolor/55 dark:text-white/50">Notes <span className="font-normal normal-case text-defaulttextcolor/50">(optional)</span></label>
-                  <input
-                    id="backdated-notes"
-                    type="text"
-                    value={requestForm.notes}
-                    onChange={(e) => updateRequestForm("notes", e.target.value)}
-                    placeholder="e.g. Reason for backdated entry…"
-                    className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="backdated-modal-stagger-5 flex items-center justify-end gap-3 border-t border-defaultborder/60 bg-defaultborder/5 dark:bg-white/5 px-5 py-4">
-                <button
-                  type="button"
-                  onClick={() => { if (!submittingRequest) setShowRequestModal(false); }}
-                  className="rounded-xl border border-defaultborder/80 bg-transparent px-4 py-2.5 text-sm font-medium text-defaulttextcolor hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
-                  disabled={submittingRequest}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSubmitRequest}
-                  className="rounded-xl bg-primary hover:bg-primary/90 active:bg-primary/80 text-white px-5 py-2.5 text-sm font-semibold shadow-sm hover:shadow transition-all disabled:opacity-60 disabled:pointer-events-none flex items-center gap-2"
-                  disabled={submittingRequest}
-                >
-                  {submittingRequest ? (
-                    <>
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" aria-hidden />
-                      Submitting…
-                    </>
-                  ) : (
-                    <>
-                      <i className="ri-send-plane-line text-base" aria-hidden />
-                      Submit Request
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <BackdatedAttendanceRequestModal
+        open={showRequestModal}
+        onClose={() => setShowRequestModal(false)}
+        studentId={myStudentId}
+        isUserBased={isUserBased}
+        candidateTimezone={candidateTimezone}
+        weekOffDays={weekOffDays}
+      />
 
       {/* ═══ REQUEST LEAVE MODAL ═══ */}
-      {showLeaveRequestModal && myStudentId && (
-        <div className="fixed inset-0 z-[105] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="leave-modal-title">
-          <style>{`
-            @keyframes leave-modal-backdrop { from { opacity: 0; } to { opacity: 1; } }
-            @keyframes leave-modal-enter {
-              from { opacity: 0; transform: scale(0.96) translateY(-8px); }
-              to { opacity: 1; transform: scale(1) translateY(0); }
-            }
-            @keyframes leave-modal-stagger { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-            .leave-modal-backdrop { animation: leave-modal-backdrop 0.2s ease-out forwards; }
-            .leave-modal-panel { animation: leave-modal-enter 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
-            .leave-modal-stagger-1 { animation: leave-modal-stagger 0.35s ease-out 0.05s both; }
-            .leave-modal-stagger-2 { animation: leave-modal-stagger 0.35s ease-out 0.1s both; }
-            .leave-modal-stagger-3 { animation: leave-modal-stagger 0.35s ease-out 0.15s both; }
-            .leave-modal-stagger-4 { animation: leave-modal-stagger 0.35s ease-out 0.2s both; }
-            .leave-modal-stagger-5 { animation: leave-modal-stagger 0.35s ease-out 0.25s both; }
-            .leave-type-card:focus-visible { outline: 2px solid rgba(14, 165, 233, 0.6); outline-offset: 2px; }
-          `}</style>
-          <div className="flex min-h-full items-start justify-center p-4 pt-[8vh] pb-8">
-            <div
-              className="fixed inset-0 bg-black/55 backdrop-blur-[2px] leave-modal-backdrop"
-              onClick={() => { if (!submittingLeaveRequest) setShowLeaveRequestModal(false); }}
-              aria-hidden
-            />
-            <div className="relative w-full max-w-[28rem] flex flex-col max-h-[85vh] leave-modal-panel rounded-2xl border border-defaultborder/80 bg-white dark:bg-bodybg shadow-xl dark:shadow-black/30 overflow-hidden">
-              {/* Header with accent */}
-              <div className="relative border-b border-defaultborder/60 bg-gradient-to-br from-sky-50/80 to-transparent dark:from-sky-950/20 dark:to-transparent">
-                <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-sky-400 to-sky-600 dark:from-sky-500 dark:to-sky-700" aria-hidden />
-                <div className="flex items-start justify-between gap-4 pl-5 pr-4 py-5">
-                  <div className="flex items-start gap-4 min-w-0">
-                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-300 shadow-inner">
-                      <i className="ri-hotel-bed-line text-[1.5rem]" aria-hidden />
-                    </span>
-                    <div className="min-w-0">
-                      <h2 id="leave-modal-title" className="text-lg font-semibold tracking-tight text-defaulttextcolor dark:text-white">
-                        Request Leave
-                      </h2>
-                      <p className="mt-1 text-sm text-defaulttextcolor/65 dark:text-white/55">
-                        Working days only · Admin will review in Settings » Attendance » Leave Requests
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => { if (!submittingLeaveRequest) setShowLeaveRequestModal(false); }}
-                    className="shrink-0 flex h-9 w-9 items-center justify-center rounded-xl text-defaulttextcolor/70 hover:text-defaulttextcolor hover:bg-black/5 dark:hover:bg-white/10 transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-                    aria-label="Close"
-                  >
-                    <i className="ri-close-line text-xl" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Body */}
-              <div className="p-5 overflow-y-auto flex-1 space-y-5">
-                <div className="leave-modal-stagger-1 flex items-start gap-3 rounded-xl bg-sky-50/60 dark:bg-sky-950/15 border border-sky-200/40 dark:border-sky-700/30 p-3.5">
-                  <i className="ri-calendar-event-line text-sky-600 dark:text-sky-400 text-lg shrink-0 mt-0.5" aria-hidden />
-                  <p className="text-sm text-defaulttextcolor/85 dark:text-white/75 leading-relaxed">
-                    Pick a date range. Only <strong>working days</strong> are included; weekends and your week-off are skipped.
-                  </p>
-                </div>
-
-                <div className="leave-modal-stagger-2 space-y-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-defaulttextcolor/55 dark:text-white/50">Dates</span>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label htmlFor="leave-from-date" className="block text-xs font-medium text-defaulttextcolor/80 mb-1.5">From <span className="text-rose-500">*</span></label>
-                      <input
-                        id="leave-from-date"
-                        type="date"
-                        value={leaveRequestForm.fromDate}
-                        onChange={(e) => updateLeaveRequestForm("fromDate", e.target.value)}
-                        className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/40 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="leave-to-date" className="block text-xs font-medium text-defaulttextcolor/80 mb-1.5">To <span className="text-rose-500">*</span></label>
-                      <input
-                        id="leave-to-date"
-                        type="date"
-                        value={leaveRequestForm.toDate}
-                        onChange={(e) => updateLeaveRequestForm("toDate", e.target.value)}
-                        className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/40 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition-all"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="leave-modal-stagger-3 space-y-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-defaulttextcolor/55 dark:text-white/50">Leave type</span>
-                  <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Leave type">
-                    {[
-                      { value: "casual" as const, label: "Casual", icon: "ri-sun-line", bg: "bg-sky-50 dark:bg-sky-500/10 border-sky-200/60 dark:border-sky-500/30", active: "bg-sky-100 dark:bg-sky-500/20 border-sky-400/60 text-sky-800 dark:text-sky-200" },
-                      { value: "sick" as const, label: "Sick", icon: "ri-heart-pulse-line", bg: "bg-orange-50 dark:bg-orange-500/10 border-orange-200/60 dark:border-orange-500/30", active: "bg-orange-100 dark:bg-orange-500/20 border-orange-400/60 text-orange-800 dark:text-orange-200" },
-                      { value: "unpaid" as const, label: "Unpaid", icon: "ri-bank-card-line", bg: "bg-slate-100 dark:bg-slate-500/10 border-slate-200/60 dark:border-slate-500/30", active: "bg-slate-200/80 dark:bg-slate-500/25 border-slate-400/60 text-slate-800 dark:text-slate-200" },
-                    ].map(({ value, label, icon, bg, active }) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => updateLeaveRequestForm("leaveType", value)}
-                        className={`leave-type-card flex flex-col items-center gap-1.5 rounded-xl border-2 p-3 text-center transition-all duration-200 hover:border-defaulttextcolor/20 dark:hover:border-white/20 ${leaveRequestForm.leaveType === value ? `${active} border-current` : `${bg} border-transparent text-defaulttextcolor/80 dark:text-white/70`}`}
-                      >
-                        <i className={`${icon} text-lg`} aria-hidden />
-                        <span className="text-xs font-semibold">{label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="leave-modal-stagger-4 space-y-2">
-                  <label htmlFor="leave-notes" className="block text-xs font-semibold uppercase tracking-wider text-defaulttextcolor/55 dark:text-white/50">Notes <span className="font-normal normal-case text-defaulttextcolor/50">(optional)</span></label>
-                  <input
-                    id="leave-notes"
-                    type="text"
-                    value={leaveRequestForm.notes}
-                    onChange={(e) => updateLeaveRequestForm("notes", e.target.value)}
-                    placeholder="e.g. Family trip, medical appointment…"
-                    className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-3.5 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/40 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition-all"
-                  />
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="leave-modal-stagger-5 flex items-center justify-end gap-3 border-t border-defaultborder/60 bg-defaultborder/5 dark:bg-white/5 px-5 py-4">
-                <button
-                  type="button"
-                  onClick={() => { if (!submittingLeaveRequest) setShowLeaveRequestModal(false); }}
-                  className="rounded-xl border border-defaultborder/80 bg-transparent px-4 py-2.5 text-sm font-medium text-defaulttextcolor hover:bg-black/5 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
-                  disabled={submittingLeaveRequest}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSubmitLeaveRequest}
-                  className="rounded-xl bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white px-5 py-2.5 text-sm font-semibold shadow-sm hover:shadow transition-all disabled:opacity-60 disabled:pointer-events-none flex items-center gap-2"
-                  disabled={submittingLeaveRequest}
-                >
-                  {submittingLeaveRequest ? (
-                    <>
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" aria-hidden />
-                      Submitting…
-                    </>
-                  ) : (
-                    <>
-                      <i className="ri-send-plane-line text-base" aria-hidden />
-                      Submit request
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <LeaveRequestModal
+        open={showLeaveRequestModal}
+        onClose={() => setShowLeaveRequestModal(false)}
+        studentId={myStudentId}
+        weekOffDays={weekOffDays}
+      />
     </Fragment>
   );
 }

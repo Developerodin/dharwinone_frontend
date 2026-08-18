@@ -7,6 +7,10 @@ import type { Project } from "@/shared/lib/api/projects";
 
 type SortKey = "name" | "open" | "due";
 
+function getProjectId(p: Project): string {
+  return p._id ?? p.id ?? "";
+}
+
 function openCount(p: Project) { return Math.max(0, (p.totalTasks ?? 0) - (p.completedTasks ?? 0)); }
 function progress(p: Project) {
   const total = p.totalTasks ?? 0;
@@ -68,12 +72,13 @@ export default function MyProjectsCard({ projects, loading }: { projects: Projec
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => {
+              {rows.map((p, i) => {
                 const h = health(p);
+                const projectId = getProjectId(p);
                 return (
-                  <tr key={p._id} className="border-b border-defaultborder/60 last:border-b-0 hover:bg-defaultbackground dark:border-white/[0.07] dark:hover:bg-white/5">
+                  <tr key={projectId || `project-${i}`} className="border-b border-defaultborder/60 last:border-b-0 hover:bg-defaultbackground dark:border-white/[0.07] dark:hover:bg-white/5">
                     <td className="px-5 py-2.5 text-[0.75rem]">
-                      <Link href={`/task/kanban-board/?projectId=${encodeURIComponent(p._id)}`} className="hover:underline">{p.name}</Link>
+                      <Link href={`/task/kanban-board/?projectId=${encodeURIComponent(projectId)}`} className="hover:underline">{p.name}</Link>
                     </td>
                     <td className="px-5 py-2.5 text-[0.75rem] tabular-nums">{openCount(p)}</td>
                     <td className="px-5 py-2.5">

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import DashboardCard from "./DashboardCard";
 import { tallyLeaveDays } from "@/shared/lib/dashboard/employeeDashboard";
 import type { LeaveRequest } from "@/shared/lib/api/leave-requests";
@@ -11,7 +10,15 @@ const TYPES = [
   { key: "unpaid", label: "Unpaid" },
 ] as const;
 
-export default function LeaveCard({ requests, loading }: { requests: LeaveRequest[]; loading: boolean }) {
+export default function LeaveCard({
+  requests,
+  loading,
+  onApplyLeave,
+}: {
+  requests: LeaveRequest[];
+  loading: boolean;
+  onApplyLeave?: () => void;
+}) {
   const t = tallyLeaveDays(requests);
   const max = Math.max(1, t.casual, t.sick, t.unpaid);
 
@@ -23,11 +30,15 @@ export default function LeaveCard({ requests, loading }: { requests: LeaveReques
     </span>
   );
 
-  const action = (
-    <Link href="/training/attendance/" className="text-[0.75rem] font-semibold text-teal-600 hover:underline dark:text-teal-400">
+  const action = onApplyLeave ? (
+    <button
+      type="button"
+      onClick={onApplyLeave}
+      className="text-[0.75rem] font-semibold text-teal-600 hover:underline dark:text-teal-400"
+    >
       Apply
-    </Link>
-  );
+    </button>
+  ) : null;
 
   return (
     <DashboardCard title="Leave" tile={tile} action={action}>
