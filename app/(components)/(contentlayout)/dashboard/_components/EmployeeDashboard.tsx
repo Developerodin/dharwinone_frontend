@@ -15,11 +15,13 @@ import {
   type AttendanceIdentity, type PunchStatusResponse, type AttendanceStatistics, type AttendanceRecord,
 } from "@/shared/lib/api/attendance";
 import { getAllLeaveRequests, type LeaveRequest } from "@/shared/lib/api/leave-requests";
+import { listStudentCourses, type StudentCourseListItem } from "@/shared/lib/api/student-courses";
 import DashboardCard from "./employee/DashboardCard";
 import TodayCard from "./employee/TodayCard";
 import LeaveCard from "./employee/LeaveCard";
 import ProfileGapsCard from "./employee/ProfileGapsCard";
 import DocumentsCard from "./employee/DocumentsCard";
+import TrainingCard from "./employee/TrainingCard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -51,6 +53,9 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const [profile, setProfile] = useState<CandidateWithProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+
+  const [courses, setCourses] = useState<StudentCourseListItem[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(true);
 
   /** Leave requests are scoped by Student id, so agents on user-based attendance have none. */
   const studentId = identity && identity.type !== "user" ? identity.id : null;
@@ -92,6 +97,17 @@ export default function EmployeeDashboard(): JSX.Element {
       .then((page) => { if (!cancelled) setLeave(page.results ?? []); })
       .catch(() => { if (!cancelled) setLeave([]); })
       .finally(() => { if (!cancelled) setLeaveLoading(false); });
+    return () => { cancelled = true; };
+  }, [identityResolved, studentId]);
+
+  useEffect(() => {
+    if (!identityResolved) return;
+    if (!studentId) { setCourses([]); setCoursesLoading(false); return; }
+    let cancelled = false;
+    listStudentCourses(studentId, { limit: 10 })
+      .then((r) => { if (!cancelled) setCourses(r.results ?? []); })
+      .catch(() => { if (!cancelled) setCourses([]); })
+      .finally(() => { if (!cancelled) setCoursesLoading(false); });
     return () => { cancelled = true; };
   }, [identityResolved, studentId]);
 
@@ -191,7 +207,7 @@ export default function EmployeeDashboard(): JSX.Element {
 
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
             <DashboardCard title="Upcoming Holidays"><p>TODO Task 10</p></DashboardCard>
-            <DashboardCard title="Training"><p>TODO Task 6</p></DashboardCard>
+            {coursesLoading || courses.length > 0 ? <TrainingCard courses={courses} loading={coursesLoading} /> : null}
             <DashboardCard title="Your team"><p>TODO Task 10</p></DashboardCard>
             <DashboardCard title="Open roles"><p>TODO Task 10</p></DashboardCard>
           </div>
