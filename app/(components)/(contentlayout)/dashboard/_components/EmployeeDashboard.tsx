@@ -17,6 +17,7 @@ import {
 import { getAllLeaveRequests, type LeaveRequest } from "@/shared/lib/api/leave-requests";
 import { listStudentCourses, type StudentCourseListItem } from "@/shared/lib/api/student-courses";
 import { listTasks, updateTaskStatus, type Task, type TaskStatus } from "@/shared/lib/api/tasks";
+import { listInternalMeetings, type InternalMeeting } from "@/shared/lib/api/internal-meetings";
 import DashboardCard from "./employee/DashboardCard";
 import TodayCard from "./employee/TodayCard";
 import LeaveCard from "./employee/LeaveCard";
@@ -25,6 +26,7 @@ import DocumentsCard from "./employee/DocumentsCard";
 import TrainingCard from "./employee/TrainingCard";
 import DueTodayCard from "./employee/DueTodayCard";
 import MyTasksCard from "./employee/MyTasksCard";
+import MeetingsCard from "./employee/MeetingsCard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -62,6 +64,9 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
+
+  const [meetings, setMeetings] = useState<InternalMeeting[]>([]);
+  const [meetingsLoading, setMeetingsLoading] = useState(true);
 
   /** Leave requests are scoped by Student id, so agents on user-based attendance have none. */
   const studentId = identity && identity.type !== "user" ? identity.id : null;
@@ -123,6 +128,15 @@ export default function EmployeeDashboard(): JSX.Element {
       .then((res) => { if (!cancelled) setProfile(res?.candidate ?? null); })
       .catch(() => { if (!cancelled) setProfile(null); })
       .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listInternalMeetings({ limit: 20, sortBy: "scheduledAt:asc" })
+      .then((r) => { if (!cancelled) setMeetings(r.results ?? []); })
+      .catch(() => { if (!cancelled) setMeetings([]); })
+      .finally(() => { if (!cancelled) setMeetingsLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -229,7 +243,7 @@ export default function EmployeeDashboard(): JSX.Element {
 
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
             <DueTodayCard tasks={tasks} loading={tasksLoading} onToggle={handleToggle} />
-            <DashboardCard title="Meetings"><p>TODO Task 8</p></DashboardCard>
+            <MeetingsCard meetings={meetings} loading={meetingsLoading} />
             <MyTasksCard tasks={tasks} loading={tasksLoading} />
           </div>
 
