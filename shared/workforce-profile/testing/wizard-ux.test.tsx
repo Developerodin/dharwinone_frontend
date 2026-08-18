@@ -58,7 +58,9 @@ function makeCtx(over: Partial<WizardContextValue> = {}): WizardContextValue {
     issuesByField: {},
     issuesBySection: {},
     submitAttempted: false,
+    validationOverlay: { status: "idle", title: "" },
     submit: vi.fn(),
+    goNext: vi.fn(),
     ...over,
   } as WizardContextValue;
 }
@@ -129,18 +131,42 @@ describe("useWorkforceSubmit feedback", () => {
 });
 
 describe("WorkforceWizardShell", () => {
-  it("surfaces a save failure and lets the user dismiss it", () => {
+  it("surfaces an API save failure in the top banner and lets the user dismiss it", () => {
     const clearSaveError = vi.fn();
     render(
       wrap(
-        makeCtx({ saveError: "Phone number must be 6-15 digits", clearSaveError }),
+        makeCtx({ saveError: "Request failed with status code 400", clearSaveError }),
         <WorkforceWizardShell stepRender={{ "personal-info": <p>step body</p> }} />,
       ),
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Phone number must be 6-15 digits");
+    expect(screen.getByRole("alert")).toHaveTextContent("Request failed with status code 400");
     fireEvent.click(screen.getByRole("button", { name: /dismiss error/i }));
     expect(clearSaveError).toHaveBeenCalled();
+  });
+
+  it("shows validation failures in a centered overlay instead of the top banner", () => {
+    render(
+      wrap(
+        makeCtx({
+          validationOverlay: {
+            status: "error",
+            title: "Can't save yet",
+            description:
+              "Social link 1: URL must be a Instagram link (e.g. instagram.com/you)",
+          },
+        }),
+        <WorkforceWizardShell stepRender={{ "personal-info": <p>step body</p> }} />,
+      ),
+    );
+
+    const overlay = screen.getByTestId("wizard-validation-overlay");
+    expect(overlay).toHaveAttribute("data-overlay-status", "error");
+    expect(screen.getByText("Can't save yet")).toBeInTheDocument();
+    expect(
+      screen.getByText(/URL must be a Instagram link/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /dismiss error/i })).not.toBeInTheDocument();
   });
 
   it("renders no alert when the save succeeded", () => {
@@ -252,12 +278,21 @@ describe("PersonalInfoStep", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/under 5 MB/i);
   });
 
-  it("accepts a social URL without a scheme, matching what the API stores", () => {
+  it("accepts a social URL without a scheme when the domain is valid", () => {
     render(wrap(makeCtx(), <PersonalInfoStep />));
     fireEvent.click(screen.getByRole("button", { name: /add link/i }));
     fireEvent.change(screen.getByLabelText(/^URL/i), {
       target: { value: "linkedin.com/in/me" },
     });
-    expect(screen.queryByText(/must start with|valid URL/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("rejects an invalid social URL such as www.github", () => {
+    render(wrap(makeCtx(), <PersonalInfoStep />));
+    fireEvent.click(screen.getByRole("button", { name: /add link/i }));
+    fireEvent.change(screen.getByLabelText(/^URL/i), {
+      target: { value: "www.github" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(/valid web address/i);
   });
 });

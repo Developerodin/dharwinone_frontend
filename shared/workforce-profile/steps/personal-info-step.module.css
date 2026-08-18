@@ -367,6 +367,19 @@
   background-color: rgb(var(--body-bg)) !important;
 }
 
+.phoneRow :global(.react-select--is-disabled .react-select__control) {
+  background: rgb(var(--light)) !important;
+  color: rgb(var(--text-muted)) !important;
+  cursor: not-allowed !important;
+  border-color: rgb(var(--input-border)) !important;
+  box-shadow: none !important;
+}
+
+:global(.dark) .phoneRow :global(.react-select--is-disabled .react-select__control) {
+  background: rgb(255 255 255 / 0.06) !important;
+  color: rgb(255 255 255 / 0.75) !important;
+}
+
 .addressPanel {
   padding: 1.25rem;
   border-radius: 0.75rem;

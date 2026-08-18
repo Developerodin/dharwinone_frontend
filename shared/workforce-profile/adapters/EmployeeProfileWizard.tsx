@@ -16,6 +16,7 @@ import {
   ExperienceStep,
   DocumentsStep,
   SalaryStep,
+  AccountSettingsStep,
 } from "../steps";
 
 export type EmployeeProfileWizardProps = {
@@ -62,6 +63,7 @@ export function EmployeeProfileWizard(props: EmployeeProfileWizardProps) {
     "work-experience": <ExperienceStep />,
     documents: <DocumentsStep />,
     salary: <SalaryStep />,
+    "account-settings": <AccountSettingsStep />,
   } as const;
 
   const resolvedSubmitLabel =

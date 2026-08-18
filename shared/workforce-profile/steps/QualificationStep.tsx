@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import { useState } from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
 import wizardUi from "../engine/workforce-wizard.module.css";
@@ -31,6 +31,8 @@ export function QualificationStep() {
   const removeSkill = useWorkforceStore((s) => s.removeSkill);
   const updateSkill = useWorkforceStore((s) => s.updateSkill);
   const { issuesByField } = useWizardContext();
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [eduOpen, setEduOpen] = useState(false);
 
   const eduErr = issuesByField["qualification.educations"]?.[0]?.message ?? null;
   const skillErr = issuesByField["qualification.skills"]?.[0]?.message ?? null;
@@ -40,10 +42,23 @@ export function QualificationStep() {
     <div className={styles.step}>
       <p className={styles.sectionEyebrow}>02</p>
       <div className={styles.sectionHead}>
-        <div className={styles.sectionTitle}>Qualification :</div>
         <button
           type="button"
-          onClick={() =>
+          onClick={() => setEduOpen((v) => !v)}
+          className={styles.skillsToggle}
+          aria-expanded={eduOpen}
+        >
+          <i
+            className={`ri-arrow-right-s-line ${styles.skillsToggleIcon} ${
+              eduOpen ? styles.skillsToggleIconOpen : ""
+            }`}
+            aria-hidden="true"
+          />
+          <span className={styles.sectionTitle}>Qualification :</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
             addEducation({
               id: newId(),
               degree: "",
@@ -52,8 +67,9 @@ export function QualificationStep() {
               startYear: "",
               endYear: "",
               description: "",
-            })
-          }
+            });
+            setEduOpen(true);
+          }}
           className={wizardUi.actionBtn}
         >
           + Add Education
@@ -61,7 +77,8 @@ export function QualificationStep() {
       </div>
       {eduErr && <div className={styles.sectionError}>{eduErr}</div>}
 
-      {educations.map((edu) => {
+      {eduOpen &&
+        educations.map((edu) => {
         const yearMismatch =
           edu.startYear &&
           edu.endYear &&
@@ -192,12 +209,26 @@ export function QualificationStep() {
 
       <div className={styles.skillsSection}>
         <div className={styles.sectionHead}>
-          <div className={styles.sectionTitle}>Skills :</div>
           <button
             type="button"
-            onClick={() =>
-              addSkill({ id: newId(), name: "", level: "Beginner" })
-            }
+            onClick={() => setSkillsOpen((v) => !v)}
+            className={styles.skillsToggle}
+            aria-expanded={skillsOpen}
+          >
+            <i
+              className={`ri-arrow-right-s-line ${styles.skillsToggleIcon} ${
+                skillsOpen ? styles.skillsToggleIconOpen : ""
+              }`}
+              aria-hidden="true"
+            />
+            <span className={styles.sectionTitle}>Skills :</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              addSkill({ id: newId(), name: "", level: "Beginner" });
+              setSkillsOpen(true);
+            }}
             className={wizardUi.actionBtn}
           >
             + Add Skill
@@ -205,7 +236,8 @@ export function QualificationStep() {
         </div>
         {skillErr && <div className={styles.sectionError}>{skillErr}</div>}
 
-        {skills.map((sk) => (
+        {skillsOpen &&
+          skills.map((sk) => (
           <div key={sk.id} className={styles.card}>
             <button
               type="button"

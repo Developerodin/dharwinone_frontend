@@ -542,13 +542,6 @@ function DynamicProfileView({
                 <i className="ri-edit-2-line me-1.5" />
                 Edit Profile
               </Link>
-              <Link
-                href="/settings/"
-                className="inline-flex h-9 items-center justify-center rounded-lg border border-white/30 bg-white/10 px-4 text-[0.8125rem] font-semibold text-white backdrop-blur-sm transition-colors hover:bg-white/20"
-              >
-                <i className="ri-settings-3-line me-1.5" />
-                Settings
-              </Link>
             </div>
           </div>
 

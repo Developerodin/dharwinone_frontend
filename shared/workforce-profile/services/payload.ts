@@ -115,14 +115,9 @@ export function toSelfServicePayload(
     if (n.countryCode) out.countryCode = n.countryCode;
     out.shortBio = n.shortBio || null;
     out.degree = n.degree || null;
-    if (n.visaType) out.visaType = n.visaType;
-    out.customVisaType = n.customVisaType || null;
-    out.sevisId = n.sevisId || null;
-    out.ead = n.ead || null;
-    out.supervisorName = n.supervisorName || null;
-    out.supervisorContact = n.supervisorContact || null;
-    out.supervisorCountryCode = n.supervisorCountryCode || null;
-    if (n.salaryRange) out.salaryRange = n.salaryRange;
+    // HR-owned immigration/compensation fields are omitted here — employees edit
+    // them only via ATS employee edit; including them would null-clear values
+    // when the wizard state still holds "" for untouched read-only inputs.
     if (n.address) out.address = compact(n.address);
     if (n.socialLinks) out.socialLinks = n.socialLinks;
     // A cleared photo must reach the server as an explicit null; omitting it

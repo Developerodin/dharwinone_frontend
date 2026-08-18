@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import { useState } from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
 import wizardUi from "../engine/workforce-wizard.module.css";
@@ -22,6 +22,7 @@ export function ExperienceStep() {
   const removeExperienceRow = useWorkforceStore((s) => s.removeExperienceRow);
   const updateExperienceRow = useWorkforceStore((s) => s.updateExperienceRow);
   const { issuesByField } = useWizardContext();
+  const [expOpen, setExpOpen] = useState(false);
 
   const expErr =
     issuesByField["experience.experiences[].endDate"]?.[0]?.message ?? null;
@@ -30,10 +31,23 @@ export function ExperienceStep() {
     <div className="p-4">
       <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">03</p>
       <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
-        <div>Experience :</div>
         <button
           type="button"
-          onClick={() =>
+          onClick={() => setExpOpen((v) => !v)}
+          className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0"
+          aria-expanded={expOpen}
+        >
+          <i
+            className={`ri-arrow-right-s-line text-xl leading-none text-[#8c9097] transition-transform duration-150 ${
+              expOpen ? "rotate-90" : ""
+            }`}
+            aria-hidden="true"
+          />
+          <span>Experience :</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
             addExperienceRow({
               id: newId(),
               company: "",
@@ -42,8 +56,9 @@ export function ExperienceStep() {
               endDate: "",
               currentlyWorking: false,
               description: "",
-            })
-          }
+            });
+            setExpOpen(true);
+          }}
           className={wizardUi.actionBtn}
         >
           + Add Experience
@@ -51,7 +66,8 @@ export function ExperienceStep() {
       </div>
       {expErr && <div className="text-red-500 text-sm mb-3">{expErr}</div>}
 
-      {experiences.map((exp, index) => (
+      {expOpen &&
+        experiences.map((exp, index) => (
         <div
           key={exp.id}
           className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3"

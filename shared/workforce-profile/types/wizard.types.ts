@@ -11,7 +11,8 @@ export type StepId =
   | "qualification"
   | "work-experience"
   | "documents"
-  | "salary";
+  | "salary"
+  | "account-settings";
 
 export type StepConfig = {
   id: StepId;

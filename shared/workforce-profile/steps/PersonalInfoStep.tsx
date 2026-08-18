@@ -9,6 +9,10 @@ import { PhoneCountrySelect } from "@/shared/components/PhoneCountrySelect";
 import { CountrySelect } from "@/shared/components/CountrySelect";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { hasPermission } from "@/shared/lib/permissions";
+import {
+  getSocialLinkUrlError,
+  SOCIAL_PLATFORMS,
+} from "@/shared/lib/socialLinks";
 import styles from "./personal-info-step.module.css";
 
 const VISA_TYPES = [
@@ -52,27 +56,6 @@ const SALARY_RANGES = [
   "$400,000+",
   "Prefer not to disclose",
 ];
-
-const SOCIAL_PLATFORMS = [
-  "LinkedIn", "GitHub", "Twitter", "Facebook",
-  "Instagram", "Portfolio", "Website", "Other",
-];
-
-/**
- * The normalizer prepends https:// before sending, so a bare domain is valid
- * input — rejecting it here contradicted what the API actually stores.
- */
-const validateURL = (url: string): boolean => {
-  const trimmed = url.trim();
-  if (!trimmed) return false;
-  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  try {
-    const u = new URL(candidate);
-    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname.includes(".");
-  } catch {
-    return false;
-  }
-};
 
 /** ids must be usable by htmlFor/aria — a raw section title has spaces and "&". */
 const slugify = (s: string): string =>
@@ -194,9 +177,11 @@ export function PersonalInfoStep() {
   const isSelfService =
     mode === "self-service-employee" || mode === "self-service-candidate";
   const emailReadOnly = isSelfService;
-  // Job title and the company mailbox are admin-owned: the self-service PATCH
-  // carries no field for them, so an editable input discards the edit silently.
+  // Job title, company mailbox, and HR immigration/compensation fields are
+  // admin-owned: the self-service PATCH omits them, so editable inputs would
+  // discard changes silently or risk clearing server values on save.
   const adminOwnedReadOnly = isSelfService;
+  const hrOwnedHint = "Managed by your administrator.";
 
   const fieldErr = (key: string): string | null => {
     if (!submitAttempted && !touched[key]) return null;
@@ -527,28 +512,41 @@ export function PersonalInfoStep() {
             />
           </Field>
 
-          <Field id="supervisorName" label="Supervisor name" optional>
+          <Field
+            id="supervisorName"
+            label="Supervisor name"
+            optional
+            hint={adminOwnedReadOnly ? hrOwnedHint : undefined}
+          >
             <input
               type="text"
               value={pi.supervisorName}
               onChange={onText("supervisorName")}
-              className={styles.input}
+              readOnly={adminOwnedReadOnly}
+              className={inputClass(false, adminOwnedReadOnly)}
               placeholder="Manager or advisor"
             />
           </Field>
 
-          <Field id="supervisorContact" label="Supervisor phone" optional>
+          <Field
+            id="supervisorContact"
+            label="Supervisor phone"
+            optional
+            hint={adminOwnedReadOnly ? hrOwnedHint : undefined}
+          >
             <div className={styles.phoneRow}>
               <PhoneCountrySelect
                 name="supervisorCountryCode"
                 value={pi.supervisorCountryCode || pi.countryCode}
                 onChange={(code) => setPersonalInfo({ supervisorCountryCode: code })}
+                disabled={adminOwnedReadOnly}
               />
               <input
                 type="tel"
                 value={pi.supervisorContact}
                 onChange={onText("supervisorContact")}
-                className={styles.input}
+                readOnly={adminOwnedReadOnly}
+                className={inputClass(false, adminOwnedReadOnly)}
                 placeholder={supervisorCountry.placeholder}
                 maxLength={supervisorCountry.maxLength}
                 inputMode="numeric"
@@ -557,34 +555,52 @@ export function PersonalInfoStep() {
             </div>
           </Field>
 
-          <Field id="sevisId" label="SEVIS ID" optional>
+          <Field
+            id="sevisId"
+            label="SEVIS ID"
+            optional
+            hint={adminOwnedReadOnly ? hrOwnedHint : undefined}
+          >
             <input
               type="text"
               value={pi.sevisId}
               onChange={onText("sevisId")}
-              className={styles.input}
+              readOnly={adminOwnedReadOnly}
+              className={inputClass(false, adminOwnedReadOnly)}
               placeholder="If applicable"
             />
           </Field>
 
-          <Field id="ead" label="EAD" optional>
+          <Field
+            id="ead"
+            label="EAD"
+            optional
+            hint={adminOwnedReadOnly ? hrOwnedHint : undefined}
+          >
             <input
               type="text"
               value={pi.ead}
               onChange={onText("ead")}
-              className={styles.input}
+              readOnly={adminOwnedReadOnly}
+              className={inputClass(false, adminOwnedReadOnly)}
               placeholder="Employment authorization"
             />
           </Field>
 
           {/* Not marked required: the rule is a warning by design (staff outside
               the US have no visa), and fieldErr only surfaces hard errors. */}
-          <Field id="visaType" label="Visa type" error={fieldErr("visaType")}>
+          <Field
+            id="visaType"
+            label="Visa type"
+            error={fieldErr("visaType")}
+            hint={adminOwnedReadOnly ? hrOwnedHint : undefined}
+          >
             <select
               value={pi.visaType}
               onChange={onText("visaType")}
               onBlur={markTouched("visaType")}
-              className={`${styles.select} ${fieldErr("visaType") ? styles.inputError : ""}`}
+              disabled={adminOwnedReadOnly}
+              className={`${styles.select} ${fieldErr("visaType") ? styles.inputError : ""} ${adminOwnedReadOnly ? styles.inputReadOnly : ""}`}
             >
               <option value="">Select visa type</option>
               {VISA_TYPES.map((v) => (
@@ -596,22 +612,34 @@ export function PersonalInfoStep() {
           </Field>
 
           {pi.visaType === "Other" ? (
-            <Field id="customVisaType" label="Custom visa type" required>
+            <Field
+              id="customVisaType"
+              label="Custom visa type"
+              required
+              hint={adminOwnedReadOnly ? hrOwnedHint : undefined}
+            >
               <input
                 type="text"
                 value={pi.customVisaType}
                 onChange={onText("customVisaType")}
-                className={styles.input}
+                readOnly={adminOwnedReadOnly}
+                className={inputClass(false, adminOwnedReadOnly)}
                 placeholder="Enter visa type"
               />
             </Field>
           ) : null}
 
-          <Field id="salaryRange" label="Salary range" optional>
+          <Field
+            id="salaryRange"
+            label="Salary range"
+            optional
+            hint={adminOwnedReadOnly ? hrOwnedHint : undefined}
+          >
             <select
               value={pi.salaryRange}
               onChange={onText("salaryRange")}
-              className={styles.select}
+              disabled={adminOwnedReadOnly}
+              className={`${styles.select} ${adminOwnedReadOnly ? styles.inputReadOnly : ""}`}
             >
               <option value="">Select salary range</option>
               {SALARY_RANGES.map((r) => (
@@ -754,11 +782,19 @@ export function PersonalInfoStep() {
                 label="URL"
                 required
                 className={styles.col6}
-                error={link.url && !validateURL(link.url) ? "Enter a valid web address, e.g. linkedin.com/in/you" : null}
+                error={
+                  link.url
+                    ? getSocialLinkUrlError(link.platform, link.url)
+                    : null
+                }
               >
                 <input
                   type="text"
-                  className={`${styles.input} ${link.url && !validateURL(link.url) ? styles.inputError : ""}`}
+                  className={`${styles.input} ${
+                    link.url && getSocialLinkUrlError(link.platform, link.url)
+                      ? styles.inputError
+                      : ""
+                  }`}
                   placeholder="linkedin.com/in/you"
                   value={link.url}
                   onChange={(e) => setSocialLink(index, "url", e.target.value)}

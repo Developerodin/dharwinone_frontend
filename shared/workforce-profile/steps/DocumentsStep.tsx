@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import { useRef, useState } from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
 import wizardUi from "../engine/workforce-wizard.module.css";
 import { useDocumentUpload } from "../resources/useDocumentUpload";
+import { ResumeSkillsExtractOverlay } from "../components/ResumeSkillsExtractOverlay";
+import { useResumeSkillsExtract } from "../resources/useResumeSkillsExtract";
 import type { DocumentResource } from "../types/resource.types";
 
 const DOC_TYPE_GROUPS: Array<{ label: string; options: string[] }> = [
@@ -37,6 +39,44 @@ type DraftRow = {
 let draftCounter = 0;
 const newDraftId = () => `draft-${Date.now()}-${++draftCounter}`;
 
+function DraftFileButton({
+  disabled,
+  onFile,
+}: {
+  disabled: boolean;
+  onFile: (file: File) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.pdf"
+        className="hidden"
+        disabled={disabled}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+      <button
+        type="button"
+        className="inline-flex h-11 items-center gap-1.5 self-start whitespace-nowrap rounded-[0.35rem] border border-gray-300 dark:border-white/10 bg-white dark:bg-gray-800 px-[0.85rem] text-[0.875rem] font-medium text-gray-700 dark:text-gray-200 hover:border-primary/45 hover:bg-primary/5 disabled:opacity-55 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+      >
+        <i className="ri-upload-2-line" aria-hidden="true" />
+        Choose file
+      </button>
+      <small className="text-gray-500 text-xs mt-1 block">
+        Supported formats: JPG, JPEG, PNG, PDF
+      </small>
+    </div>
+  );
+}
+
 function isExistingDoc(d: DocumentResource): boolean {
   return d.status === "uploaded" && !d.file;
 }
@@ -49,6 +89,8 @@ export function DocumentsStep() {
   const documents = useWorkforceStore((s) => s.documents.documents);
   const removeDocument = useWorkforceStore((s) => s.removeDocument);
   const upload = useDocumentUpload();
+  const { maybeExtractFromResume, overlayStatus, addedCount, errorMessage } =
+    useResumeSkillsExtract();
   const { issuesByField } = useWizardContext();
 
   const docErr = issuesByField["documents"]?.[0]?.message ?? null;
@@ -57,6 +99,7 @@ export function DocumentsStep() {
   const newDocs = documents.filter(isNewDoc);
 
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [existingOpen, setExistingOpen] = useState(false);
 
   const addDraft = () =>
     setDrafts((d) => [...d, { draftId: newDraftId(), type: "", customName: "" }]);
@@ -72,6 +115,7 @@ export function DocumentsStep() {
     if (!label || !file) return;
     await upload.add(file, { label, type: draft.type });
     removeDraft(draft.draftId);
+    await maybeExtractFromResume(file, { type: draft.type, label });
   };
 
   const replaceExisting = async (existing: DocumentResource, file: File) => {
@@ -80,6 +124,10 @@ export function DocumentsStep() {
       type: existing.type,
     });
     removeDocument(existing.tempId);
+    await maybeExtractFromResume(file, {
+      type: existing.type,
+      label: existing.label,
+    });
   };
 
   const fileThumbnail = (file: File) => {
@@ -103,7 +151,13 @@ export function DocumentsStep() {
   };
 
   return (
-    <div className="p-4">
+    <>
+      <ResumeSkillsExtractOverlay
+        status={overlayStatus}
+        addedCount={addedCount}
+        errorMessage={errorMessage}
+      />
+      <div className="p-4">
       <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">04</p>
       <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
         <div>Documents (Optional) :</div>
@@ -119,10 +173,24 @@ export function DocumentsStep() {
 
       {existingDocs.length > 0 && (
         <div className="mb-6">
-          <h6 className="text-sm font-semibold mb-3 text-gray-700 dark:text-gray-300">
-            Existing Documents
-          </h6>
-          {existingDocs.map((doc) => (
+          <button
+            type="button"
+            onClick={() => setExistingOpen((v) => !v)}
+            className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0 mb-3"
+            aria-expanded={existingOpen}
+          >
+            <i
+              className={`ri-arrow-right-s-line text-lg leading-none text-[#8c9097] transition-transform duration-150 ${
+                existingOpen ? "rotate-90" : ""
+              }`}
+              aria-hidden="true"
+            />
+            <h6 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              Existing Documents
+            </h6>
+          </button>
+          {existingOpen &&
+          existingDocs.map((doc) => (
             <div
               key={doc.tempId}
               className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3 bg-gray-50 dark:bg-gray-800"
@@ -204,7 +272,7 @@ export function DocumentsStep() {
                   Document Type <span className="text-red-500">*</span>
                 </label>
                 <select
-                  className="form-control w-full !rounded-md"
+                  className="form-control w-full !rounded-md h-11"
                   value={draft.type}
                   onChange={(e) => {
                     const t = e.target.value;
@@ -249,23 +317,13 @@ export function DocumentsStep() {
                 <label className="form-label">
                   Upload File <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="file"
-                  accept=".jpg,.jpeg,.png,.pdf"
-                  className="form-control w-full !rounded-md"
+                <DraftFileButton
                   disabled={
                     !draft.type ||
                     (draft.type === "Other" && !draft.customName.trim())
                   }
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (file) void submitDraft(draft, file);
-                  }}
+                  onFile={(file) => void submitDraft(draft, file)}
                 />
-                <small className="text-gray-500 text-xs mt-1">
-                  Supported formats: JPG, JPEG, PNG, PDF
-                </small>
               </div>
             </div>
           ))}
@@ -339,5 +397,6 @@ export function DocumentsStep() {
         </div>
       )}
     </div>
+    </>
   );
 }

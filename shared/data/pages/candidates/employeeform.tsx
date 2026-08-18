@@ -19,6 +19,13 @@ import {
   CANDIDATE_EXCEL_SHEETS,
   downloadCandidateExcelTemplate,
 } from "@/shared/lib/candidate-excel-template";
+import {
+  getSocialLinkUrlError,
+  isSocialLinkUrlValid,
+  normalizeSocialUrl,
+  SOCIAL_PLATFORMS,
+  validateSocialLinkRows,
+} from "@/shared/lib/socialLinks";
 
 function normalizeExcelHeader(h: string) {
   return (h || "").toString().trim().toLowerCase().replace(/\s+/g, "");
@@ -242,6 +249,44 @@ function Button({ visible = true, disabled, ...props }: any) {
       disabled={disabled}
       {...props}
     />
+  );
+}
+
+function DraftFileButton({
+  disabled,
+  onFile,
+}: {
+  disabled: boolean;
+  onFile: (file: File) => void;
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  return (
+    <div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".jpg,.jpeg,.png,.pdf"
+        className="hidden"
+        disabled={disabled}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+      <button
+        type="button"
+        className="inline-flex h-11 items-center gap-1.5 self-start whitespace-nowrap rounded-[0.35rem] border border-gray-300 dark:border-white/10 bg-white dark:bg-gray-800 px-[0.85rem] text-[0.875rem] font-medium text-gray-700 dark:text-gray-200 hover:border-primary/45 hover:bg-primary/5 disabled:opacity-55 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+      >
+        <i className="ri-upload-2-line" aria-hidden="true" />
+        Choose file
+      </button>
+      <small className="text-gray-500 text-xs mt-1 block">
+        Supported formats: JPG, JPEG, PNG, PDF
+      </small>
+    </div>
   );
 }
 
@@ -591,6 +636,14 @@ export const EmployeeForm = ({
 
   const [skills, setSkills] = useState<{ id: number; name: string; level: string; category?: string }[]>([]);
 
+  // ------------------------------- State: Collapsible Sections -------------------------------
+
+  const [educationOpen, setEducationOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [experienceOpen, setExperienceOpen] = useState(false);
+  const [existingDocsOpen, setExistingDocsOpen] = useState(false);
+  const [existingSalarySlipsOpen, setExistingSalarySlipsOpen] = useState(false);
+
   // ------------------------------- State: Social Links -------------------------------
 
   const [socialLinks, setSocialLinks] = useState<{id: number, platform: string, url: string}[]>([]);
@@ -727,15 +780,6 @@ export const EmployeeForm = ({
     return getPhoneCountry(countryCode).regex.test(digits);
   };
 
-  const validateURL = (url: string): boolean => {
-    try {
-      new URL(url);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
   const validateRequired = (value: string): boolean => {
     return value.trim() !== '';
   };
@@ -836,12 +880,29 @@ export const EmployeeForm = ({
             errors.push('Salary Range is required');
             newFieldErrors['salaryRange'] = 'Salary Range is required';
           }
-          const validSocialLinks = socialLinks.filter(link =>
-            validateRequired(link.platform) && validateRequired(link.url) && validateURL(link.url)
+          const filledSocialLinks = socialLinks.filter(
+            (link) => link.platform.trim() !== "" || link.url.trim() !== "",
           );
-          if (validSocialLinks.length === 0) {
-            errors.push('At least one social link is required');
-            newFieldErrors['socialLinks'] = 'At least one social link is required';
+          const socialValidationError = validateSocialLinkRows(
+            filledSocialLinks.map((link) => ({
+              platform: link.platform,
+              url: link.url,
+            })),
+          );
+          if (socialValidationError) {
+            errors.push(socialValidationError);
+            newFieldErrors.socialLinks = socialValidationError;
+          } else {
+            const validSocialLinks = socialLinks.filter(
+              (link) =>
+                validateRequired(link.platform) &&
+                validateRequired(link.url) &&
+                isSocialLinkUrlValid(link.platform, link.url),
+            );
+            if (validSocialLinks.length === 0) {
+              errors.push("At least one social link is required");
+              newFieldErrors.socialLinks = "At least one social link is required";
+            }
           }
         }
         if (formData.supervisorContact && !validatePhone(formData.supervisorContact, formData.supervisorCountryCode || formData.countryCode)) {
@@ -2035,10 +2096,12 @@ export const EmployeeForm = ({
             ...(cat ? { category: cat } : {}),
           };
         }),
-        socialLinks: socialLinks.filter(link => link.platform.trim() !== "" && link.url.trim() !== "").map((link) => ({
-          platform: link.platform,
-          url: link.url,
-        })),
+        socialLinks: socialLinks
+          .filter((link) => link.platform.trim() !== "" && link.url.trim() !== "")
+          .map((link) => ({
+            platform: link.platform,
+            url: normalizeSocialUrl(link.url),
+          })),
         documents: [...existingDocs, ...uploadedDocs],
         salarySlips: [...existingSalarySlips, ...uploadedSalarySlips],
       } as Record<string, unknown>;
@@ -2772,14 +2835,11 @@ export const EmployeeForm = ({
                       required={!relaxPersonalInfoValidation}
                     >
                       <option value="">Select Platform</option>
-                      <option value="LinkedIn">LinkedIn</option>
-                      <option value="GitHub">GitHub</option>
-                      <option value="Twitter">Twitter</option>
-                      <option value="Facebook">Facebook</option>
-                      <option value="Instagram">Instagram</option>
-                      <option value="Portfolio">Portfolio</option>
-                      <option value="Website">Website</option>
-                      <option value="Other">Other</option>
+                      {SOCIAL_PLATFORMS.map((platform) => (
+                        <option key={platform} value={platform}>
+                          {platform}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -2788,15 +2848,20 @@ export const EmployeeForm = ({
                       URL {!relaxPersonalInfoValidation ? <span className="text-red-500">*</span> : null}
                     </label>
                     <input
-                      type="url"
-                      className="form-control w-full !rounded-md"
-                      placeholder="https://example.com"
+                      type="text"
+                      className={`form-control w-full !rounded-md ${
+                        link.url && getSocialLinkUrlError(link.platform, link.url) ? "border-red-500" : ""
+                      }`}
+                      placeholder="github.com/username"
                       value={link.url}
                       onChange={(e) => handleSocialLinkChange(index, "url", e.target.value)}
                       required={!relaxPersonalInfoValidation}
+                      inputMode="url"
                     />
-                    {link.url && !validateURL(link.url) && (
-                      <div className="text-red-500 text-sm mt-1">Please enter a valid URL</div>
+                    {link.url && getSocialLinkUrlError(link.platform, link.url) && (
+                      <div className="text-red-500 text-sm mt-1" role="alert">
+                        {getSocialLinkUrlError(link.platform, link.url)}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -2828,10 +2893,26 @@ export const EmployeeForm = ({
         <div className="p-4">
           <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">02</p>
           <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
-            <div>Qualification :</div>
             <button
               type="button"
-              onClick={handleAddEducation}
+              onClick={() => setEducationOpen((v) => !v)}
+              className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0"
+              aria-expanded={educationOpen}
+            >
+              <i
+                className={`ri-arrow-right-s-line text-xl leading-none text-[#8c9097] transition-transform duration-150 ${
+                  educationOpen ? "rotate-90" : ""
+                }`}
+                aria-hidden="true"
+              />
+              <span>Qualification :</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleAddEducation();
+                setEducationOpen(true);
+              }}
               className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
             >
               + Add Education
@@ -2841,7 +2922,7 @@ export const EmployeeForm = ({
             <div className="text-red-500 text-sm mb-3">{fieldErrors['education']}</div>
           )}
 
-          {educations.map((edu, index) => (
+          {educationOpen && educations.map((edu, index) => (
             <div key={index} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3">
               <button type="button" onClick={() => { setEducations(educations.filter((_, i) => i !== index)) }} className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600">
                 ✕
@@ -2929,10 +3010,26 @@ export const EmployeeForm = ({
           ))}
           <div className="xl:col-span-12 col-span-12">
             <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
-              <div>Skills :</div>
               <button
                 type="button"
-                onClick={handleAddSkill}
+                onClick={() => setSkillsOpen((v) => !v)}
+                className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0"
+                aria-expanded={skillsOpen}
+              >
+                <i
+                  className={`ri-arrow-right-s-line text-xl leading-none text-[#8c9097] transition-transform duration-150 ${
+                    skillsOpen ? "rotate-90" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+                <span>Skills :</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleAddSkill();
+                  setSkillsOpen(true);
+                }}
                 className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
               >
                 + Add Skill
@@ -2942,7 +3039,7 @@ export const EmployeeForm = ({
               <div className="text-red-500 text-sm mb-3">{fieldErrors['skills']}</div>
             )}
 
-            {skills.map((skill, index) => (
+            {skillsOpen && skills.map((skill, index) => (
               <div key={skill.id} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3">
                 <button
                   type="button"
@@ -2998,10 +3095,26 @@ export const EmployeeForm = ({
         <div className="p-4">
           <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">03</p>
           <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
-            <div>Experience :</div>
             <button
               type="button"
-              onClick={handleAddExperience}
+              onClick={() => setExperienceOpen((v) => !v)}
+              className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0"
+              aria-expanded={experienceOpen}
+            >
+              <i
+                className={`ri-arrow-right-s-line text-xl leading-none text-[#8c9097] transition-transform duration-150 ${
+                  experienceOpen ? "rotate-90" : ""
+                }`}
+                aria-hidden="true"
+              />
+              <span>Experience :</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleAddExperience();
+                setExperienceOpen(true);
+              }}
               className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
             >
               + Add Experience
@@ -3010,7 +3123,7 @@ export const EmployeeForm = ({
           {fieldErrors['experience'] && (
             <div className="text-red-500 text-sm mb-3">{fieldErrors['experience']}</div>
           )}
-          {experiences.map((exp, index) => (
+          {experienceOpen && experiences.map((exp, index) => (
             <div key={index} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3">
               <button type="button"
                 onClick={() => setExperiences(experiences.filter((_, i) => i !== index))}
@@ -3129,8 +3242,21 @@ export const EmployeeForm = ({
           {/* Existing Documents */}
           {existingDocs.length > 0 && (
             <div className="mb-6">
-              <h6 className="text-sm font-semibold mb-3 text-gray-700 dark:text-gray-300">Existing Documents</h6>
-              {existingDocs.map((doc, index) => (
+              <button
+                type="button"
+                onClick={() => setExistingDocsOpen((v) => !v)}
+                className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0 mb-3"
+                aria-expanded={existingDocsOpen}
+              >
+                <i
+                  className={`ri-arrow-right-s-line text-lg leading-none text-[#8c9097] transition-transform duration-150 ${
+                    existingDocsOpen ? "rotate-90" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+                <h6 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Existing Documents</h6>
+              </button>
+              {existingDocsOpen && existingDocs.map((doc, index) => (
                 <div key={index} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3 bg-gray-50 dark:bg-gray-800">
                   <button
                     type="button"
@@ -3205,7 +3331,7 @@ export const EmployeeForm = ({
               <div className="xl:col-span-4 col-span-12">
                 <label className="form-label">Document Type <span className="text-red-500">*</span></label>
                 <select
-                  className={`form-control w-full !rounded-md ${fieldErrors['documents'] ? 'border-red-500' : ''}`}
+                  className={`form-control w-full !rounded-md h-11 ${fieldErrors['documents'] ? 'border-red-500' : ''}`}
                   value={doc.name}
                   onChange={(e) => {
                     const updated = [...documentsList];
@@ -3261,20 +3387,14 @@ export const EmployeeForm = ({
 
               <div className="xl:col-span-4 col-span-12">
                 <label className="form-label">Upload File <span className="text-red-500">*</span></label>
-                <input
-                  type="file"
-                  accept=".jpg,.jpeg,.png,.pdf"
-                  className={`form-control w-full !rounded-md ${fieldErrors['documents'] ? 'border-red-500' : ''}`}
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files[0]) {
-                      const updated = [...documentsList];
-                      updated[index].file = e.target.files[0];
-                      setDocumentsList(updated);
-                    }
+                <DraftFileButton
+                  disabled={!doc.name || (doc.name === "Other" && !doc.customName.trim())}
+                  onFile={(file) => {
+                    const updated = [...documentsList];
+                    updated[index].file = file;
+                    setDocumentsList(updated);
                   }}
-                  required
                 />
-                <small className="text-gray-500 text-xs mt-1">Supported formats: JPG, JPEG, PNG, PDF</small>
               </div>
 
                   {doc.file && (
@@ -3323,8 +3443,21 @@ export const EmployeeForm = ({
         {/* Existing Salary Slips */}
         {existingSalarySlips.length > 0 && (
           <div className="mb-6">
-            <h6 className="text-sm font-semibold mb-3 text-gray-700 dark:text-gray-300">Existing Salary Slips</h6>
-            {existingSalarySlips.map((slip, index) => (
+            <button
+              type="button"
+              onClick={() => setExistingSalarySlipsOpen((v) => !v)}
+              className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0 mb-3"
+              aria-expanded={existingSalarySlipsOpen}
+            >
+              <i
+                className={`ri-arrow-right-s-line text-lg leading-none text-[#8c9097] transition-transform duration-150 ${
+                  existingSalarySlipsOpen ? "rotate-90" : ""
+                }`}
+                aria-hidden="true"
+              />
+              <h6 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Existing Salary Slips</h6>
+            </button>
+            {existingSalarySlipsOpen && existingSalarySlips.map((slip, index) => (
               <div key={index} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3 bg-gray-50 dark:bg-gray-800">
                 <button
                   type="button"

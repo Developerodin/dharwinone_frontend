@@ -12,6 +12,7 @@ import type { ValidationResult } from "../types/validation.types";
 import { useWizardNavigation } from "./useWizardNavigation";
 import { useDirtyState } from "./useDirtyState";
 import { useWorkforceValidation, type ValidationRule } from "./useWorkforceValidation";
+import { useWizardFeedbackOverlay } from "./useWizardFeedbackOverlay";
 import { useWorkforceAnalytics } from "./useWorkforceAnalytics";
 import { useWorkforceAsyncState, type LoadFn } from "./useWorkforceAsyncState";
 import { useWorkforceSubmit } from "../submit/useWorkforceSubmit";
@@ -73,7 +74,7 @@ export function useWorkforceForm(
   const asyncLoad = asyncState.load;
 
   const [submitAttempted, setSubmitAttempted] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const { overlay: validationOverlay, showError, dismiss } = useWizardFeedbackOverlay();
 
   // A blocked save used to be silent: the offending field could sit on another
   // step with nothing pointing at it. Jump there, say how many, focus the field.
@@ -82,11 +83,11 @@ export function useWorkforceForm(
       const errors = result.issues.filter((i) => i.severity === "error");
       const first = errors[0];
       if (!first) return;
-      setValidationError(
+      const description =
         errors.length === 1
           ? first.message
-          : `${errors.length} fields need attention. First: ${first.message}`,
-      );
+          : `${errors.length} fields need attention. First: ${first.message}`;
+      showError("Can't save yet", description);
       nav.setStepById(first.section);
       if (typeof document === "undefined") return;
       const domId = first.field.split(".").pop()?.replace(/\[\]$/, "");
@@ -100,7 +101,7 @@ export function useWorkforceForm(
         }
       });
     },
-    [nav],
+    [nav, showError],
   );
 
   const handleSubmitSuccess = useCallback(
@@ -134,12 +135,21 @@ export function useWorkforceForm(
 
   const submit = useCallback(async (): Promise<void> => {
     setSubmitAttempted(true);
-    setValidationError(null);
+    dismiss();
     await submitter.submit();
-  }, [submitter]);
+  }, [submitter, dismiss]);
+
+  const goNext = useCallback(() => {
+    setSubmitAttempted(true);
+    const result = validation.validateStep(nav.currentStep);
+    if (result.hasErrors) {
+      handleValidationError(result);
+      return;
+    }
+    nav.setStepByIndex(nav.currentIndex + 1);
+  }, [validation, nav, handleValidationError]);
 
   const clearSaveError = useCallback(() => {
-    setValidationError(null);
     submitter.clearSubmitError();
   }, [submitter]);
 
@@ -163,7 +173,7 @@ export function useWorkforceForm(
       loadError: asyncState.loadError?.message ?? null,
       // asyncState.save is a no-op here; the real save runs through `submitter`,
       // so its error is the one the user needs to see.
-      saveError: submitter.submitError ?? validationError,
+      saveError: submitter.submitError,
       clearSaveError,
 
       isDirty: dirty.isDirty,
@@ -175,7 +185,9 @@ export function useWorkforceForm(
       issuesBySection: validation.issuesBySection,
       submitAttempted,
 
+      validationOverlay,
       submit,
+      goNext,
     }),
     [
       mode,
@@ -189,7 +201,6 @@ export function useWorkforceForm(
       asyncState.loadError,
       submitter.isSubmitting,
       submitter.submitError,
-      validationError,
       clearSaveError,
       dirty.isDirty,
       dirty.dirtySections,
@@ -198,7 +209,9 @@ export function useWorkforceForm(
       validation.issuesByField,
       validation.issuesBySection,
       submitAttempted,
+      validationOverlay,
       submit,
+      goNext,
     ],
   );
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { getPhoneValidationError } from "@/shared/lib/phoneCountries";
+import { validateSocialLinkRows } from "@/shared/lib/socialLinks";
 import type { Mode, StepId } from "../types/wizard.types";
 import type {
   ValidationIssue,
@@ -68,6 +69,17 @@ export const DEFAULT_RULES: ValidationRule[] = [
     severity: "warning",
     test: (s) =>
       s.personalInfo.visaType.trim() ? null : "Visa type not provided",
+  },
+  {
+    field: "personalInfo.socialLinks",
+    section: "personal-info",
+    test: (s) =>
+      validateSocialLinkRows(
+        s.personalInfo.socialLinks.map((link) => ({
+          platform: link.platform,
+          url: link.url,
+        })),
+      ),
   },
   {
     field: "qualification.educations",

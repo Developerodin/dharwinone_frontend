@@ -54,6 +54,12 @@ const DEFAULT_STEPS: StepConfig[] = [
     icon: "ri-money-dollar-circle-line",
     visibleIn: ["create-admin", "edit-admin", "self-service-employee"],
   },
+  {
+    id: "account-settings",
+    title: "Account Setting",
+    icon: "ri-user-settings-line",
+    visibleIn: ["self-service-employee"],
+  },
 ];
 
 export function useWizardNavigation(

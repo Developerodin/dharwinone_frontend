@@ -2,16 +2,9 @@ import type {
   WorkforceFormState,
   NormalizedWorkforce,
 } from "../types/workforce.types";
+import { normalizeSocialUrl } from "@/shared/lib/socialLinks";
 
 const trimString = (v: string | undefined | null) => (v ?? "").trim();
-
-/**
- * Social link URLs are validated server-side with Joi `.uri()`, which rejects a
- * bare domain ("linkedin.com/in/x") with "Social link URL must be a valid URL".
- * Users type them without a scheme constantly, so add the one they meant.
- */
-const withScheme = (url: string): string =>
-  !url || /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
 
 const dropEmptyStrings = <T extends Record<string, unknown>>(obj: T): T => {
   const out: Record<string, unknown> = {};
@@ -56,7 +49,7 @@ export function normalize(state: WorkforceFormState): NormalizedWorkforce {
       .filter((l) => trimString(l.platform) && trimString(l.url))
       .map((l) => ({
         platform: trimString(l.platform),
-        url: withScheme(trimString(l.url)),
+        url: normalizeSocialUrl(trimString(l.url)),
       })),
 
     qualifications: state.qualification.educations

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Seo from "@/shared/layout-components/seo/seo";
 import { useAuth } from "@/shared/contexts/auth-context";
@@ -17,83 +17,25 @@ import {
 import type { NotificationPreferences } from "@/shared/lib/api/users";
 import { useHasEmployeeRole } from "@/shared/hooks/use-has-employee-role";
 import { EmployeeProfileWizard } from "@/shared/workforce-profile";
+import {
+  isPersonalInfoWizardEnabled,
+  resolveSelfServiceWizardTarget,
+} from "@/shared/lib/personal-info-wizard";
 import { PhoneCountrySelect } from "@/shared/components/PhoneCountrySelect";
+import { NotificationPreferencesEditor } from "@/shared/components/NotificationPreferencesEditor";
+import { ChangePasswordButton } from "@/shared/components/ChangePasswordButton";
 import { DEFAULT_PHONE_COUNTRY, parseStoredPhone } from "@/shared/lib/phoneCountries";
 import type { CandidateWithProfile, UpdateMeWithCandidatePayload } from "@/shared/lib/api/auth";
 import { AxiosError } from "axios";
 import Swal from "sweetalert2";
 import { formatUserAgentSummary } from "@/shared/lib/parse-user-agent";
 import { formatUserRoleDisplayName } from "@/shared/lib/user-role-display";
-
-type NotificationPrefKey = keyof NotificationPreferences;
-
-/** Grouped notification toggles — keys must match `NotificationPreferences`. */
-const NOTIFICATION_PREF_GROUPS: {
-  id: string;
-  title: string;
-  summary: string;
-  icon: string;
-  items: { key?: NotificationPrefKey; inAppKey: NotificationPrefKey; label: string; description?: string }[];
-}[] = [
-  {
-    id: "work",
-    title: "Work & attendance",
-    summary: "HR, leave, and tasks",
-    icon: "ri-time-line",
-    items: [
-      { key: "leaveUpdates", inAppKey: "leaveUpdatesInApp", label: "Leave & attendance updates", description: "Absences, approvals, and attendance changes" },
-      { key: "taskAssignments", inAppKey: "taskAssignmentsInApp", label: "Task assignments", description: "When new work is assigned to you" },
-      { inAppKey: "chatMessagesInApp", label: "Chat messages", description: "New direct and group chat messages" },
-      { inAppKey: "projectUpdatesInApp", label: "Project assignments", description: "When you are added to a project" },
-    ],
-  },
-  {
-    id: "hiring",
-    title: "Applications & offers",
-    summary: "Recruiting and recruiter touchpoints",
-    icon: "ri-briefcase-4-line",
-    items: [
-      { key: "applicationUpdates", inAppKey: "applicationUpdatesInApp", label: "Job application updates", description: "Status changes on roles you applied to" },
-      { key: "offerUpdates", inAppKey: "offerUpdatesInApp", label: "Offer updates", description: "Offers, negotiations, and outcomes" },
-      { key: "recruiterUpdates", inAppKey: "recruiterUpdatesInApp", label: "Recruiter assignments", description: "When a recruiter is linked to you" },
-      { key: "placementUpdates", inAppKey: "placementUpdatesInApp", label: "Placement updates", description: "Joining dates and placement confirmations" },
-      { inAppKey: "assignmentUpdatesInApp", label: "Assignee changes", description: "When you are set as the assigned agent" },
-    ],
-  },
-  {
-    id: "learning",
-    title: "Meetings & learning",
-    summary: "Calendar, reminders, and programmes",
-    icon: "ri-calendar-event-line",
-    items: [
-      { key: "meetingInvitations", inAppKey: "meetingInvitationsInApp", label: "Meeting invitations", description: "Invites and schedule updates" },
-      { key: "meetingReminders", inAppKey: "meetingRemindersInApp", label: "Meeting reminders", description: "Alerts before your sessions" },
-      { key: "certificates", inAppKey: "certificatesInApp", label: "Certificates", description: "Issued credentials and completions" },
-      { key: "courseUpdates", inAppKey: "courseUpdatesInApp", label: "Course / training updates", description: "Modules, deadlines, and programme news" },
-      { inAppKey: "sopAssignmentsInApp", label: "Onboarding SOP reminders", description: "Open onboarding steps assigned to you" },
-    ],
-  },
-  {
-    id: "support",
-    title: "Support",
-    summary: "Help desk and ticket updates",
-    icon: "ri-customer-service-2-line",
-    items: [
-      { key: "supportTicketUpdates", inAppKey: "supportTicketUpdatesInApp", label: "Support ticket updates", description: "Status changes on tickets you raised" },
-    ],
-  },
-];
-
-const ALL_NOTIFICATION_PREF_KEYS = NOTIFICATION_PREF_GROUPS.flatMap((g) =>
-  g.items.flatMap((i) => (i.key ? [i.key, i.inAppKey] : [i.inAppKey]))
-);
-
-function normalizeSocialUrl(raw: string): string {
-  const u = raw.trim();
-  if (!u) return "";
-  if (/^https?:\/\//i.test(u)) return u;
-  return `https://${u}`;
-}
+import {
+  getSocialLinkUrlError,
+  normalizeSocialUrl,
+  SOCIAL_PLATFORMS,
+  validateSocialLinkRows,
+} from "@/shared/lib/socialLinks";
 
 function validatePhoneForCandidate(phone: string): string | null {
   const digits = (phone || "").replace(/\D/g, "");
@@ -124,14 +66,6 @@ function normalizeRoleIdList(raw: unknown): string[] {
       return "";
     })
     .filter(Boolean);
-}
-
-const PASSWORD_MIN_LENGTH = 8;
-
-function validateNewPassword(password: string): string | null {
-  if (password.length < PASSWORD_MIN_LENGTH) return `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
-  if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) return "Password must contain at least one letter and one number.";
-  return null;
 }
 
 type QualRow = {
@@ -237,18 +171,6 @@ function validateExperiencesPayload(rows: ExpRow[]): { error?: string; list?: Ex
     list.push({ ...x, company, role });
   }
   return { list };
-}
-
-function validateSocialLinkRowsIncomplete(
-  rows: Array<{ platform: string; url: string }>
-): string | null {
-  for (let i = 0; i < rows.length; i++) {
-    const platform = rows[i]?.platform.trim() ?? "";
-    const url = rows[i]?.url.trim() ?? "";
-    if (platform && !url) return `Social link ${i + 1}: add a URL, or clear the row.`;
-    if (!platform && url) return `Social link ${i + 1}: choose a platform, or clear the URL.`;
-  }
-  return null;
 }
 
 function extractApiErrorMessage(err: unknown): string {
@@ -381,6 +303,9 @@ export default function PersonalInformationPage() {
   const { hasEmployeeRole, hasEmployeeProfile, isLoading: candidateRoleLoading } = useHasEmployeeRole();
   /** Username is only persisted on the staff (no linked candidate profile) save path. */
   const canEditUsernameOnPage = hasAdminPrivileges && !hasEmployeeProfile;
+  /** Immigration/compensation fields are HR-owned — editable only via ATS employee edit. */
+  const hrOwnedReadOnly = hasEmployeeProfile;
+  const hrOwnedHint = "Managed by your administrator.";
   const [candidate, setCandidate] = useState<CandidateWithProfile | null>(null);
 
   const [firstName, setFirstName] = useState("");
@@ -401,19 +326,13 @@ export default function PersonalInformationPage() {
   const [extractingFromDoc, setExtractingFromDoc] = useState(false);
   const [avatarUploadLoading, setAvatarUploadLoading] = useState(false);
   const [avatarRemoveLoading, setAvatarRemoveLoading] = useState(false);
-  const [showWizardPreview, setShowWizardPreview] = useState(false);
+  /**
+   * NEXT_PUBLIC_ENABLE_PERSONAL_INFO_WIZARD === "true" -> the wizard is the whole
+   * Personal Information experience. Missing/anything else -> the existing
+   * implementation below, unchanged.
+   */
+  const wizardEnabled = isPersonalInfoWizardEnabled();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [changePasswordError, setChangePasswordError] = useState("");
-  const [changePasswordSuccess, setChangePasswordSuccess] = useState("");
-  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
 
   const [phoneNumber, setPhoneNumber] = useState("");
   const [countryCode, setCountryCode] = useState<string>(DEFAULT_PHONE_COUNTRY);
@@ -476,44 +395,6 @@ export default function PersonalInformationPage() {
     projectUpdatesInApp: true,
     sopAssignmentsInApp: true,
   });
-
-  const notificationPanelId = useId();
-  const [notificationSectionOpen, setNotificationSectionOpen] = useState(false);
-
-  const enabledNotificationEmailCount = useMemo(
-    () => ALL_NOTIFICATION_PREF_KEYS.filter((k) => notificationPrefs[k] !== false).length,
-    [notificationPrefs]
-  );
-
-  const enableAllNotificationPrefs = () => {
-    setNotificationPrefs((p) => {
-      const next = { ...p };
-      ALL_NOTIFICATION_PREF_KEYS.forEach((k) => {
-        next[k] = true;
-      });
-      return next;
-    });
-  };
-
-  const disableAllNotificationPrefs = () => {
-    setNotificationPrefs((p) => {
-      const next = { ...p };
-      ALL_NOTIFICATION_PREF_KEYS.forEach((k) => {
-        next[k] = false;
-      });
-      return next;
-    });
-  };
-
-  const setNotificationGroupPrefs = (keys: NotificationPrefKey[], on: boolean) => {
-    setNotificationPrefs((p) => {
-      const next = { ...p };
-      keys.forEach((k) => {
-        next[k] = on;
-      });
-      return next;
-    });
-  };
 
   const roleDisplayName = useMemo(
     () => formatUserRoleDisplayName({ user, roleNames, permissionsLoaded }),
@@ -873,7 +754,7 @@ export default function PersonalInformationPage() {
         return;
       }
       expForSave = eRes.list;
-      const socialErr = validateSocialLinkRowsIncomplete(socialLinkRows);
+      const socialErr = validateSocialLinkRows(socialLinkRows);
       if (socialErr) {
         await showProfileSaveToast("error", "Can't save profile", socialErr);
         return;
@@ -1020,14 +901,7 @@ export default function PersonalInformationPage() {
             phoneNumber: (phoneNumber || "").replace(/\D/g, ""),
             countryCode: countryCode || undefined,
             shortBio: shortBio || undefined,
-            sevisId: sevisId || undefined,
-            ead: ead || undefined,
-            visaType: visaType || undefined,
-            customVisaType: customVisaType || undefined,
             degree: degree || undefined,
-            supervisorName: supervisorName || undefined,
-            supervisorContact: (supervisorContact || "").replace(/\D/g, "") || undefined,
-            salaryRange: salaryRange || undefined,
             address: {
               streetAddress: address.streetAddress || undefined,
               streetAddress2: address.streetAddress2 || undefined,
@@ -1214,57 +1088,6 @@ export default function PersonalInformationPage() {
     }
   };
 
-  const openChangePasswordModal = () => {
-    setChangePasswordOpen(true);
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    setChangePasswordError("");
-    setChangePasswordSuccess("");
-  };
-
-  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setChangePasswordError("");
-    setChangePasswordSuccess("");
-    if (!currentPassword.trim()) {
-      setChangePasswordError("Current password is required.");
-      return;
-    }
-    const validation = validateNewPassword(newPassword);
-    if (validation) {
-      setChangePasswordError(validation);
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setChangePasswordError("New passwords do not match.");
-      return;
-    }
-    setChangePasswordLoading(true);
-    try {
-      await authApi.changePassword(currentPassword.trim(), newPassword);
-      setChangePasswordSuccess("Your password has been updated.");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setTimeout(() => {
-        setChangePasswordOpen(false);
-        setChangePasswordSuccess("");
-      }, 1500);
-    } catch (err) {
-      const status = err instanceof AxiosError ? err.response?.status : 0;
-      const msg =
-        err instanceof AxiosError && err.response?.data?.message
-          ? String(err.response.data.message)
-          : status === 401
-            ? "Current password is incorrect."
-            : "Something went wrong. Please try again.";
-      setChangePasswordError(msg);
-    } finally {
-      setChangePasswordLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (!user) return;
     const fullName = user.name ?? "";
@@ -1315,6 +1138,56 @@ export default function PersonalInformationPage() {
     }
   }, [user, hasEmployeeProfile]);
 
+  // ── Feature flag branch ──────────────────────────────────────────────────
+  // NEXT_PUBLIC_ENABLE_PERSONAL_INFO_WIZARD=true -> the wizard IS Personal
+  // Information (Employee and Candidate each get their own wizard flow).
+  // Anything else -> fall through to the existing implementation below,
+  // which is left untouched.
+  if (wizardEnabled && (candidateRoleLoading || hasEmployeeProfile)) {
+    const { mode: wizardMode, role: wizardRole } =
+      resolveSelfServiceWizardTarget(roleNames);
+
+    return (
+      <Fragment>
+        <Seo title="Personal Information" />
+        <div className="sm:p-4 p-4">
+          <div className="box overflow-hidden">
+            <div className="box-body !p-0">
+              {candidateRoleLoading ? (
+                <div className="p-6 flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+                </div>
+              ) : (
+                <EmployeeProfileWizard
+                  mode={wizardMode}
+                  role={wizardRole}
+                  submitLabel="Save profile"
+                  onSubmitSuccess={async (result) => {
+                    // Wizard saves via PATCH /auth/me/with-candidate; refresh
+                    // auth state so the header name and avatar follow.
+                    const next = result.candidate as unknown as CandidateWithProfile | undefined;
+                    if (next) setCandidate(next);
+                    await refreshUser();
+                    await checkAuth();
+                    await Swal.fire({
+                      icon: "success",
+                      title: "Profile updated",
+                      toast: true,
+                      position: "top-end",
+                      showConfirmButton: false,
+                      timer: 2800,
+                      timerProgressBar: true,
+                    });
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      </Fragment>
+    );
+  }
+
   return (
     <Fragment>
       <Seo title="Personal Information" />
@@ -1356,69 +1229,10 @@ export default function PersonalInformationPage() {
                     {avatarRemoveLoading ? "Removing…" : "Remove"}
                   </button>
                 )}
-                {hasEmployeeProfile && (
-                  <button
-                    type="button"
-                    onClick={() => setShowWizardPreview((v) => !v)}
-                    className="ti-btn ti-btn-sm ti-btn-soft-info !w-auto !h-auto whitespace-nowrap inline-flex items-center"
-                    title="Preview the new unified profile wizard"
-                  >
-                    <i className="ri-magic-line me-1 align-middle inline-block" />
-                    {showWizardPreview ? "Hide wizard preview" : "Try new wizard"}
-                  </button>
-                )}
               </div>
             </div>
           </div>
         </div>
-
-        {hasEmployeeProfile && showWizardPreview && (
-          <div className="box overflow-hidden border border-info/30">
-            <div className="box-header px-4 py-2 border-b border-dashed dark:border-defaultborder/10 flex items-center justify-between gap-2 bg-info/5">
-              <div className="flex items-center gap-2">
-                <i className="ri-magic-line text-info" />
-                <h6 className="font-medium mb-0 text-[0.875rem]">New profile wizard (preview)</h6>
-                <span className="badge bg-info/10 text-info text-[0.6rem] font-medium px-2 py-0.5 rounded-full uppercase tracking-wide">Beta</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowWizardPreview(false)}
-                className="ti-btn ti-btn-sm ti-btn-soft-secondary !w-auto !h-auto whitespace-nowrap"
-              >
-                Close preview
-              </button>
-            </div>
-            <div className="box-body px-0 py-0">
-              <EmployeeProfileWizard
-                mode="self-service-employee"
-                role="employee"
-                submitLabel="Save profile"
-                onSubmitSuccess={async (result) => {
-                  // Wizard saved via PATCH /auth/me/with-candidate.
-                  // Refresh legacy state so avatar, header name and the
-                  // duplicated form below all show the updated values.
-                  const next = result.candidate as unknown as CandidateWithProfile | undefined;
-                  if (next) setCandidate(next);
-                  await refreshUser();
-                  await checkAuth();
-                  await Swal.fire({
-                    icon: "success",
-                    title: "Profile updated",
-                    text: "Saved via the new wizard.",
-                    toast: true,
-                    position: "top-end",
-                    showConfirmButton: false,
-                    timer: 2800,
-                    timerProgressBar: true,
-                  });
-                }}
-              />
-            </div>
-            <div className="px-4 py-2 border-t border-dashed dark:border-defaultborder/10 text-[0.7rem] text-[#8c9097] dark:text-white/50">
-              Both the wizard and the existing form below write to the same profile. Use the wizard to preview the new unified flow; the legacy form remains the source of truth until P2.c.
-            </div>
-          </div>
-        )}
 
         {/* ── Account fields (name, username, email) ── */}
         <div className="box overflow-hidden">
@@ -1666,26 +1480,38 @@ export default function PersonalInformationPage() {
                   <label className="form-label">SEVIS ID</label>
                   <input
                     type="text"
-                    className="form-control w-full !rounded-md"
+                    className={`form-control w-full !rounded-md ${hrOwnedReadOnly ? "!bg-gray-100 dark:!bg-black/20" : ""}`}
                     value={sevisId}
-                    onChange={(e) => setSevisId(e.target.value)}
+                    readOnly={hrOwnedReadOnly}
+                    onChange={hrOwnedReadOnly ? undefined : (e) => setSevisId(e.target.value)}
+                    title={hrOwnedReadOnly ? hrOwnedHint : undefined}
                   />
+                  {hrOwnedReadOnly ? (
+                    <p className="text-[0.7rem] text-defaulttextcolor/60 mt-0.5 mb-0">{hrOwnedHint}</p>
+                  ) : null}
                 </div>
                 <div className="col-span-12 sm:col-span-6">
                   <label className="form-label">EAD</label>
                   <input
                     type="text"
-                    className="form-control w-full !rounded-md"
+                    className={`form-control w-full !rounded-md ${hrOwnedReadOnly ? "!bg-gray-100 dark:!bg-black/20" : ""}`}
                     value={ead}
-                    onChange={(e) => setEad(e.target.value)}
+                    readOnly={hrOwnedReadOnly}
+                    onChange={hrOwnedReadOnly ? undefined : (e) => setEad(e.target.value)}
+                    title={hrOwnedReadOnly ? hrOwnedHint : undefined}
                   />
+                  {hrOwnedReadOnly ? (
+                    <p className="text-[0.7rem] text-defaulttextcolor/60 mt-0.5 mb-0">{hrOwnedHint}</p>
+                  ) : null}
                 </div>
                 <div className="col-span-12 sm:col-span-6">
                   <label className="form-label">Visa type</label>
                   <select
-                    className="form-control w-full !rounded-md"
+                    className={`form-control w-full !rounded-md ${hrOwnedReadOnly ? "!bg-gray-100 dark:!bg-black/20" : ""}`}
                     value={visaType}
-                    onChange={(e) => setVisaType(e.target.value)}
+                    disabled={hrOwnedReadOnly}
+                    onChange={hrOwnedReadOnly ? undefined : (e) => setVisaType(e.target.value)}
+                    title={hrOwnedReadOnly ? hrOwnedHint : undefined}
                   >
                     <option value="">Select Visa Type</option>
                     <option value="F-1">F-1 (Student Visa)</option>
@@ -1704,16 +1530,21 @@ export default function PersonalInformationPage() {
                     <option value="B-2">B-2 (Tourist)</option>
                     <option value="Other">Other</option>
                   </select>
+                  {hrOwnedReadOnly ? (
+                    <p className="text-[0.7rem] text-defaulttextcolor/60 mt-0.5 mb-0">{hrOwnedHint}</p>
+                  ) : null}
                 </div>
                 {visaType === "Other" && (
                   <div className="col-span-12 sm:col-span-6">
                     <label className="form-label">Custom visa type</label>
                     <input
                       type="text"
-                      className="form-control w-full !rounded-md"
+                      className={`form-control w-full !rounded-md ${hrOwnedReadOnly ? "!bg-gray-100 dark:!bg-black/20" : ""}`}
                       placeholder="Enter visa type"
                       value={customVisaType}
-                      onChange={(e) => setCustomVisaType(e.target.value)}
+                      readOnly={hrOwnedReadOnly}
+                      onChange={hrOwnedReadOnly ? undefined : (e) => setCustomVisaType(e.target.value)}
+                      title={hrOwnedReadOnly ? hrOwnedHint : undefined}
                     />
                   </div>
                 )}
@@ -1730,26 +1561,35 @@ export default function PersonalInformationPage() {
                   <label className="form-label">Supervisor name</label>
                   <input
                     type="text"
-                    className="form-control w-full !rounded-md"
+                    className={`form-control w-full !rounded-md ${hrOwnedReadOnly ? "!bg-gray-100 dark:!bg-black/20" : ""}`}
                     value={supervisorName}
-                    onChange={(e) => setSupervisorName(e.target.value)}
+                    readOnly={hrOwnedReadOnly}
+                    onChange={hrOwnedReadOnly ? undefined : (e) => setSupervisorName(e.target.value)}
+                    title={hrOwnedReadOnly ? hrOwnedHint : undefined}
                   />
+                  {hrOwnedReadOnly ? (
+                    <p className="text-[0.7rem] text-defaulttextcolor/60 mt-0.5 mb-0">{hrOwnedHint}</p>
+                  ) : null}
                 </div>
                 <div className="col-span-12 sm:col-span-6">
                   <label className="form-label">Supervisor contact</label>
                   <input
                     type="tel"
-                    className="form-control w-full !rounded-md"
+                    className={`form-control w-full !rounded-md ${hrOwnedReadOnly ? "!bg-gray-100 dark:!bg-black/20" : ""}`}
                     value={supervisorContact}
-                    onChange={(e) => setSupervisorContact(e.target.value)}
+                    readOnly={hrOwnedReadOnly}
+                    onChange={hrOwnedReadOnly ? undefined : (e) => setSupervisorContact(e.target.value)}
+                    title={hrOwnedReadOnly ? hrOwnedHint : undefined}
                   />
                 </div>
                 <div className="col-span-12 sm:col-span-6">
                   <label className="form-label">Salary range</label>
                   <select
-                    className="form-control w-full !rounded-md"
+                    className={`form-control w-full !rounded-md ${hrOwnedReadOnly ? "!bg-gray-100 dark:!bg-black/20" : ""}`}
                     value={salaryRange}
-                    onChange={(e) => setSalaryRange(e.target.value)}
+                    disabled={hrOwnedReadOnly}
+                    onChange={hrOwnedReadOnly ? undefined : (e) => setSalaryRange(e.target.value)}
+                    title={hrOwnedReadOnly ? hrOwnedHint : undefined}
                   >
                     <option value="">Select Salary Range</option>
                     <option value="Under $5,000">Under $5,000</option>
@@ -1770,6 +1610,9 @@ export default function PersonalInformationPage() {
                     <option value="$400,000+">$400,000+</option>
                     <option value="Prefer not to disclose">Prefer not to disclose</option>
                   </select>
+                  {hrOwnedReadOnly ? (
+                    <p className="text-[0.7rem] text-defaulttextcolor/60 mt-0.5 mb-0">{hrOwnedHint}</p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -2020,14 +1863,11 @@ export default function PersonalInformationPage() {
                         }
                       >
                         <option value="">Select</option>
-                        <option value="LinkedIn">LinkedIn</option>
-                        <option value="GitHub">GitHub</option>
-                        <option value="Twitter">Twitter</option>
-                        <option value="Facebook">Facebook</option>
-                        <option value="Instagram">Instagram</option>
-                        <option value="Portfolio">Portfolio</option>
-                        <option value="Website">Website</option>
-                        <option value="Other">Other</option>
+                        {SOCIAL_PLATFORMS.map((platform) => (
+                          <option key={platform} value={platform}>
+                            {platform}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="col-span-12 sm:col-span-7">
@@ -2038,15 +1878,23 @@ export default function PersonalInformationPage() {
                         URL
                       </label>
                       <input
-                        type="url"
-                        className="form-control !rounded-md"
-                        placeholder="https://…"
+                        type="text"
+                        className={`form-control !rounded-md ${
+                          row.url && getSocialLinkUrlError(row.platform, row.url) ? "border-danger" : ""
+                        }`}
+                        placeholder="github.com/username"
                         value={row.url}
                         disabled={!candidate}
+                        inputMode="url"
                         onChange={(e) =>
                           setSocialLinkRows((arr) => arr.map((r, j) => (j === i ? { ...r, url: e.target.value } : r)))
                         }
                       />
+                      {row.url && getSocialLinkUrlError(row.platform, row.url) ? (
+                        <div className="text-danger text-xs mt-1" role="alert">
+                          {getSocialLinkUrlError(row.platform, row.url)}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -2506,212 +2354,8 @@ export default function PersonalInformationPage() {
           </div>
         )}
 
-        <div className="mb-6 overflow-hidden rounded-xl border border-defaultborder bg-gradient-to-br from-gray-50/90 via-white to-primary/5 shadow-sm dark:from-gray-900/40 dark:via-gray-900/20 dark:to-primary/10">
-          <button
-            type="button"
-            aria-expanded={notificationSectionOpen}
-            aria-controls={notificationPanelId}
-            onClick={() => setNotificationSectionOpen((o) => !o)}
-            className={`flex w-full items-start gap-3 bg-white/60 px-4 py-4 text-start transition-colors hover:bg-white/90 dark:bg-gray-900/40 dark:hover:bg-gray-900/55 sm:gap-4 sm:px-5 sm:py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/35 ${
-              notificationSectionOpen ? "border-b border-defaultborder/80" : ""
-            }`}
-          >
-            <span
-              className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary shadow-sm dark:bg-primary/20"
-              aria-hidden
-            >
-              <i className="ri-notification-3-line text-[1.35rem] leading-none" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex flex-wrap items-center gap-2 gap-y-1">
-                <span className="font-semibold text-[1.05rem] text-defaulttextcolor">Notification preferences</span>
-                <span className="inline-flex items-center rounded-md border border-defaultborder bg-white/90 px-2 py-0.5 text-[0.6875rem] font-medium uppercase tracking-wide text-defaulttextcolor/70 dark:bg-gray-800/80">
-                  Email & In-App
-                </span>
-              </span>
-              <span className="mt-1.5 block text-[0.8125rem] leading-snug text-defaulttextcolor/65">
-                <span className="tabular-nums font-medium text-defaulttextcolor/75">
-                  {enabledNotificationEmailCount}/{ALL_NOTIFICATION_PREF_KEYS.length}
-                </span>
-                {" · "}
-                {notificationSectionOpen ? "Hide details" : "Expand to manage notification channels"}
-              </span>
-            </span>
-            <span className="flex shrink-0 flex-col items-center gap-1 pt-1 sm:pt-0.5">
-              <span className="rounded-full border border-defaultborder/80 bg-white/80 px-2.5 py-0.5 text-[0.75rem] font-medium tabular-nums text-defaulttextcolor/80 dark:bg-gray-800/60">
-                {enabledNotificationEmailCount}/{ALL_NOTIFICATION_PREF_KEYS.length}
-              </span>
-              <i
-                className={`ri-arrow-down-s-line text-2xl leading-none text-defaulttextcolor/45 transition-transform duration-300 ease-out ${notificationSectionOpen ? "rotate-180" : ""}`}
-                aria-hidden
-              />
-            </span>
-          </button>
-
-          <div
-            id={notificationPanelId}
-            role="region"
-            aria-label="Notification preferences"
-            // display:none when collapsed — clipping (overflow-hidden + grid-rows-[0fr]) still leaks ~content height
-            // into the document scrollHeight (Chromium grid-collapse quirk), causing scrollable empty space below the page.
-            className={`overflow-hidden ${notificationSectionOpen ? "grid grid-rows-[1fr]" : "hidden"}`}
-          >
-            <div className="min-h-0">
-              <div className="border-b border-defaultborder/70 bg-white/40 px-4 py-4 dark:border-defaultborder/50 dark:bg-gray-900/25 sm:px-5 sm:py-4">
-                <p className="text-[0.875rem] text-defaulttextcolor/75 mb-4 max-w-2xl leading-relaxed">
-                  Choose which <strong className="font-medium text-defaulttextcolor">email</strong> and <strong className="font-medium text-defaulttextcolor">in-app</strong> notifications you receive. Toggle each channel independently per category.
-                </p>
-                <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-4 sm:gap-y-3">
-                  <span className="text-[0.8125rem] text-defaulttextcolor/60 tabular-nums shrink-0">
-                    {enabledNotificationEmailCount}/{ALL_NOTIFICATION_PREF_KEYS.length} enabled
-                  </span>
-                  <div
-                    role="group"
-                    aria-label="Bulk notification actions"
-                    className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end"
-                  >
-                    <button
-                      type="button"
-                      onClick={enableAllNotificationPrefs}
-                      className="ti-btn ti-btn-outline-primary inline-flex !h-auto min-h-[2.5rem] w-full items-center justify-center gap-2 !px-4 !py-2.5 text-[0.875rem] font-medium sm:w-auto sm:min-w-[10.5rem]"
-                    >
-                      <i className="ri-mail-check-line shrink-0 text-[1.125rem] leading-none" aria-hidden />
-                      <span>Enable all</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={disableAllNotificationPrefs}
-                      className="ti-btn ti-btn-light inline-flex !h-auto min-h-[2.5rem] w-full items-center justify-center gap-2 !px-4 !py-2.5 text-[0.875rem] font-medium sm:w-auto sm:min-w-[10.5rem]"
-                    >
-                      <i className="ri-mail-forbid-line shrink-0 text-[1.125rem] leading-none" aria-hidden />
-                      <span>Disable all</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-          <div className="px-3 py-4 sm:px-5 sm:py-5 space-y-4">
-            {NOTIFICATION_PREF_GROUPS.map((group) => {
-              const groupAllKeys = group.items.flatMap((i) => (i.key ? [i.key, i.inAppKey] : [i.inAppKey]));
-              const groupOn = groupAllKeys.every((k) => notificationPrefs[k] !== false);
-              const groupPartial = !groupOn && groupAllKeys.some((k) => notificationPrefs[k] !== false);
-
-              return (
-                <section
-                  key={group.id}
-                  className="rounded-lg border border-defaultborder/90 bg-white/70 dark:bg-gray-800/30 overflow-hidden transition-shadow hover:shadow-sm"
-                  aria-labelledby={`notif-group-${group.id}`}
-                >
-                  <div className="flex flex-col gap-3 border-b border-defaultborder/60 bg-gray-50/80 dark:bg-gray-800/50 px-4 py-3 sm:px-4">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <span
-                        className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary dark:bg-primary/20"
-                        aria-hidden
-                      >
-                        <i className={`${group.icon} text-lg leading-none`} />
-                      </span>
-                      <div className="min-w-0 flex-1 pr-1">
-                        <h3 id={`notif-group-${group.id}`} className="text-[0.9375rem] font-semibold text-defaulttextcolor mb-0 break-words">
-                          {group.title}
-                        </h3>
-                        <p className="text-[0.75rem] text-defaulttextcolor/65 mb-0 mt-0.5 break-words">{group.summary}</p>
-                      </div>
-                    </div>
-                    <div className="flex w-full min-w-0 flex-col gap-2.5 ps-0 sm:ps-12 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
-                      {groupPartial ? (
-                        <span className="inline-flex w-fit max-w-full items-center rounded border border-amber-200/80 bg-amber-50/90 px-2 py-1 text-[0.6875rem] font-medium uppercase tracking-wide text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-                          Partial
-                        </span>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => setNotificationGroupPrefs(groupAllKeys, !groupOn)}
-                        className={`ti-btn ti-btn-outline-primary inline-flex !h-auto min-h-[2.5rem] w-full max-w-full items-center justify-center gap-2 !px-4 !py-2.5 text-[0.875rem] font-medium lg:w-auto lg:shrink-0 lg:min-w-[12rem] ${!groupPartial ? "lg:ms-auto" : ""}`}
-                      >
-                        <span className="lg:hidden">{groupOn ? "Disable section" : "Enable section"}</span>
-                        <span className="hidden lg:inline">{groupOn ? "Turn off entire section" : "Turn on entire section"}</span>
-                      </button>
-                    </div>
-                  </div>
-                  <ul className="list-none m-0 p-0 divide-y divide-defaultborder/50">
-                    {group.items.map(({ key, inAppKey, label, description }) => {
-                      const emailOn = key ? notificationPrefs[key] !== false : false;
-                      const inAppOn = notificationPrefs[inAppKey] !== false;
-                      return (
-                        <li key={inAppKey}>
-                          <div className="flex flex-col gap-2.5 px-4 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-4 sm:py-3.5 transition-colors hover:bg-gray-50/90 dark:hover:bg-white/5">
-                            <span className="min-w-0 flex-1 pr-0 sm:pr-2">
-                              <span className="block text-[0.9375rem] font-medium text-defaulttextcolor break-words">{label}</span>
-                              {description ? (
-                                <span className="mt-0.5 block text-[0.8125rem] leading-snug text-defaulttextcolor/60 break-words">{description}</span>
-                              ) : null}
-                            </span>
-                            <div className="flex shrink-0 items-center gap-5">
-                              {key && (
-                                <label className="flex cursor-pointer flex-col items-center gap-1 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary/40 rounded">
-                                  <span className="text-[0.6875rem] font-medium uppercase tracking-wide text-defaulttextcolor/55">Email</span>
-                                  <input
-                                    type="checkbox"
-                                    className="sr-only"
-                                    checked={emailOn}
-                                    onChange={(e) => setNotificationPrefs((p) => ({ ...p, [key]: e.target.checked }))}
-                                  />
-                                  <span
-                                    className={`relative inline-flex h-7 w-[2.75rem] cursor-pointer items-center rounded-full p-0.5 transition-colors duration-200 ${
-                                      emailOn ? "bg-primary" : "bg-gray-200 dark:bg-gray-600"
-                                    }`}
-                                    aria-hidden
-                                  >
-                                    <span
-                                      className={`block h-6 w-6 rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform duration-200 ease-out dark:ring-white/10 ${
-                                        emailOn ? "translate-x-[1.15rem]" : "translate-x-0"
-                                      }`}
-                                    />
-                                  </span>
-                                </label>
-                              )}
-                              <label className="flex cursor-pointer flex-col items-center gap-1 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary/40 rounded">
-                                <span className="text-[0.6875rem] font-medium uppercase tracking-wide text-defaulttextcolor/55">In-App</span>
-                                <input
-                                  type="checkbox"
-                                  className="sr-only"
-                                  checked={inAppOn}
-                                  onChange={(e) => setNotificationPrefs((p) => ({ ...p, [inAppKey]: e.target.checked }))}
-                                />
-                                <span
-                                  className={`relative inline-flex h-7 w-[2.75rem] cursor-pointer items-center rounded-full p-0.5 transition-colors duration-200 ${
-                                    inAppOn ? "bg-primary" : "bg-gray-200 dark:bg-gray-600"
-                                  }`}
-                                  aria-hidden
-                                >
-                                  <span
-                                    className={`block h-6 w-6 rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform duration-200 ease-out dark:ring-white/10 ${
-                                      inAppOn ? "translate-x-[1.15rem]" : "translate-x-0"
-                                    }`}
-                                  />
-                                </span>
-                              </label>
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </section>
-              );
-            })}
-          </div>
-
-          <div className="border-t border-defaultborder/80 bg-gray-50/50 px-4 py-3 dark:bg-gray-900/30 sm:px-5">
-            <p className="text-[0.8125rem] text-defaulttextcolor/65 mb-0 flex flex-wrap items-center gap-2">
-              <i className="ri-information-line text-base text-primary/80 shrink-0" aria-hidden />
-              <span>
-                Preferences are stored with your profile. Use <strong className="font-medium text-defaulttextcolor/80">Save</strong> below to apply changes.
-              </span>
-            </p>
-          </div>
-            </div>
-          </div>
+        <div className="mb-6">
+          <NotificationPreferencesEditor value={notificationPrefs} onChange={setNotificationPrefs} />
         </div>
 
         {/* ── Actions + security ── */}
@@ -2719,9 +2363,7 @@ export default function PersonalInformationPage() {
           <div className="box-body !p-0">
             <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-dashed dark:border-defaultborder/10">
               <div className="flex items-center gap-2">
-                <button type="button" onClick={openChangePasswordModal} className="ti-btn ti-btn-sm ti-btn-light !w-auto !h-auto whitespace-nowrap inline-flex items-center">
-                  <i className="ri-lock-password-line me-1 align-middle inline-block" />Change password
-                </button>
+                <ChangePasswordButton />
                 <button type="button" onClick={() => logout()} className="ti-btn ti-btn-sm ti-btn-soft-danger !w-auto !h-auto whitespace-nowrap inline-flex items-center">
                   <i className="ri-logout-circle-line me-1 align-middle inline-block" />Logout
                 </button>
@@ -2748,133 +2390,6 @@ export default function PersonalInformationPage() {
           </div>
         </div>
       </div>
-
-      {/* Change password modal */}
-      {changePasswordOpen && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="change-password-title"
-          onClick={() => !changePasswordLoading && setChangePasswordOpen(false)}
-        >
-          <div
-            className="ti-modal-box w-full max-w-md bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-defaultborder"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="ti-modal-header flex items-center justify-between px-4 py-3 border-b border-defaultborder">
-              <h6 id="change-password-title" className="modal-title text-[1rem] font-semibold mb-0">
-                Change password
-              </h6>
-              <button
-                type="button"
-                onClick={() => !changePasswordLoading && setChangePasswordOpen(false)}
-                className="!text-[1.25rem] !font-semibold text-defaulttextcolor hover:text-default"
-                aria-label="Close"
-                disabled={changePasswordLoading}
-              >
-                <i className="ri-close-line" />
-              </button>
-            </div>
-            <form onSubmit={handleChangePasswordSubmit} className="ti-modal-body px-4 py-4">
-              {changePasswordError && (
-                <div className="mb-4 p-3 bg-danger/10 border border-danger/30 text-danger rounded-md text-sm">
-                  {changePasswordError}
-                </div>
-              )}
-              {changePasswordSuccess && (
-                <div className="mb-4 p-3 bg-success/10 border border-success/30 text-success rounded-md text-sm">
-                  {changePasswordSuccess}
-                </div>
-              )}
-              <div className="mb-4">
-                <label htmlFor="change-current-password" className="form-label !text-[0.8125rem]">Current password</label>
-                <div className="input-group">
-                  <input
-                    type={showCurrentPassword ? "text" : "password"}
-                    id="change-current-password"
-                    className="form-control !rounded-e-none"
-                    placeholder="Current password"
-                    value={currentPassword}
-                    onChange={(e) => { setCurrentPassword(e.target.value); setChangePasswordError(""); }}
-                    autoComplete="current-password"
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="ti-btn ti-btn-light !rounded-s-none"
-                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                    aria-label={showCurrentPassword ? "Hide" : "Show"}
-                  >
-                    <i className={showCurrentPassword ? "ri-eye-off-line" : "ri-eye-line"} />
-                  </button>
-                </div>
-              </div>
-              <div className="mb-4">
-                <label htmlFor="change-new-password" className="form-label !text-[0.8125rem]">New password</label>
-                <div className="input-group">
-                  <input
-                    type={showNewPassword ? "text" : "password"}
-                    id="change-new-password"
-                    className="form-control !rounded-e-none"
-                    placeholder="New password"
-                    value={newPassword}
-                    onChange={(e) => { setNewPassword(e.target.value); setChangePasswordError(""); }}
-                    autoComplete="new-password"
-                    required
-                    minLength={PASSWORD_MIN_LENGTH}
-                  />
-                  <button
-                    type="button"
-                    className="ti-btn ti-btn-light !rounded-s-none"
-                    onClick={() => setShowNewPassword(!showNewPassword)}
-                    aria-label={showNewPassword ? "Hide" : "Show"}
-                  >
-                    <i className={showNewPassword ? "ri-eye-off-line" : "ri-eye-line"} />
-                  </button>
-                </div>
-                <p className="text-[0.75rem] text-defaulttextcolor/70 mt-1 mb-0">Min 8 characters, at least one letter and one number.</p>
-              </div>
-              <div className="mb-4">
-                <label htmlFor="change-confirm-password" className="form-label !text-[0.8125rem]">Confirm new password</label>
-                <div className="input-group">
-                  <input
-                    type={showConfirmPassword ? "text" : "password"}
-                    id="change-confirm-password"
-                    className="form-control !rounded-e-none"
-                    placeholder="Confirm new password"
-                    value={confirmPassword}
-                    onChange={(e) => { setConfirmPassword(e.target.value); setChangePasswordError(""); }}
-                    autoComplete="new-password"
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="ti-btn ti-btn-light !rounded-s-none"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    aria-label={showConfirmPassword ? "Hide" : "Show"}
-                  >
-                    <i className={showConfirmPassword ? "ri-eye-off-line" : "ri-eye-line"} />
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => !changePasswordLoading && setChangePasswordOpen(false)}
-                  className="ti-btn ti-btn-light"
-                  disabled={changePasswordLoading}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="ti-btn ti-btn-primary" disabled={changePasswordLoading}>
-                  {changePasswordLoading ? "Updating…" : "Update password"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {extractReview && (
         <div

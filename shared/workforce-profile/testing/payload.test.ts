@@ -95,7 +95,37 @@ describe("payload.toSelfServicePayload (PATCH)", () => {
     }) as Record<string, unknown>;
     expect(payload.shortBio).toBeNull();
     expect(payload.degree).toBeNull();
-    expect(payload.sevisId).toBeNull();
+    expect(payload).not.toHaveProperty("sevisId");
+    expect(payload).not.toHaveProperty("visaType");
+    expect(payload).not.toHaveProperty("supervisorName");
+    expect(payload).not.toHaveProperty("salaryRange");
+  });
+
+  it("omits HR-owned immigration and compensation fields from self-service payload", () => {
+    const state = makeFormState({
+      personalInfo: {
+        ...makeFormState().personalInfo,
+        sevisId: "N123",
+        ead: "EAD-1",
+        visaType: "H-1B",
+        customVisaType: "",
+        supervisorName: "Jane Doe",
+        supervisorContact: "5551234567",
+        supervisorCountryCode: "US",
+        salaryRange: "$50,000 - $70,000",
+      },
+    });
+    const payload = toSelfServicePayload(normalize(state), {
+      "personal-info": true,
+    }) as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("sevisId");
+    expect(payload).not.toHaveProperty("ead");
+    expect(payload).not.toHaveProperty("visaType");
+    expect(payload).not.toHaveProperty("customVisaType");
+    expect(payload).not.toHaveProperty("supervisorName");
+    expect(payload).not.toHaveProperty("supervisorContact");
+    expect(payload).not.toHaveProperty("supervisorCountryCode");
+    expect(payload).not.toHaveProperty("salaryRange");
   });
 });
 

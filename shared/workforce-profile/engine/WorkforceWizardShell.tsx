@@ -4,6 +4,7 @@ import React, { useEffect, useRef } from "react";
 import { useWizardContext } from "./WizardContext";
 import { WizardStepTabs } from "./WizardStepTabs";
 import { WizardFooter } from "./WizardFooter";
+import { WizardFeedbackOverlay } from "../components/WizardFeedbackOverlay";
 import type { StepId } from "../types/wizard.types";
 import styles from "./workforce-wizard.module.css";
 
@@ -35,6 +36,8 @@ export function WorkforceWizardShell({
     issuesBySection,
     isDirty,
     submit,
+    goNext,
+    validationOverlay,
   } = useWizardContext();
 
   const stepRegionRef = useRef<HTMLDivElement>(null);
@@ -68,7 +71,7 @@ export function WorkforceWizardShell({
   const isFirst = currentIndex === 0;
   const isLast = currentIndex === steps.length - 1;
 
-  const handleNext = () => setStepByIndex(currentIndex + 1);
+  const handleNext = () => goNext();
   const handleBack = () => setStepByIndex(currentIndex - 1);
 
   const body = stepRender[currentStep] ?? (
@@ -126,6 +129,14 @@ export function WorkforceWizardShell({
         sticky={stickyFooter}
         alwaysShowSubmit={alwaysShowSubmit}
         isDirty={isDirty}
+      />
+      <WizardFeedbackOverlay
+        status={validationOverlay.status}
+        title={validationOverlay.title}
+        description={validationOverlay.description}
+        testId="wizard-validation-overlay"
+        titleId="wizard-validation-title"
+        descId="wizard-validation-desc"
       />
     </div>
   );

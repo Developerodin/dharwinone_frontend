@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef } from "react";
+import { useRef, useState } from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
 import wizardUi from "../engine/workforce-wizard.module.css";
@@ -142,6 +142,7 @@ export function SalaryStep() {
   const removeSalarySlip = useWorkforceStore((s) => s.removeSalarySlip);
   const updateSalarySlip = useWorkforceStore((s) => s.updateSalarySlip);
   const { issuesByField } = useWizardContext();
+  const [existingOpen, setExistingOpen] = useState(false);
 
   const fieldErr = issuesByField["salarySlips"]?.[0]?.message ?? null;
 
@@ -223,8 +224,22 @@ export function SalaryStep() {
 
       {existing.length > 0 && (
         <div className={styles.existingSection}>
-          <h6 className={styles.subsectionTitle}>Existing Salary Slips</h6>
-          {existing.map((slip) => (
+          <button
+            type="button"
+            onClick={() => setExistingOpen((v) => !v)}
+            className={styles.subsectionToggle}
+            aria-expanded={existingOpen}
+          >
+            <i
+              className={`ri-arrow-right-s-line ${styles.subsectionToggleIcon} ${
+                existingOpen ? styles.subsectionToggleIconOpen : ""
+              }`}
+              aria-hidden="true"
+            />
+            <h6 className={styles.subsectionTitle}>Existing Salary Slips</h6>
+          </button>
+          {existingOpen &&
+          existing.map((slip) => (
             <div
               key={slip.id}
               className={`${styles.card} ${styles.cardExisting}`}

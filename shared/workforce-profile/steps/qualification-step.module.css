@@ -175,6 +175,28 @@
   margin-top: 1.75rem;
 }
 
+.skillsToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+.skillsToggleIcon {
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #8c9097;
+  transition: transform 160ms ease;
+}
+
+.skillsToggleIconOpen {
+  transform: rotate(90deg);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .input,
   .select,

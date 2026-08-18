@@ -3,6 +3,7 @@
 import React, { createContext, useContext } from "react";
 import type { Mode, Role, StepId, StepConfig } from "../types/wizard.types";
 import type { ValidationIssue } from "../types/validation.types";
+import type { WizardFeedbackOverlayState } from "../hooks/useWizardFeedbackOverlay";
 
 export type WizardContextValue = {
   mode: Mode;
@@ -30,7 +31,11 @@ export type WizardContextValue = {
   /** True once Save was pressed — fields stop hiding their errors after that. */
   submitAttempted: boolean;
 
+  /** Centered overlay for blocking validation feedback (replaces top banner). */
+  validationOverlay: WizardFeedbackOverlayState;
+
   submit: () => Promise<void>;
+  goNext: () => void;
 };
 
 const WizardContext = createContext<WizardContextValue | null>(null);
