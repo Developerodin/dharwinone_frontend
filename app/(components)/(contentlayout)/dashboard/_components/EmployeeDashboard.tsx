@@ -12,14 +12,16 @@ import {
   punchOutAttendance, punchOutAttendanceMe,
   getAttendanceStatistics, getAttendanceStatisticsMe,
   listAttendance, listAttendanceMe,
+  getMyUpcomingHolidays, getEmployeesOnLeaveToday,
   type AttendanceIdentity, type PunchStatusResponse, type AttendanceStatistics, type AttendanceRecord,
+  type AssignedHolidayItem, type OnLeaveTodayItem,
 } from "@/shared/lib/api/attendance";
+import { listJobs, type Job } from "@/shared/lib/api/jobs";
 import { getAllLeaveRequests, type LeaveRequest } from "@/shared/lib/api/leave-requests";
 import { listStudentCourses, type StudentCourseListItem } from "@/shared/lib/api/student-courses";
 import { listTasks, updateTaskStatus, type Task, type TaskStatus } from "@/shared/lib/api/tasks";
 import { listInternalMeetings, type InternalMeeting } from "@/shared/lib/api/internal-meetings";
 import { listProjects, type Project } from "@/shared/lib/api/projects";
-import DashboardCard from "./employee/DashboardCard";
 import TodayCard from "./employee/TodayCard";
 import LeaveCard from "./employee/LeaveCard";
 import ProfileGapsCard from "./employee/ProfileGapsCard";
@@ -29,6 +31,9 @@ import DueTodayCard from "./employee/DueTodayCard";
 import MyTasksCard from "./employee/MyTasksCard";
 import MeetingsCard from "./employee/MeetingsCard";
 import MyProjectsCard from "./employee/MyProjectsCard";
+import TeamPulseCard from "./employee/TeamPulseCard";
+import OpenRolesCard from "./employee/OpenRolesCard";
+import UpcomingHolidaysCard from "./UpcomingHolidaysCard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -72,6 +77,15 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
+
+  const [holidays, setHolidays] = useState<AssignedHolidayItem[]>([]);
+  const [holidayMeta, setHolidayMeta] = useState<{ todayIsHoliday: boolean; todayHolidayTitle?: string | null }>({ todayIsHoliday: false });
+  const [holidaysLoading, setHolidaysLoading] = useState(true);
+
+  const [onLeave, setOnLeave] = useState<OnLeaveTodayItem[]>([]);
+  const [onLeaveLoading, setOnLeaveLoading] = useState(true);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
 
   /** Leave requests are scoped by Student id, so agents on user-based attendance have none. */
   const studentId = identity && identity.type !== "user" ? identity.id : null;
@@ -133,6 +147,32 @@ export default function EmployeeDashboard(): JSX.Element {
       .then((res) => { if (!cancelled) setProfile(res?.candidate ?? null); })
       .catch(() => { if (!cancelled) setProfile(null); })
       .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyUpcomingHolidays({ limit: 4 })
+      .then((d) => {
+        if (cancelled) return;
+        setHolidays(d.upcoming ?? []);
+        setHolidayMeta({ todayIsHoliday: d.todayIsHoliday, todayHolidayTitle: d.todayHolidayTitle });
+      })
+      .catch(() => { if (!cancelled) setHolidays([]); })
+      .finally(() => { if (!cancelled) setHolidaysLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getEmployeesOnLeaveToday()
+      .then((r) => { if (!cancelled) setOnLeave(r.results ?? []); })
+      .catch(() => { if (!cancelled) setOnLeave([]); })
+      .finally(() => { if (!cancelled) setOnLeaveLoading(false); });
+    listJobs({ limit: 5 })
+      .then((r) => { if (!cancelled) setJobs(r.results ?? []); })
+      .catch(() => { if (!cancelled) setJobs([]); })
+      .finally(() => { if (!cancelled) setJobsLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -269,11 +309,18 @@ export default function EmployeeDashboard(): JSX.Element {
             <MyTasksCard tasks={tasks} loading={tasksLoading} />
           </div>
 
-          <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
-            <DashboardCard title="Upcoming Holidays"><p>TODO Task 10</p></DashboardCard>
+          {/* [&>.box]:mb-0 cancels the legacy .box mb-6 on the reused holidays card. */}
+          <div className="flex min-w-0 flex-col gap-[18px] [&>.box]:mb-0 [&>section:last-child]:flex-1">
+            <UpcomingHolidaysCard
+              loading={holidaysLoading}
+              holidays={holidays}
+              todayIsHoliday={holidayMeta.todayIsHoliday}
+              todayHolidayTitle={holidayMeta.todayHolidayTitle}
+              showManage={false}
+            />
             {coursesLoading || courses.length > 0 ? <TrainingCard courses={courses} loading={coursesLoading} /> : null}
-            <DashboardCard title="Your team"><p>TODO Task 10</p></DashboardCard>
-            <DashboardCard title="Open roles"><p>TODO Task 10</p></DashboardCard>
+            <TeamPulseCard onLeave={onLeave} loading={onLeaveLoading} />
+            <OpenRolesCard jobs={jobs} loading={jobsLoading} />
           </div>
         </div>
 
