@@ -2,45 +2,126 @@
 
 import Seo from "@/shared/layout-components/seo/seo";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import React, { Fragment, useState, useEffect } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import React, { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { getPublicJobs, isExternalJob, type PublicJob } from "@/shared/lib/api/jobs";
 import { formatSalaryRange, mapExperienceLevel } from "@/shared/lib/ats/jobMappers";
+import {
+  areBrowseJobsListQueryStringsEquivalent,
+  buildBrowseJobsListQueryString,
+  parseBrowseJobsListState,
+  rememberBrowseJobsListQueryString,
+} from "@/shared/lib/ats/browseJobsListQuery";
 
 const JOB_TYPES = ["Full-time", "Part-time", "Contract", "Temporary", "Internship", "Freelance"];
 const EXPERIENCE_LEVELS = ["Entry Level", "Mid Level", "Senior Level", "Executive"];
+const PAGE_SIZE = 12;
 
 export default function BrowseJobsPage() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const initial = parseBrowseJobsListState(searchParams);
+
   const [jobs, setJobs] = useState<PublicJob[]>([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initial.page);
   const [totalPages, setTotalPages] = useState(1);
   const [totalResults, setTotalResults] = useState(0);
-  const [search, setSearch] = useState("");
-  const [jobType, setJobType] = useState<string>("");
-  const [location, setLocation] = useState("");
-  const [experienceLevel, setExperienceLevel] = useState<string>("");
-  const [sortBy, setSortBy] = useState("createdAt:desc");
-  const [jobOrigin, setJobOrigin] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState(initial.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(initial.search);
+  const [jobType, setJobType] = useState(initial.jobType);
+  const [location, setLocation] = useState(initial.location);
+  const [experienceLevel, setExperienceLevel] = useState(initial.experienceLevel);
+  const [sortBy, setSortBy] = useState(initial.sortBy);
+  const [jobOrigin, setJobOrigin] = useState(initial.jobOrigin);
+
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevDebouncedSearchRef = useRef(initial.search);
+
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      const trimmedPrev = prevDebouncedSearchRef.current.trim();
+      const trimmedNext = searchQuery.trim();
+      if (trimmedPrev !== trimmedNext) {
+        setPage(1);
+      }
+      prevDebouncedSearchRef.current = searchQuery;
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchQuery]);
+
+  const syncUrl = useCallback(() => {
+    const qs = buildBrowseJobsListQueryString({
+      page,
+      search: debouncedSearch,
+      jobType,
+      location,
+      experienceLevel,
+      sortBy,
+      jobOrigin,
+    });
+    const nextSearch = qs ? qs.slice(1) : "";
+    const currentSearch = searchParams.toString();
+    if (areBrowseJobsListQueryStringsEquivalent(nextSearch, currentSearch)) return;
+    router.replace(qs ? `${pathname}${qs}` : pathname, { scroll: false });
+    rememberBrowseJobsListQueryString(nextSearch);
+  }, [
+    page,
+    debouncedSearch,
+    jobType,
+    location,
+    experienceLevel,
+    sortBy,
+    jobOrigin,
+    pathname,
+    router,
+    searchParams,
+  ]);
+
+  useEffect(() => {
+    syncUrl();
+  }, [syncUrl]);
+
+  useEffect(() => {
+    const fromUrl = parseBrowseJobsListState(searchParams);
+    setPage((prev) => (prev === fromUrl.page ? prev : fromUrl.page));
+    setSearchQuery((prev) => (prev === fromUrl.search ? prev : fromUrl.search));
+    setDebouncedSearch((prev) => {
+      if (prev === fromUrl.search) return prev;
+      prevDebouncedSearchRef.current = fromUrl.search;
+      return fromUrl.search;
+    });
+    setJobType((prev) => (prev === fromUrl.jobType ? prev : fromUrl.jobType));
+    setLocation((prev) => (prev === fromUrl.location ? prev : fromUrl.location));
+    setExperienceLevel((prev) => (prev === fromUrl.experienceLevel ? prev : fromUrl.experienceLevel));
+    setSortBy((prev) => (prev === fromUrl.sortBy ? prev : fromUrl.sortBy));
+    setJobOrigin((prev) => (prev === fromUrl.jobOrigin ? prev : fromUrl.jobOrigin));
+  }, [searchParams]);
 
   useEffect(() => {
     setLoading(true);
     getPublicJobs({
-      limit: 12,
+      limit: PAGE_SIZE,
       page,
-      search: search || undefined,
+      search: debouncedSearch.trim() || undefined,
       jobType: jobType || undefined,
-      location: location || undefined,
+      location: location.trim() || undefined,
       experienceLevel: experienceLevel || undefined,
       sortBy,
       jobOrigin:
         jobOrigin === "internal" || jobOrigin === "external" ? (jobOrigin as "internal" | "external") : undefined,
     })
       .then((res) => {
+        const results = res.totalResults ?? 0;
+        const limit = res.limit ?? PAGE_SIZE;
         setJobs(res.results ?? []);
-        setTotalPages(res.totalPages ?? 1);
-        setTotalResults(res.totalResults ?? 0);
+        setTotalResults(results);
+        setTotalPages(res.totalPages ?? Math.max(1, Math.ceil(results / limit)));
       })
       .catch(() => {
         setJobs([]);
@@ -48,7 +129,7 @@ export default function BrowseJobsPage() {
         setTotalResults(0);
       })
       .finally(() => setLoading(false));
-  }, [page, search, jobType, location, experienceLevel, sortBy, jobOrigin]);
+  }, [page, debouncedSearch, jobType, location, experienceLevel, sortBy, jobOrigin]);
 
   return (
     <Fragment>
@@ -63,11 +144,8 @@ export default function BrowseJobsPage() {
                   type="text"
                   className="form-control"
                   placeholder="Title, company, location..."
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setPage(1);
-                  }}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
               <div className="lg:col-span-2 col-span-12">
@@ -157,7 +235,7 @@ export default function BrowseJobsPage() {
         <div className="mb-4 text-defaulttextcolor dark:text-white/70">
           {totalResults === 0
             ? "No jobs"
-            : `Showing ${(page - 1) * 12 + 1}-${Math.min(page * 12, totalResults)} of ${totalResults} job${totalResults !== 1 ? "s" : ""}`}
+            : `Showing ${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, totalResults)} of ${totalResults} job${totalResults !== 1 ? "s" : ""}`}
         </div>
 
         {loading ? (
@@ -173,7 +251,7 @@ export default function BrowseJobsPage() {
         ) : (
           <div className="space-y-0 overflow-hidden rounded-lg border border-defaultborder dark:border-defaultborder/10 bg-white dark:bg-bodybg shadow-sm">
             {jobs.map((job, index) => {
-              const id = job._id ?? job.id ?? "";
+              const id = job.id ?? "";
               const companyInitial = (job.organisation?.name || "J").charAt(0).toUpperCase();
               const metaParts = [
                 job.location && (
@@ -265,27 +343,42 @@ export default function BrowseJobsPage() {
           </div>
         )}
 
-        {totalPages > 1 && (
-          <div className="flex justify-center gap-2 mt-6">
-            <button
-              type="button"
-              className="ti-btn ti-btn-light"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Previous
-            </button>
-            <span className="flex items-center px-4 text-defaulttextcolor">
-              Page {page} of {totalPages}
-            </span>
-            <button
-              type="button"
-              className="ti-btn ti-btn-light"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next
-            </button>
+        {!loading && totalResults > 0 && (
+          <div className="mt-6 w-full border-t border-defaultborder dark:border-defaultborder/10 pt-4 pb-5 sm:pb-6">
+            <nav aria-label="Pagination" className="pagination-style-4 w-full">
+              <ul className="ti-pagination mb-0 flex flex-wrap items-center justify-center gap-1 sm:gap-2 max-w-full">
+                <li className={`page-item ${page <= 1 ? "disabled" : ""}`}>
+                  <button
+                    type="button"
+                    className="page-link min-h-[2.75rem] sm:min-h-0 flex items-center justify-center px-4"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    aria-label={page > 1 ? `Previous page, page ${page - 1} of ${totalPages}` : "Previous page"}
+                  >
+                    Previous
+                  </button>
+                </li>
+                <li className="page-item shrink-0">
+                  <span
+                    className="page-link !text-defaulttextcolor dark:!text-white !bg-transparent whitespace-nowrap"
+                    aria-current="page"
+                  >
+                    Page {page} of {totalPages}
+                  </span>
+                </li>
+                <li className={`page-item ${page >= totalPages ? "disabled" : ""}`}>
+                  <button
+                    type="button"
+                    className="page-link !text-primary min-h-[2.75rem] sm:min-h-0 flex items-center justify-center px-4"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                    aria-label={page < totalPages ? `Next page, page ${page + 1} of ${totalPages}` : "Next page"}
+                  >
+                    Next
+                  </button>
+                </li>
+              </ul>
+            </nav>
           </div>
         )}
       </div>

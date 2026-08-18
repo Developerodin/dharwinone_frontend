@@ -4,6 +4,7 @@ import Seo from "@/shared/layout-components/seo/seo";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import React, { Fragment, useState, useEffect } from "react";
+import { readBrowseJobsListBackHref } from "@/shared/lib/ats/browseJobsListQuery";
 import { getPublicJobById, browseApplyToJob, isExternalJob, type PublicJob } from "@/shared/lib/api/jobs";
 import { getMyApplications, withdrawMyApplication, type JobApplication } from "@/shared/lib/api/jobApplications";
 import { useAuth } from "@/shared/contexts/auth-context";
@@ -54,6 +55,11 @@ export default function BrowseJobDetailsPage() {
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [listBackHref, setListBackHref] = useState("/ats/browse-jobs");
+
+  useEffect(() => {
+    setListBackHref(readBrowseJobsListBackHref());
+  }, []);
 
   useEffect(() => {
     const onScroll = () => setShowScrollTop(typeof window !== "undefined" && window.scrollY > 380);
@@ -187,7 +193,7 @@ export default function BrowseJobDetailsPage() {
                 It may have been filled, closed, or the link is out of date.
               </p>
               <Link
-                href="/ats/browse-jobs"
+                href={listBackHref}
                 className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl bg-stone-900 px-6 py-3 text-sm font-bold uppercase tracking-wide text-white transition hover:bg-stone-800 dark:bg-teal-600 dark:hover:bg-teal-500"
               >
                 <i className="ri-arrow-left-line text-lg" aria-hidden />
@@ -265,7 +271,7 @@ export default function BrowseJobDetailsPage() {
         </div>
       ) : null}
       <Link
-        href="/ats/browse-jobs"
+        href={listBackHref}
         className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-stone-300/90 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:bg-stone-50 dark:border-white/15 dark:bg-transparent dark:text-stone-200 dark:hover:bg-white/[0.06]"
       >
         <i className="ri-arrow-left-line text-lg" aria-hidden />
@@ -289,7 +295,7 @@ export default function BrowseJobDetailsPage() {
         <div className="relative w-full max-w-none px-4 pb-16 pt-6 sm:px-5 sm:pt-8 lg:px-6">
           <nav className="mb-6" aria-label="Breadcrumb">
             <Link
-              href="/ats/browse-jobs"
+              href={listBackHref}
               className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 transition hover:text-stone-900 dark:text-stone-400 dark:hover:text-white"
             >
               <i className="ri-arrow-left-s-line text-lg opacity-70" aria-hidden />

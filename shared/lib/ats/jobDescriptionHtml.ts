@@ -287,6 +287,15 @@ function isBulletLine(trimmed: string): boolean {
   return /^([•*-]|\d+[\.)])\s+/.test(trimmed);
 }
 
+/** Bullet text with its marker already stripped — the inside of an `<li>`. */
+function formatPlainTextBulletBody(rest: string): string {
+  const colon = rest.match(/^([^:\n]{2,75}):\s+(.{6,})$/);
+  if (colon && !colon[1].includes(".") && !LEADING_COLON_TITLE_BAD.test(colon[1].trim())) {
+    return `<strong>${escapeHtmlText(colon[1].trim())}:</strong> ${emphasizeKeywordsInPlainTextSegment(colon[2])}`;
+  }
+  return emphasizeKeywordsInPlainTextSegment(rest);
+}
+
 /**
  * Bold likely section labels in plain-text job posts (imports / external APIs).
  * Does not run on HTML descriptions from the rich-text editor.
@@ -302,17 +311,7 @@ function formatPlainTextLineWithSectionEmphasis(rawLine: string): string {
     const m = trimmed.match(/^((?:[•*-]|\d+[\.)])\s+)(.+)$/);
     if (m) {
       const [, bulletPrefix, rest] = m;
-      const colon = rest.match(/^([^:\n]{2,75}):\s+(.{6,})$/);
-      if (
-        colon &&
-        !colon[1].includes(".") &&
-        !LEADING_COLON_TITLE_BAD.test(colon[1].trim())
-      ) {
-        const title = colon[1].trim();
-        const body = colon[2];
-        return `${escapeHtmlText(leadWs)}${escapeHtmlText(bulletPrefix)}<strong>${escapeHtmlText(title)}:</strong> ${emphasizeKeywordsInPlainTextSegment(body)}`;
-      }
-      return `${escapeHtmlText(leadWs)}${escapeHtmlText(bulletPrefix)}${emphasizeKeywordsInPlainTextSegment(rest)}`;
+      return `${escapeHtmlText(leadWs)}${escapeHtmlText(bulletPrefix)}${formatPlainTextBulletBody(rest)}`;
     }
     return escapeHtmlText(line);
   }
@@ -369,6 +368,49 @@ function formatPlainTextLineWithSectionEmphasis(rawLine: string): string {
 }
 
 /**
+ * One blank-line-separated block of plain text → paragraphs, with runs of bullet
+ * lines promoted to real `<ul>` / `<ol>` (feeds ship " * item" / "1. item" markers).
+ */
+function renderPlainTextBlock(block: string): string {
+  const out: string[] = [];
+  let paragraph: string[] = [];
+  let list: { tag: "ul" | "ol"; items: string[] } | null = null;
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    out.push(`<p>${paragraph.join("<br />")}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (!list) return;
+    out.push(`<${list.tag}>${list.items.map((i) => `<li>${i}</li>`).join("")}</${list.tag}>`);
+    list = null;
+  };
+
+  for (const line of block.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+
+    const bullet = trimmed.match(/^((?:[•*-]|\d+[\.)]))\s+(.+)$/);
+    if (bullet) {
+      const tag = /^\d/.test(bullet[1]) ? "ol" : "ul";
+      flushParagraph();
+      if (list && list.tag !== tag) flushList();
+      if (!list) list = { tag, items: [] };
+      list.items.push(formatPlainTextBulletBody(bullet[2]));
+      continue;
+    }
+
+    flushList();
+    paragraph.push(formatPlainTextLineWithSectionEmphasis(line));
+  }
+
+  flushList();
+  flushParagraph();
+  return out.join("");
+}
+
+/**
  * HTML suitable for dangerouslySetInnerHTML inside a `prose` container.
  */
 export function formatJobDescriptionForDisplay(raw: string): string {
@@ -381,14 +423,7 @@ export function formatJobDescriptionForDisplay(raw: string): string {
     return sanitizeRichHtml(normalized);
   }
 
-  const blocks = normalized.split(/\n{2,}/);
-  const built = blocks
-    .map((block) => {
-      const lines = block.split("\n");
-      const inner = lines.map((ln) => formatPlainTextLineWithSectionEmphasis(ln)).join("<br />");
-      return `<p>${inner}</p>`;
-    })
-    .join("");
+  const built = normalized.split(/\n{2,}/).map(renderPlainTextBlock).join("");
   return sanitizeRichHtml(built);
 }
 
