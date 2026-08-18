@@ -16,10 +16,18 @@ interface PhoneCountrySelectProps {
   name?: string;
   className?: string;
   id?: string;
+  disabled?: boolean;
 }
 
 /** Searchable country dial code selector - type to jump (e.g. "i" → India, Indonesia) */
-export function PhoneCountrySelect({ value, onChange, name, className = "", id }: PhoneCountrySelectProps) {
+export function PhoneCountrySelect({
+  value,
+  onChange,
+  name,
+  className = "",
+  id,
+  disabled = false,
+}: PhoneCountrySelectProps) {
   const selected =
     OPTIONS.find((o) => o.value === value) ?? OPTIONS.find((o) => o.value === DEFAULT_PHONE_COUNTRY) ?? OPTIONS[0];
 
@@ -29,14 +37,19 @@ export function PhoneCountrySelect({ value, onChange, name, className = "", id }
   const widthClass = callerSetsWidth ? "" : "w-[150px]";
 
   return (
-    <div className={`phone-country-select shrink-0 min-w-0 ${widthClass} ${className}`}>
+    <div
+      className={`phone-country-select shrink-0 min-w-0 ${widthClass} ${className}${
+        disabled ? " phone-country-select--disabled" : ""
+      }`}
+    >
       <input type="hidden" name={name} value={value} />
       <Select
         inputId={id}
         options={OPTIONS}
         value={selected}
         onChange={(opt) => opt && onChange(opt.value)}
-        isSearchable
+        isDisabled={disabled}
+        isSearchable={!disabled}
         filterOption={(option, search) => {
           const input = search.trim().toLowerCase();
           if (!input) return true;
@@ -47,21 +60,31 @@ export function PhoneCountrySelect({ value, onChange, name, className = "", id }
         classNamePrefix="react-select"
         className="react-select-container"
         styles={{
-          control: (base) => ({
+          control: (base, state) => ({
             ...base,
             minHeight: 38,
             borderRadius: 6,
-            backgroundColor: "rgb(var(--body-bg) / 1)",
+            backgroundColor: state.isDisabled
+              ? "rgb(var(--light) / 1)"
+              : "rgb(var(--body-bg) / 1)",
             borderColor: "rgb(var(--input-border) / 1)",
-            color: "rgb(var(--default-text-color) / 1)",
+            color: state.isDisabled
+              ? "rgb(var(--text-muted) / 1)"
+              : "rgb(var(--default-text-color) / 1)",
+            cursor: state.isDisabled ? "not-allowed" : "default",
+            boxShadow: state.isDisabled ? "none" : base.boxShadow,
           }),
-          singleValue: (base) => ({
+          singleValue: (base, state) => ({
             ...base,
-            color: "rgb(var(--default-text-color) / 1)",
+            color: state.isDisabled
+              ? "rgb(var(--text-muted) / 1)"
+              : "rgb(var(--default-text-color) / 1)",
           }),
-          input: (base) => ({
+          input: (base, state) => ({
             ...base,
-            color: "rgb(var(--default-text-color) / 1)",
+            color: state.isDisabled
+              ? "rgb(var(--text-muted) / 1)"
+              : "rgb(var(--default-text-color) / 1)",
           }),
           placeholder: (base) => ({
             ...base,

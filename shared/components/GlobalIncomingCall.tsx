@@ -930,16 +930,28 @@ function GlobalOutgoingCallInner() {
 
   const isVideo = outgoingCall.callType === "video";
   const kindShort = isVideo ? "Video" : "Voice";
-  const calleeName = outgoingCall.calleeName || "Calling…";
+  const isGroup = outgoingCall.callScope === "group";
+  const groupDisplayName = outgoingCall.groupName?.trim() || "Group";
+  const participantHint =
+    isGroup && outgoingCall.participantCount != null && outgoingCall.participantCount > 0
+      ? `${outgoingCall.participantCount} participant${outgoingCall.participantCount === 1 ? "" : "s"}`
+      : null;
+  const calleeName = isGroup ? groupDisplayName : outgoingCall.calleeName || "Calling…";
   const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(calleeName)}&size=128&background=f1f5f9&color=334155`;
   const headline =
-    status === "declined" ? "Call declined" : status === "unanswered" ? "No answer" : isVideo ? "Video call" : "Voice call";
+    status === "declined" ? "Call declined" : status === "unanswered" ? "No answer" : isGroup ? "Outgoing group call" : isVideo ? "Video call" : "Voice call";
   const subline =
     status === "declined"
-      ? `${calleeName} declined the call.`
+      ? isGroup
+        ? `No one joined the ${groupDisplayName} call.`
+        : `${outgoingCall.calleeName || "Contact"} declined the call.`
       : status === "unanswered"
-        ? `${calleeName} didn't answer.`
-        : `Ringing ${calleeName}…`;
+        ? isGroup
+          ? `No one answered the ${groupDisplayName} call.`
+          : `${outgoingCall.calleeName || "Contact"} didn't answer.`
+        : isGroup
+          ? `Ringing ${groupDisplayName}${participantHint ? ` · ${participantHint}` : ""}…`
+          : `Ringing ${outgoingCall.calleeName || "contact"}…`;
 
   const modal = (
     <div
@@ -984,13 +996,18 @@ function GlobalOutgoingCallInner() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
               </span>
             )}
-            {terminal ? headline : `Outgoing · ${kindShort}`}
+            {terminal ? headline : isGroup ? `Outgoing group · ${kindShort}` : `Outgoing · ${kindShort}`}
           </span>
         </p>
 
         <h2 className="mb-2 text-[1.375rem] font-bold leading-tight tracking-tight text-[#0f172a] dark:text-white">
           {calleeName}
         </h2>
+        {isGroup && !terminal && (
+          <p className="mx-auto mb-1 max-w-[16rem] text-xs font-medium uppercase tracking-[0.14em] text-primary/80 dark:text-primary/70">
+            Group call
+          </p>
+        )}
         <p className="mx-auto mb-6 max-w-[16rem] text-sm leading-relaxed text-[#64748b] dark:text-white/50">{subline}</p>
 
         {terminal ? (

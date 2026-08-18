@@ -316,6 +316,12 @@
   font-size: 0.75rem;
   color: var(--chat-ink-muted);
   line-height: 1.35;
+
+  :global(a) {
+    color: var(--chat-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 }
 
 .unreadBadge {

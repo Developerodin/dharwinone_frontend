@@ -59,6 +59,19 @@ export interface OutgoingCallData {
   callType: "audio" | "video";
   calleeName: string;
   status: "calling" | "declined" | "cancelled" | "unanswered";
+  callScope?: "direct" | "group";
+  groupName?: string;
+  participantCount?: number;
+}
+
+export interface ConversationUpdatedData {
+  conversationId?: string;
+  lastMessage?: {
+    content?: string;
+    sender?: string;
+    createdAt?: string;
+    type?: string;
+  };
 }
 
 /** Bolna telephony delta emitted on `call:update` (see chatSocket.service.js::emitCallUpdate). */
@@ -94,7 +107,7 @@ interface ChatSocketContextValue {
   joinConversation: (conversationId: string) => void;
   leaveConversation: (conversationId: string) => void;
   onNewMessage: (callback: (msg: unknown) => void) => () => void;
-  onConversationUpdated: (callback: () => void) => () => void;
+  onConversationUpdated: (callback: (data?: ConversationUpdatedData) => void) => () => void;
   onConversationDeleted: (callback: (data: { conversationId: string }) => void) => () => void;
   onIncomingCall: (callback: (data: IncomingCallData) => void) => () => void;
   onCallEnded: (callback: (data: { conversationId: string; roomName: string }) => void) => () => void;
@@ -144,7 +157,7 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
   const notifiedMessageIdsRef = useRef<Set<string>>(new Set());
 
   const newMsgListeners = useRef<Set<(msg: unknown) => void>>(new Set());
-  const convUpdateListeners = useRef<Set<() => void>>(new Set());
+  const convUpdateListeners = useRef<Set<(data?: ConversationUpdatedData) => void>>(new Set());
   const convDeletedListeners = useRef<Set<(data: { conversationId: string }) => void>>(new Set());
   const incomingCallListeners = useRef<Set<(data: IncomingCallData) => void>>(new Set());
   const callEndedListeners = useRef<Set<(data: { conversationId: string; roomName: string }) => void>>(new Set());
@@ -173,7 +186,7 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
     return () => { newMsgListeners.current.delete(cb); };
   }, []);
 
-  const onConversationUpdated = useCallback((cb: () => void) => {
+  const onConversationUpdated = useCallback((cb: (data?: ConversationUpdatedData) => void) => {
     convUpdateListeners.current.add(cb);
     return () => { convUpdateListeners.current.delete(cb); };
   }, []);
@@ -253,11 +266,19 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
     (
       conversationId: string,
       callType: "audio" | "video",
-      meta?: { calleeName?: string },
+      meta?: { calleeName?: string; callScope?: "direct" | "group"; groupName?: string; participantCount?: number },
       cb?: (res: { success?: boolean; callId?: string; error?: string }) => void
     ) => {
       // Show the caller a "Calling…" overlay immediately; backend only emits call:start on accept.
-      setOutgoingCall({ conversationId, callType, calleeName: meta?.calleeName?.trim() || "Calling…", status: "calling" });
+      setOutgoingCall({
+        conversationId,
+        callType,
+        calleeName: meta?.calleeName?.trim() || "Calling…",
+        status: "calling",
+        callScope: meta?.callScope,
+        groupName: meta?.groupName,
+        participantCount: meta?.participantCount,
+      });
       socket?.emit("call:initiate", { conversationId, callType }, (res: { success?: boolean; callId?: string; error?: string }) => {
         if (res?.callId) {
           pendingInitiateCallIdRef.current = res.callId;
@@ -426,8 +447,8 @@ export function ChatSocketProvider({ children }: { children: React.ReactNode }) 
           newMsgListeners.current.forEach((cb) => cb(msg));
         });
 
-        sock.on("conversation_updated", () => {
-          convUpdateListeners.current.forEach((cb) => cb());
+        sock.on("conversation_updated", (data?: ConversationUpdatedData) => {
+          convUpdateListeners.current.forEach((cb) => cb(data));
         });
 
         sock.on("conversation_deleted", (data: { conversationId: string }) => {

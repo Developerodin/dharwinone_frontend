@@ -4,6 +4,7 @@ import {
   reactionToggleEmoji,
   splitTextLinks,
   conversationPreviewText,
+  conversationPreviewAfterDelete,
   lastMessageFromMsg,
 } from "./chatHelpers";
 
@@ -116,5 +117,29 @@ describe("lastMessageFromMsg", () => {
       sender: undefined,
       createdAt: "2026-01-01",
     });
+  });
+});
+
+describe("conversationPreviewAfterDelete", () => {
+  it("uses deleted placeholder when the latest message was removed", () => {
+    const preview = conversationPreviewAfterDelete(
+      [{ id: "m2", content: "HI", createdAt: "2026-01-02" }] as any,
+      "m2",
+      { id: "m2", content: "HI", createdAt: "2026-01-02" } as any
+    );
+    expect(preview.content).toBe("This message was deleted");
+  });
+
+  it("falls back to the previous visible message when the latest is deleted", () => {
+    const preview = conversationPreviewAfterDelete(
+      [
+        { id: "m2", content: "HI", createdAt: "2026-01-02" },
+        { id: "m1", content: "Earlier note", createdAt: "2026-01-01", sender: { name: "Alex" } },
+      ] as any,
+      "m2",
+      { id: "m2", content: "HI", createdAt: "2026-01-02" } as any
+    );
+    expect(preview.content).toBe("Earlier note");
+    expect(preview.sender).toBe("Alex");
   });
 });

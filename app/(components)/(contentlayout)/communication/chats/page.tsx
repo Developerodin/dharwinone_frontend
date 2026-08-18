@@ -36,7 +36,7 @@ import { useChatSocket } from "@/shared/contexts/ChatSocketContext";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { format, formatDistanceToNow } from "date-fns";
 import chatStyles from "./chats.module.scss";
-import { myReactionEmoji, reactionToggleEmoji, splitTextLinks, conversationPreviewText } from "./_utils/chatHelpers";
+import { myReactionEmoji, reactionToggleEmoji, splitTextLinks, conversationPreviewText, conversationPreviewAfterDelete } from "./_utils/chatHelpers";
 import { ChatToast, useChatToast } from "./_components/ChatToast";
 
 const DEFAULT_AVATAR = "/assets/images/faces/1.jpg";
@@ -60,6 +60,27 @@ const MessageText = ({ text, className }: { text: string; className?: string }) 
       )
     )}
   </p>
+);
+
+/** Sidebar preview with clickable URLs (truncated by parent). */
+const PreviewText = ({ text, className }: { text: string; className?: string }) => (
+  <span className={className}>
+    {splitTextLinks(text).map((s, i) =>
+      s.href ? (
+        <a
+          key={i}
+          href={s.href}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {s.text}
+        </a>
+      ) : (
+        <span key={i}>{s.text}</span>
+      )
+    )}
+  </span>
 );
 
 function callLogStatusLabel(status: string | undefined): string {
@@ -662,7 +683,7 @@ const Chat = () => {
   } | null>(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
-  const [deleteMenuFor, setDeleteMenuFor] = useState<string | null>(null);
+  const [messageMenuFor, setMessageMenuFor] = useState<string | null>(null);
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [forwardTargets, setForwardTargets] = useState<Set<string>>(new Set());
   const [forwardSearch, setForwardSearch] = useState("");
@@ -715,6 +736,7 @@ const Chat = () => {
         setMessages((prev) => prev.filter((x) => String((x as any).id || (x as any)._id) !== mid));
       } else {
         await deleteMessage(cid, mid, "everyone");
+        const deletedMsg = messages.find((x) => String((x as any).id || (x as any)._id) === mid);
         setMessages((prev) =>
           prev.map((x) =>
             String((x as any).id || (x as any)._id) === mid
@@ -722,26 +744,10 @@ const Chat = () => {
               : x
           )
         );
-        const latestId =
-          messages.length > 0
-            ? String(
-                (messages[messages.length - 1] as any).id ||
-                  (messages[messages.length - 1] as any)._id
-              )
-            : null;
-        if (latestId === mid) {
+        if (deletedMsg) {
+          const preview = conversationPreviewAfterDelete(messages, mid, deletedMsg);
           setConversations((prev) =>
-            prev.map((c) =>
-              getId(c) === cid
-                ? {
-                    ...c,
-                    lastMessage: {
-                      ...(c.lastMessage || { createdAt: new Date().toISOString() }),
-                      content: "This message was deleted",
-                    },
-                  }
-                : c
-            )
+            prev.map((c) => (getId(c) === cid ? { ...c, lastMessage: preview } : c))
           );
         }
       }
@@ -753,7 +759,7 @@ const Chat = () => {
     }
   };
   const reactionPickerRef = useRef<HTMLDivElement>(null);
-  const deleteMenuRef = useRef<HTMLSpanElement>(null);
+  const messageMenuRef = useRef<HTMLSpanElement>(null);
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -984,8 +990,16 @@ const Chat = () => {
 
   // Conversation updated (for persistence across users)
   useEffect(() => {
-    const unsub = onConversationUpdated(() => {
-      fetchConversations();
+    const unsub = onConversationUpdated((data) => {
+      if (data?.conversationId && data.lastMessage) {
+        setConversations((prev) =>
+          prev.map((c) =>
+            getId(c) === String(data.conversationId) ? { ...c, lastMessage: data.lastMessage } : c
+          )
+        );
+      } else {
+        fetchConversations();
+      }
       if (isOpen && selectedConversation?.type === "group") {
         const cid = getId(selectedConversation);
         if (cid) getConversation(cid).then(setGroupInfoData).catch(() => {});
@@ -1146,19 +1160,19 @@ const Chat = () => {
     deleteConfirmCancelRef.current?.focus();
   }, [deleteConfirm]);
 
-  // Close the reaction bar / delete menu on outside-click or Escape.
+  // Close the reaction bar / message menu on outside-click or Escape.
   useEffect(() => {
-    if (!reactionPickerFor && !deleteMenuFor) return;
+    if (!reactionPickerFor && !messageMenuFor) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (reactionPickerRef.current?.contains(t) || deleteMenuRef.current?.contains(t)) return;
+      if (reactionPickerRef.current?.contains(t) || messageMenuRef.current?.contains(t)) return;
       setReactionPickerFor(null);
-      setDeleteMenuFor(null);
+      setMessageMenuFor(null);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setReactionPickerFor(null);
-        setDeleteMenuFor(null);
+        setMessageMenuFor(null);
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -1167,7 +1181,7 @@ const Chat = () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [reactionPickerFor, deleteMenuFor]);
+  }, [reactionPickerFor, messageMenuFor]);
 
   // ── Handlers ──
   const addMessageIfNew = useCallback((prev: Message[], msg: Message) => {
@@ -1288,11 +1302,15 @@ const Chat = () => {
 
   const handleCall = (callType: "audio" | "video") => {
     const cid = getId(selectedConversation);
-    if (!cid) return;
-    // Socket-based flow: backend emits call:start to both participants on accept,
-    // and ChatSocketContext auto-navigates to the room at that point. The caller sees
-    // a "Calling…" overlay (GlobalOutgoingCall) until the callee answers/declines.
-    emitCallInitiate(cid, callType, { calleeName: selectedConversation ? displayName(selectedConversation) : undefined });
+    if (!cid || !selectedConversation) return;
+    const isGroup = selectedConversation.type === "group";
+    const participantCount = selectedConversation.participants?.length || 0;
+    emitCallInitiate(cid, callType, {
+      calleeName: displayName(selectedConversation),
+      callScope: isGroup ? "group" : "direct",
+      groupName: isGroup ? displayName(selectedConversation) : undefined,
+      participantCount: isGroup ? participantCount : undefined,
+    });
   };
 
   const handleDeleteChat = () => {
@@ -1822,7 +1840,7 @@ const Chat = () => {
                                     )}
                                   </p>
                                   <p className={`${chatStyles.convPreview} truncate`}>
-                                    {conversationPreviewText(c.lastMessage)}
+                                    <PreviewText text={conversationPreviewText(c.lastMessage)} />
                                   </p>
                                 </div>
                                 {(c.unreadCount || 0) > 0 && (
@@ -2161,83 +2179,81 @@ const Chat = () => {
                               <div className={`min-w-0 flex-1 ${isMe ? "text-end" : ""}`}>
                                 <span className={`${chatStyles.msgMeta} ${isMe ? chatStyles.msgMetaMe : ""}`}>
                                   {!(m as any).deletedAt && (
-                                    <>
+                                    <span
+                                      ref={messageMenuFor === String((m as any).id || (m as any)._id) ? messageMenuRef : undefined}
+                                      className="relative inline-flex"
+                                    >
                                       <button
                                         type="button"
-                                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded hover:bg-white/10 transition-opacity shrink-0"
-                                        title="Forward"
-                                        aria-label="Forward message"
-                                        onClick={() => {
-                                          setDeleteMenuFor(null);
-                                          setForwardTargets(new Set());
-                                          setForwardSearch("");
-                                          setForwardingMessage(m);
-                                        }}
+                                        className="opacity-70 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded hover:bg-white/10 transition-opacity shrink-0"
+                                        title="Message actions"
+                                        aria-label="Message actions"
+                                        aria-haspopup="menu"
+                                        aria-expanded={messageMenuFor === String((m as any).id || (m as any)._id)}
+                                        onClick={() =>
+                                          setMessageMenuFor((prev) =>
+                                            prev === String((m as any).id || (m as any)._id)
+                                              ? null
+                                              : String((m as any).id || (m as any)._id)
+                                          )
+                                        }
                                       >
-                                        <i className="ri-share-forward-line text-sm" />
+                                        <i className="ri-more-2-fill text-sm" />
                                       </button>
-                                      <span
-                                        ref={deleteMenuFor === String((m as any).id || (m as any)._id) ? deleteMenuRef : undefined}
-                                        className="relative inline-flex"
-                                      >
-                                        <button
-                                          type="button"
-                                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded hover:bg-white/10 transition-opacity shrink-0"
-                                          title="Delete"
-                                          aria-label="Delete message"
-                                          aria-haspopup="menu"
-                                          aria-expanded={deleteMenuFor === String((m as any).id || (m as any)._id)}
-                                          onClick={() =>
-                                            setDeleteMenuFor((prev) =>
-                                              prev === String((m as any).id || (m as any)._id)
-                                                ? null
-                                                : String((m as any).id || (m as any)._id)
-                                            )
-                                          }
-                                        >
-                                          <i className="ri-delete-bin-line text-sm" />
-                                        </button>
-                                        {deleteMenuFor === String((m as any).id || (m as any)._id) && (
-                                          <div className={`absolute top-full right-0 mt-1 min-w-[11rem] rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-black/5 dark:border-white/10 py-1 text-start ${chatStyles.messageActionMenu}`}>
+                                      {messageMenuFor === String((m as any).id || (m as any)._id) && (
+                                        <div className={`absolute top-full right-0 mt-1 min-w-[11rem] rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-black/5 dark:border-white/10 py-1 text-start ${chatStyles.messageActionMenu}`}>
+                                          <button
+                                            type="button"
+                                            className="w-full text-start px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
+                                            onClick={() => {
+                                              setMessageMenuFor(null);
+                                              setReplyingTo(m);
+                                            }}
+                                          >
+                                            Reply
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="w-full text-start px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
+                                            onClick={() => {
+                                              setMessageMenuFor(null);
+                                              setForwardTargets(new Set());
+                                              setForwardSearch("");
+                                              setForwardingMessage(m);
+                                            }}
+                                          >
+                                            Forward
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="w-full text-start px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
+                                            onClick={() => {
+                                              const mid = String((m as any).id || (m as any)._id);
+                                              setMessageMenuFor(null);
+                                              if (!getId(selectedConversation)) return;
+                                              setDeleteConfirm({ mode: "me", messageId: mid });
+                                            }}
+                                          >
+                                            Delete for me
+                                          </button>
+                                          {isMe && (
                                             <button
                                               type="button"
-                                              className="w-full text-start px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
+                                              className="w-full text-start px-3 py-1.5 text-sm text-danger hover:bg-black/5 dark:hover:bg-white/10"
                                               onClick={() => {
                                                 const mid = String((m as any).id || (m as any)._id);
-                                                setDeleteMenuFor(null);
+                                                setMessageMenuFor(null);
                                                 if (!getId(selectedConversation)) return;
-                                                setDeleteConfirm({ mode: "me", messageId: mid });
+                                                setDeleteConfirm({ mode: "everyone", messageId: mid });
                                               }}
                                             >
-                                              Delete for me
+                                              Delete for everyone
                                             </button>
-                                            {isMe && (
-                                              <button
-                                                type="button"
-                                                className="w-full text-start px-3 py-1.5 text-sm text-danger hover:bg-black/5 dark:hover:bg-white/10"
-                                                onClick={() => {
-                                                  const mid = String((m as any).id || (m as any)._id);
-                                                  setDeleteMenuFor(null);
-                                                  if (!getId(selectedConversation)) return;
-                                                  setDeleteConfirm({ mode: "everyone", messageId: mid });
-                                                }}
-                                              >
-                                                Delete for everyone
-                                              </button>
-                                            )}
-                                          </div>
-                                        )}
-                                      </span>
-                                    </>
+                                          )}
+                                        </div>
+                                      )}
+                                    </span>
                                   )}
-                                  <button
-                                    type="button"
-                                    className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded hover:bg-white/10 transition-opacity shrink-0"
-                                    title="Reply"
-                                    onClick={() => setReplyingTo(m)}
-                                  >
-                                    <i className="ri-reply-line text-sm" />
-                                  </button>
                                   {(m.sender as any)?.name} &middot;{" "}
                                   {m.createdAt ? format(new Date(m.createdAt), "h:mm a") : ""}
                                   {isMe && renderReadStatus(m)}
@@ -2362,7 +2378,7 @@ const Chat = () => {
                   ref={fileInputRef}
                   className="hidden"
                   multiple
-                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar"
+                  accept="image/*,video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar"
                   onChange={handleFileSelect}
                 />
                 <button

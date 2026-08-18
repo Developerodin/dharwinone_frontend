@@ -12,6 +12,38 @@ export function conversationPreviewText(lastMessage?: Conversation["lastMessage"
   return content || "No messages yet";
 }
 
+/** Sidebar preview after a delete-for-everyone: placeholder or previous visible message. */
+export function conversationPreviewAfterDelete(
+  messages: Message[],
+  deletedMessageId: string,
+  deletedMsg: Message
+): NonNullable<Conversation["lastMessage"]> {
+  const byDate = [...messages].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+  const latestId = String((byDate[0] as { id?: string; _id?: string })?.id || (byDate[0] as { _id?: string })?._id || "");
+  const deletedCopy = {
+    ...deletedMsg,
+    deletedAt: new Date().toISOString(),
+    deletedFor: "everyone" as const,
+  };
+
+  if (latestId !== deletedMessageId) {
+    const visible = byDate.find((m) => {
+      const id = String((m as { id?: string; _id?: string }).id || (m as { _id?: string })._id || "");
+      if (id === deletedMessageId) return false;
+      return !((m as { deletedAt?: string | null }).deletedAt && (m as { deletedFor?: string }).deletedFor === "everyone");
+    });
+    return visible ? lastMessageFromMsg(visible) : lastMessageFromMsg(deletedCopy);
+  }
+
+  const nextVisible = byDate.find((m) => {
+    const id = String((m as { id?: string; _id?: string }).id || (m as { _id?: string })._id || "");
+    return id !== deletedMessageId && !((m as { deletedAt?: string | null }).deletedAt && (m as { deletedFor?: string }).deletedFor === "everyone");
+  });
+  return nextVisible ? lastMessageFromMsg(nextVisible) : lastMessageFromMsg(deletedCopy);
+}
+
 /** Build sidebar preview from a message after send/upload. */
 export function lastMessageFromMsg(msg: Message): NonNullable<Conversation["lastMessage"]> {
   const isDeleted = !!(msg as { deletedAt?: string | null }).deletedAt;
