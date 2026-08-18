@@ -1,8 +1,10 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Seo from "@/shared/layout-components/seo/seo";
 import { useAuth } from "@/shared/contexts/auth-context";
+import { ROUTES } from "@/shared/lib/constants";
+import { getMeWithCandidate, type CandidateWithProfile } from "@/shared/lib/api/auth";
 import {
   getMyStudentForAttendance,
   getPunchInOutStatus, getPunchInOutStatusMe,
@@ -16,6 +18,8 @@ import { getAllLeaveRequests, type LeaveRequest } from "@/shared/lib/api/leave-r
 import DashboardCard from "./employee/DashboardCard";
 import TodayCard from "./employee/TodayCard";
 import LeaveCard from "./employee/LeaveCard";
+import ProfileGapsCard from "./employee/ProfileGapsCard";
+import DocumentsCard from "./employee/DocumentsCard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -44,6 +48,9 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const [leave, setLeave] = useState<LeaveRequest[]>([]);
   const [leaveLoading, setLeaveLoading] = useState(true);
+
+  const [profile, setProfile] = useState<CandidateWithProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   /** Leave requests are scoped by Student id, so agents on user-based attendance have none. */
   const studentId = identity && identity.type !== "user" ? identity.id : null;
@@ -88,6 +95,49 @@ export default function EmployeeDashboard(): JSX.Element {
     return () => { cancelled = true; };
   }, [identityResolved, studentId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    getMeWithCandidate()
+      .then((res) => { if (!cancelled) setProfile(res?.candidate ?? null); })
+      .catch(() => { if (!cancelled) setProfile(null); })
+      .finally(() => { if (!cancelled) setProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Only fields the employee can actually fill in on Settings → Personal information. */
+  const gaps = useMemo(() => {
+    const href = ROUTES.settingsPersonalInfo;
+    const checks: Array<{ label: string; href: string; ok: boolean }> = [
+      { label: "Phone number", href, ok: Boolean(profile?.phoneNumber) },
+      { label: "Address", href, ok: Boolean(profile?.address?.streetAddress) },
+      { label: "Qualification", href, ok: (profile?.qualifications?.length ?? 0) > 0 },
+      { label: "Work experience", href, ok: (profile?.experiences?.length ?? 0) > 0 },
+      { label: "Skills", href, ok: (profile?.skills?.length ?? 0) > 0 },
+    ];
+    return checks.filter((c) => !c.ok).map(({ label, href: to }) => ({ label, href: to }));
+  }, [profile]);
+
+  const documentGroups = useMemo(() => {
+    const docs = (profile?.documents ?? [])
+      .filter((d) => Boolean(d.url))
+      .map((d) => ({
+        name: d.label || d.originalName || d.type || "Document",
+        meta: d.type ?? "",
+        href: d.url as string,
+      }));
+    const slips = (profile?.salarySlips ?? [])
+      .filter((s) => Boolean(s.documentUrl))
+      .map((s) => ({
+        name: [s.month, s.year].filter(Boolean).join(" ") || s.originalName || "Payslip",
+        meta: s.originalName ?? "",
+        href: s.documentUrl as string,
+      }));
+    return [
+      { caption: "Uploaded documents", items: docs },
+      { caption: "Payslips uploaded by HR", items: slips },
+    ];
+  }, [profile]);
+
   const handlePunch = useCallback(async () => {
     if (!identity) return;
     setPunching(true);
@@ -127,8 +177,10 @@ export default function EmployeeDashboard(): JSX.Element {
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
             <TodayCard status={status} stats={stats} records={records} loading={attLoading} onPunch={handlePunch} punching={punching} />
             <LeaveCard requests={leave} loading={leaveLoading} />
-            <DashboardCard title="Finish your profile"><p>TODO Task 5</p></DashboardCard>
-            <DashboardCard title="Documents"><p>TODO Task 5</p></DashboardCard>
+            {profileLoading || gaps.length > 0
+              ? <ProfileGapsCard gaps={gaps} totalSections={5} loading={profileLoading} />
+              : null}
+            <DocumentsCard groups={documentGroups} loading={profileLoading} />
           </div>
 
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
