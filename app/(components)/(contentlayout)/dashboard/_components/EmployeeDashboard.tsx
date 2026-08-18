@@ -18,6 +18,7 @@ import { getAllLeaveRequests, type LeaveRequest } from "@/shared/lib/api/leave-r
 import { listStudentCourses, type StudentCourseListItem } from "@/shared/lib/api/student-courses";
 import { listTasks, updateTaskStatus, type Task, type TaskStatus } from "@/shared/lib/api/tasks";
 import { listInternalMeetings, type InternalMeeting } from "@/shared/lib/api/internal-meetings";
+import { listProjects, type Project } from "@/shared/lib/api/projects";
 import DashboardCard from "./employee/DashboardCard";
 import TodayCard from "./employee/TodayCard";
 import LeaveCard from "./employee/LeaveCard";
@@ -27,6 +28,7 @@ import TrainingCard from "./employee/TrainingCard";
 import DueTodayCard from "./employee/DueTodayCard";
 import MyTasksCard from "./employee/MyTasksCard";
 import MeetingsCard from "./employee/MeetingsCard";
+import MyProjectsCard from "./employee/MyProjectsCard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -67,6 +69,9 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const [meetings, setMeetings] = useState<InternalMeeting[]>([]);
   const [meetingsLoading, setMeetingsLoading] = useState(true);
+
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
 
   /** Leave requests are scoped by Student id, so agents on user-based attendance have none. */
   const studentId = identity && identity.type !== "user" ? identity.id : null;
@@ -130,6 +135,23 @@ export default function EmployeeDashboard(): JSX.Element {
       .finally(() => { if (!cancelled) setProfileLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  /** `ProjectsListParams.mine` means *created by*, so membership is filtered client-side. */
+  useEffect(() => {
+    let cancelled = false;
+    listProjects({ limit: 100 })
+      .then((r) => {
+        if (cancelled) return;
+        const uid = user?.id;
+        if (!uid) { setProjects([]); return; }
+        setProjects((r.results ?? []).filter((p) =>
+          (p.assignedTo ?? []).some((u) => u._id === uid || u.id === uid)
+        ));
+      })
+      .catch(() => { if (!cancelled) setProjects([]); })
+      .finally(() => { if (!cancelled) setProjectsLoading(false); });
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -255,9 +277,7 @@ export default function EmployeeDashboard(): JSX.Element {
           </div>
         </div>
 
-        <DashboardCard title="Projects you're on" bodyClassName="p-0">
-          <p className="p-5">TODO Task 9</p>
-        </DashboardCard>
+        <MyProjectsCard projects={projects} loading={projectsLoading} />
       </div>
     </Fragment>
   );
