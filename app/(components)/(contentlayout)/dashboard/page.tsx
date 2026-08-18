@@ -60,6 +60,7 @@ import { hasSalesAgentRole } from "@/shared/lib/roles";
 import { hasStaffAccess } from "@/shared/lib/persona";
 import SalesAgentDashboard from "./_components/SalesAgentDashboard";
 import CandidateDashboard from "./_components/CandidateDashboard";
+import EmployeeDashboard from "./_components/EmployeeDashboard";
 import UpcomingHolidaysCard from "./_components/UpcomingHolidaysCard";
 import OnLeaveTodayCard from "./_components/OnLeaveTodayCard";
 import { usePageCapabilities } from "@/shared/hooks/use-page-capabilities";
@@ -994,6 +995,11 @@ export default function DashboardPage() {
   /** ATS applicants (Candidate role) — job applications, browse jobs. Not HRMS Employee staff. */
   if (dashboardType === "candidate") {
     return <CandidateDashboard />;
+  }
+
+  /** HRMS Employee staff — attendance, tasks, leave, projects. Not ATS candidates. */
+  if (dashboardType === "employee") {
+    return <EmployeeDashboard />;
   }
 
   /** Employee role and other internal users use the HRMS dashboard (tasks, attendance, ATS panels by permission). */
