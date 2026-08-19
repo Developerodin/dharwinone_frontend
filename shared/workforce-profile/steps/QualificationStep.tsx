@@ -35,8 +35,13 @@ export function QualificationStep() {
   const [eduOpen, setEduOpen] = useState(false);
 
   const eduErr = issuesByField["qualification.educations"]?.[0]?.message ?? null;
+  const startYearErr =
+    issuesByField["qualification.educations[].startYear"]?.[0]?.message ?? null;
+  const endYearErr =
+    issuesByField["qualification.educations[].endYear"]?.[0]?.message ?? null;
   const skillErr = issuesByField["qualification.skills"]?.[0]?.message ?? null;
   const years = generateYearOptions();
+  const yearFieldErr = startYearErr || endYearErr;
 
   return (
     <div className={styles.step}>
@@ -76,6 +81,7 @@ export function QualificationStep() {
         </button>
       </div>
       {eduErr && <div className={styles.sectionError}>{eduErr}</div>}
+      {yearFieldErr && <div className={styles.sectionError}>{yearFieldErr}</div>}
 
       {eduOpen &&
         educations.map((edu) => {
@@ -146,7 +152,7 @@ export function QualificationStep() {
               </label>
               <select
                 id={`start-year-${edu.id}`}
-                className={styles.select}
+                className={`${styles.select} ${startYearErr ? styles.inputError : ""}`}
                 value={edu.startYear}
                 onChange={(e) =>
                   updateEducation(edu.id, { startYear: e.target.value })
@@ -167,7 +173,7 @@ export function QualificationStep() {
               </label>
               <select
                 id={`end-year-${edu.id}`}
-                className={styles.select}
+                className={`${styles.select} ${endYearErr ? styles.inputError : ""}`}
                 value={edu.endYear}
                 onChange={(e) =>
                   updateEducation(edu.id, { endYear: e.target.value })

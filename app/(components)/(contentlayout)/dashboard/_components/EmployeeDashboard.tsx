@@ -16,12 +16,13 @@ import {
   type AttendanceIdentity, type PunchStatusResponse, type AttendanceStatistics, type AttendanceRecord,
   type AssignedHolidayItem, type OnLeaveTodayItem,
 } from "@/shared/lib/api/attendance";
-import { listJobs, type Job } from "@/shared/lib/api/jobs";
+import { getMyMatchingJobs, type JobMatch } from "@/shared/lib/api/employees";
 import { getAllLeaveRequests, type LeaveRequest } from "@/shared/lib/api/leave-requests";
 import { listStudentCourses, type StudentCourseListItem } from "@/shared/lib/api/student-courses";
-import { listTasks, updateTaskStatus, type Task, type TaskStatus } from "@/shared/lib/api/tasks";
+import { getTaskId, listTasks, updateTaskStatus, type Task, type TaskStatus } from "@/shared/lib/api/tasks";
 import { listInternalMeetings, type InternalMeeting } from "@/shared/lib/api/internal-meetings";
 import { listProjects, type Project } from "@/shared/lib/api/projects";
+import { listMyTeamGroups } from "@/shared/lib/api/projectTeams";
 import TodayCard from "./employee/TodayCard";
 import LeaveCard from "./employee/LeaveCard";
 import ProfileGapsCard from "./employee/ProfileGapsCard";
@@ -36,6 +37,13 @@ import OpenRolesCard from "./employee/OpenRolesCard";
 import UpcomingHolidaysCard from "./UpcomingHolidaysCard";
 import BackdatedAttendanceRequestModal from "../../training/attendance/_components/BackdatedAttendanceRequestModal";
 import LeaveRequestModal from "../../training/attendance/_components/LeaveRequestModal";
+import TaskDetailModal from "./employee/TaskDetailModal";
+import PunchInBlockedOverlay from "./employee/PunchInBlockedOverlay";
+import {
+  parsePunchInBlockedError,
+  resolvePunchInEligibility,
+  type PunchInEligibility,
+} from "@/shared/lib/dashboard/employeeDashboard";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -63,6 +71,7 @@ export default function EmployeeDashboard(): JSX.Element {
   const [punching, setPunching] = useState(false);
   const [showBackdatedModal, setShowBackdatedModal] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [blockedOverlay, setBlockedOverlay] = useState<Extract<PunchInEligibility, { allowed: false }> | null>(null);
 
   const [leave, setLeave] = useState<LeaveRequest[]>([]);
   const [leaveLoading, setLeaveLoading] = useState(true);
@@ -75,6 +84,7 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
+  const [detailTask, setDetailTask] = useState<Task | null>(null);
 
   const [meetings, setMeetings] = useState<InternalMeeting[]>([]);
   const [meetingsLoading, setMeetingsLoading] = useState(true);
@@ -88,7 +98,9 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const [onLeave, setOnLeave] = useState<OnLeaveTodayItem[]>([]);
   const [onLeaveLoading, setOnLeaveLoading] = useState(true);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [teamNames, setTeamNames] = useState<string[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(true);
+  const [jobs, setJobs] = useState<JobMatch[]>([]);
   const [jobsLoading, setJobsLoading] = useState(true);
 
   /** Leave requests are scoped by Student id, so agents on user-based attendance have none. */
@@ -177,10 +189,26 @@ export default function EmployeeDashboard(): JSX.Element {
       .then((r) => { if (!cancelled) setOnLeave(r.results ?? []); })
       .catch(() => { if (!cancelled) setOnLeave([]); })
       .finally(() => { if (!cancelled) setOnLeaveLoading(false); });
-    listJobs({ limit: 5 })
-      .then((r) => { if (!cancelled) setJobs(r.results ?? []); })
+    getMyMatchingJobs({ limit: 5, minScore: 1 })
+      .then((r) => { if (!cancelled) setJobs(r.matches ?? []); })
       .catch(() => { if (!cancelled) setJobs([]); })
       .finally(() => { if (!cancelled) setJobsLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Auth-only roster: clears teamsLoading even on error so the card never sticks on skeleton. */
+  useEffect(() => {
+    let cancelled = false;
+    listMyTeamGroups()
+      .then((r) => {
+        if (cancelled) return;
+        const names = (r.results ?? [])
+          .map((t) => String(t.name ?? "").trim())
+          .filter(Boolean);
+        setTeamNames(names);
+      })
+      .catch(() => { if (!cancelled) setTeamNames([]); })
+      .finally(() => { if (!cancelled) setTeamsLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -203,7 +231,7 @@ export default function EmployeeDashboard(): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    listInternalMeetings({ limit: 20, sortBy: "scheduledAt:asc" })
+    listInternalMeetings({ limit: 20, sortBy: "scheduledAt:asc", status: "scheduled" })
       .then((r) => { if (!cancelled) setMeetings(r.results ?? []); })
       .catch(() => { if (!cancelled) setMeetings([]); })
       .finally(() => { if (!cancelled) setMeetingsLoading(false); });
@@ -224,13 +252,25 @@ export default function EmployeeDashboard(): JSX.Element {
   useEffect(() => { void loadTasks(); }, [loadTasks]);
 
   const handleToggle = useCallback(async (id: string, next: TaskStatus) => {
-    setTasks((prev) => prev.map((t) => (t._id === id ? { ...t, status: next } : t)));
+    setTasks((prev) => prev.map((t) => (getTaskId(t) === id ? { ...t, status: next } : t)));
     try {
       await updateTaskStatus(id, next);
     } catch {
       void loadTasks();
     }
   }, [loadTasks]);
+
+  const handleOpenTask = useCallback((task: Task) => {
+    setDetailTask(task);
+  }, []);
+
+  const handleCompleteFromDetail = useCallback(
+    (id: string) => {
+      setDetailTask(null);
+      void handleToggle(id, "completed");
+    },
+    [handleToggle],
+  );
 
   /** Only fields the employee can actually fill in on Settings → Personal information. */
   const gaps = useMemo(() => {
@@ -272,6 +312,18 @@ export default function EmployeeDashboard(): JSX.Element {
     return Array.isArray(wo) ? wo : [];
   }, [identity]);
 
+  const punchEligibility = useMemo(
+    () =>
+      resolvePunchInEligibility({
+        todayIsHoliday: holidayMeta.todayIsHoliday,
+        todayHolidayTitle: holidayMeta.todayHolidayTitle,
+        leaveRequests: leave,
+        attendanceRecords: records,
+        weekOffDays,
+      }),
+    [holidayMeta.todayIsHoliday, holidayMeta.todayHolidayTitle, leave, records, weekOffDays],
+  );
+
   const candidateTimezone = useMemo(() => {
     if (status?.shift?.timezone) return status.shift.timezone;
     if (identity && !isUserBased(identity)) {
@@ -290,6 +342,10 @@ export default function EmployeeDashboard(): JSX.Element {
 
   const handlePunch = useCallback(async () => {
     if (!identity) return;
+    if (!status?.isPunchedIn && punchEligibility.allowed === false) {
+      setBlockedOverlay(punchEligibility);
+      return;
+    }
     setPunching(true);
     const userBased = isUserBased(identity);
     try {
@@ -302,12 +358,14 @@ export default function EmployeeDashboard(): JSX.Element {
         await punchInAttendance(identity.id);
       }
       await loadAttendance();
-    } catch {
-      /* the card keeps the last known state; a reload surfaces the truth */
+    } catch (err) {
+      const blocked = parsePunchInBlockedError(err);
+      if (blocked) setBlockedOverlay(blocked);
+      /* otherwise keep last known state; a reload surfaces the truth */
     } finally {
       setPunching(false);
     }
-  }, [identity, status?.isPunchedIn, loadAttendance]);
+  }, [identity, status?.isPunchedIn, punchEligibility, loadAttendance]);
 
   return (
     <Fragment>
@@ -332,7 +390,15 @@ export default function EmployeeDashboard(): JSX.Element {
               loading={attLoading}
               onPunch={handlePunch}
               punching={punching}
-              onBackdatedEntry={identity ? () => setShowBackdatedModal(true) : undefined}
+              punchEligibility={punchEligibility}
+              onBlockedPunchClick={() => {
+                if (punchEligibility.allowed === false) setBlockedOverlay(punchEligibility);
+              }}
+              onBackdatedEntry={
+                identity && punchEligibility.allowed !== false
+                  ? () => setShowBackdatedModal(true)
+                  : undefined
+              }
             />
             <LeaveCard
               requests={leave}
@@ -346,7 +412,12 @@ export default function EmployeeDashboard(): JSX.Element {
           </div>
 
           <div className="flex min-w-0 flex-col gap-[18px] [&>section:last-child]:flex-1">
-            <DueTodayCard tasks={tasks} loading={tasksLoading} onToggle={handleToggle} />
+            <DueTodayCard
+              tasks={tasks}
+              loading={tasksLoading}
+              onToggle={handleToggle}
+              onOpen={handleOpenTask}
+            />
             <MeetingsCard meetings={meetings} loading={meetingsLoading} />
             <MyTasksCard tasks={tasks} loading={tasksLoading} />
           </div>
@@ -361,7 +432,12 @@ export default function EmployeeDashboard(): JSX.Element {
               showManage={false}
             />
             {coursesLoading || courses.length > 0 ? <TrainingCard courses={courses} loading={coursesLoading} /> : null}
-            <TeamPulseCard onLeave={onLeave} loading={onLeaveLoading} />
+            <TeamPulseCard
+              onLeave={onLeave}
+              loading={onLeaveLoading}
+              teamNames={teamNames}
+              teamsLoading={teamsLoading}
+            />
             <OpenRolesCard jobs={jobs} loading={jobsLoading} />
           </div>
         </div>
@@ -384,6 +460,17 @@ export default function EmployeeDashboard(): JSX.Element {
         studentId={studentId}
         weekOffDays={weekOffDays}
         onSuccess={() => void loadLeave()}
+      />
+
+      <TaskDetailModal
+        task={detailTask}
+        onClose={() => setDetailTask(null)}
+        onComplete={handleCompleteFromDetail}
+      />
+
+      <PunchInBlockedOverlay
+        block={blockedOverlay}
+        onClose={() => setBlockedOverlay(null)}
       />
     </Fragment>
   );

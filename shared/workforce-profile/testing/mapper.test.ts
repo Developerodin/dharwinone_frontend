@@ -66,4 +66,28 @@ describe("mapper.mapToFormState", () => {
     expect(state.qualification.educations[0].startYear).toBe("2018");
     expect(state.qualification.educations[0].endYear).toBe("2022");
   });
+
+  // GET/PATCH me/with-candidate returns Mongo Dates as full ISO. Date inputs
+  // only accept yyyy-mm-dd — without coercion the field looks empty after save.
+  it("coerces ISO experience dates to yyyy-mm-dd for date inputs", () => {
+    const state = mapToFormState({
+      ...sampleApiCandidate,
+      experiences: [
+        {
+          company: "Acme",
+          role: "Eng",
+          startDate: "2022-06-01T00:00:00.000Z",
+          endDate: "2023-08-15T12:30:00.000Z",
+          currentlyWorking: false,
+        },
+      ],
+    } as never);
+    expect(state.experience.experiences[0].startDate).toBe("2022-06-01");
+    expect(state.experience.experiences[0].endDate).toBe("2023-08-15");
+  });
+
+  it("keeps already-normalized date-only experience values", () => {
+    const state = mapToFormState(sampleApiCandidate as never);
+    expect(state.experience.experiences[0].startDate).toBe("2022-06-01");
+  });
 });

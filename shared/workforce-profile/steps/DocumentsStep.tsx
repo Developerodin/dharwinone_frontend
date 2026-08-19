@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
 import wizardUi from "../engine/workforce-wizard.module.css";
+import salaryStyles from "./salary-step.module.css";
 import { useDocumentUpload } from "../resources/useDocumentUpload";
 import { ResumeSkillsExtractOverlay } from "../components/ResumeSkillsExtractOverlay";
 import { useResumeSkillsExtract } from "../resources/useResumeSkillsExtract";
@@ -46,14 +47,14 @@ function DraftFileButton({
   disabled: boolean;
   onFile: (file: File) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputId = `doc-upload-${Math.random().toString(36).slice(2)}`;
   return (
-    <div>
+    <div className="flex w-full flex-col">
       <input
-        ref={inputRef}
+        id={inputId}
         type="file"
         accept=".jpg,.jpeg,.png,.pdf"
-        className="hidden"
+        className={salaryStyles.hiddenFile}
         disabled={disabled}
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -61,16 +62,16 @@ function DraftFileButton({
           if (file) onFile(file);
         }}
       />
-      <button
-        type="button"
-        className="inline-flex h-11 items-center gap-1.5 self-start whitespace-nowrap rounded-[0.35rem] border border-gray-300 dark:border-white/10 bg-white dark:bg-gray-800 px-[0.85rem] text-[0.875rem] font-medium text-gray-700 dark:text-gray-200 hover:border-primary/45 hover:bg-primary/5 disabled:opacity-55 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
-        disabled={disabled}
-        onClick={() => inputRef.current?.click()}
+      <label
+        htmlFor={inputId}
+        className={`${salaryStyles.uploadBtn} ${
+          disabled ? "pointer-events-none cursor-not-allowed opacity-55" : ""
+        }`}
       >
         <i className="ri-upload-2-line" aria-hidden="true" />
         Choose file
-      </button>
-      <small className="text-gray-500 text-xs mt-1 block">
+      </label>
+      <small className={salaryStyles.fieldHint}>
         Supported formats: JPG, JPEG, PNG, PDF
       </small>
     </div>
@@ -193,7 +194,7 @@ export function DocumentsStep() {
           existingDocs.map((doc) => (
             <div
               key={doc.tempId}
-              className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3 bg-gray-50 dark:bg-gray-800"
+              className="relative grid grid-cols-12 gap-3 border rounded-sm p-3 mb-3 bg-gray-50 dark:bg-gray-800"
             >
               <button
                 type="button"
@@ -257,7 +258,7 @@ export function DocumentsStep() {
           {drafts.map((draft) => (
             <div
               key={draft.draftId}
-              className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3"
+              className="relative grid grid-cols-12 gap-2 items-start border rounded-sm p-3 mb-3"
             >
               <button
                 type="button"
@@ -267,12 +268,16 @@ export function DocumentsStep() {
                 ✕
               </button>
 
-              <div className="xl:col-span-4 col-span-12">
+              <div
+                className={`${
+                  draft.type === "Other" ? "xl:col-span-4" : "xl:col-span-5"
+                } col-span-12 flex flex-col`}
+              >
                 <label className="form-label">
                   Document Type <span className="text-red-500">*</span>
                 </label>
                 <select
-                  className="form-control w-full !rounded-md h-11"
+                  className="form-control !w-full !rounded-md h-11"
                   value={draft.type}
                   onChange={(e) => {
                     const t = e.target.value;
@@ -294,10 +299,13 @@ export function DocumentsStep() {
                   ))}
                   <option value="Other">Other</option>
                 </select>
+                <div className="mt-1 min-h-4 text-xs opacity-0 select-none" aria-hidden="true">
+                  helper
+                </div>
               </div>
 
               {draft.type === "Other" && (
-                <div className="xl:col-span-4 col-span-12">
+                <div className="xl:col-span-4 col-span-12 flex flex-col">
                   <label className="form-label">
                     Custom Document Name <span className="text-red-500">*</span>
                   </label>
@@ -310,10 +318,17 @@ export function DocumentsStep() {
                       updateDraft(draft.draftId, { customName: e.target.value })
                     }
                   />
+                  <div className="mt-1 min-h-4 text-xs opacity-0 select-none" aria-hidden="true">
+                    helper
+                  </div>
                 </div>
               )}
 
-              <div className="xl:col-span-4 col-span-12">
+              <div
+                className={`${
+                  draft.type === "Other" ? "xl:col-span-4" : "xl:col-span-7"
+                } col-span-12 flex flex-col`}
+              >
                 <label className="form-label">
                   Upload File <span className="text-red-500">*</span>
                 </label>
@@ -331,7 +346,7 @@ export function DocumentsStep() {
           {newDocs.map((doc) => (
             <div
               key={doc.tempId}
-              className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3"
+              className="relative grid grid-cols-12 gap-3 border rounded-sm p-3 mb-3"
             >
               <button
                 type="button"

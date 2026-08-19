@@ -147,7 +147,16 @@ export function toSelfServicePayload(
 
   if (include("work-experience")) {
     // currentlyWorking is a boolean and survives compact(); blank dates do not.
-    out.experiences = n.experiences.map((x) => compact({ ...x }));
+    out.experiences = n.experiences.map((x) =>
+      compact({
+        company: x.company,
+        role: x.role,
+        startDate: x.startDate,
+        endDate: x.endDate,
+        currentlyWorking: x.currentlyWorking,
+        description: x.description,
+      }),
+    );
   }
 
   if (include("documents")) {

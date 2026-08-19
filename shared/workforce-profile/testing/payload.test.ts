@@ -151,6 +151,38 @@ describe("payload.toSelfServicePayload — backend Joi contract", () => {
     expect(exp.currentlyWorking).toBe(true);
   });
 
+  it("keeps filled experience startDate through self-service payload", () => {
+    const payload = toSelfServicePayload(normalize(baseState()), {
+      "work-experience": true,
+    }) as Record<string, unknown>;
+    const exp = (payload.experiences as Record<string, unknown>[])[0];
+    expect(exp.startDate).toBe("2020-01-01");
+  });
+
+  it("keeps filled experience dates when not currently working", () => {
+    const state = makeFormState({
+      experience: {
+        experiences: [
+          {
+            id: "x",
+            company: "Acme",
+            role: "Eng",
+            startDate: "2020-01-01",
+            endDate: "2021-06-30",
+            currentlyWorking: false,
+            description: "",
+          },
+        ],
+      },
+    });
+    const payload = toSelfServicePayload(normalize(state), {
+      "work-experience": true,
+    }) as Record<string, unknown>;
+    const exp = (payload.experiences as Record<string, unknown>[])[0];
+    expect(exp.startDate).toBe("2020-01-01");
+    expect(exp.endDate).toBe("2021-06-30");
+  });
+
   it("drops an empty salary slip month", () => {
     const state = makeFormState({
       salary: {

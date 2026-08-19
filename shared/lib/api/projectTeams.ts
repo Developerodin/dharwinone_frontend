@@ -33,6 +33,17 @@ export async function listTeamGroups(
   return data;
 }
 
+/** Auth-only roster memberships for the logged-in user (no teams.read required). */
+export interface MyTeamGroupsResponse {
+  results: TeamGroup[];
+  totalResults: number;
+}
+
+export async function listMyTeamGroups(): Promise<MyTeamGroupsResponse> {
+  const { data } = await apiClient.get<MyTeamGroupsResponse>("/project-teams/mine");
+  return data;
+}
+
 export async function getTeamGroupById(id: string): Promise<TeamGroup> {
   const { data } = await apiClient.get<TeamGroup>(`/project-teams/${id}`);
   return data;

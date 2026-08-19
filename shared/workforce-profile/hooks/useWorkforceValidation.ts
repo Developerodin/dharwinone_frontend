@@ -23,6 +23,41 @@ export type ValidationRule = {
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const yearRegex = /^\d{4}$/;
+const todayISO = (): string => new Date().toISOString().slice(0, 10);
+
+const educationRowUsed = (e: {
+  degree: string;
+  institute: string;
+  location: string;
+  startYear: string;
+  endYear: string;
+  description: string;
+}) =>
+  !!(
+    e.degree.trim() ||
+    e.institute.trim() ||
+    e.location.trim() ||
+    e.startYear.trim() ||
+    e.endYear.trim() ||
+    e.description.trim()
+  );
+
+const experienceRowUsed = (x: {
+  company: string;
+  role: string;
+  startDate: string;
+  endDate: string;
+  currentlyWorking: boolean;
+  description: string;
+}) =>
+  !!(
+    x.company.trim() ||
+    x.role.trim() ||
+    x.startDate.trim() ||
+    x.endDate.trim() ||
+    x.description.trim() ||
+    x.currentlyWorking
+  );
 
 export const DEFAULT_RULES: ValidationRule[] = [
   {
@@ -94,6 +129,10 @@ export const DEFAULT_RULES: ValidationRule[] = [
     field: "qualification.educations[].startYear",
     section: "qualification",
     test: (s) => {
+      const missing = s.qualification.educations.find(
+        (e) => educationRowUsed(e) && !e.startYear.trim(),
+      );
+      if (missing) return "Start year is required";
       const bad = s.qualification.educations.find(
         (e) => e.startYear && !yearRegex.test(e.startYear),
       );
@@ -104,24 +143,55 @@ export const DEFAULT_RULES: ValidationRule[] = [
     field: "qualification.educations[].endYear",
     section: "qualification",
     test: (s) => {
+      const missing = s.qualification.educations.find(
+        (e) => educationRowUsed(e) && !e.endYear.trim(),
+      );
+      if (missing) return "End year is required";
       const bad = s.qualification.educations.find(
         (e) => e.endYear && !yearRegex.test(e.endYear),
       );
-      return bad ? "End year must be a 4-digit year" : null;
+      if (bad) return "End year must be a 4-digit year";
+      const rangeBad = s.qualification.educations.find(
+        (e) =>
+          e.startYear &&
+          e.endYear &&
+          yearRegex.test(e.startYear) &&
+          yearRegex.test(e.endYear) &&
+          Number(e.startYear) > Number(e.endYear),
+      );
+      return rangeBad ? "End year must be on or after start year" : null;
+    },
+  },
+  {
+    field: "experience.experiences[].startDate",
+    section: "work-experience",
+    test: (s) => {
+      const missing = s.experience.experiences.find(
+        (x) => experienceRowUsed(x) && !x.startDate.trim(),
+      );
+      return missing ? "Start date is required" : null;
     },
   },
   {
     field: "experience.experiences[].endDate",
     section: "work-experience",
     test: (s) => {
-      const bad = s.experience.experiences.find(
+      const missing = s.experience.experiences.find(
+        (x) => experienceRowUsed(x) && !x.currentlyWorking && !x.endDate.trim(),
+      );
+      if (missing) return "End date is required";
+      const rangeBad = s.experience.experiences.find(
         (x) =>
           !x.currentlyWorking &&
           x.startDate &&
           x.endDate &&
           x.endDate < x.startDate,
       );
-      return bad ? "End date must be after start date" : null;
+      if (rangeBad) return "End date must be after start date";
+      const futureBad = s.experience.experiences.find(
+        (x) => x.endDate && x.endDate > todayISO(),
+      );
+      return futureBad ? "End date cannot be in the future" : null;
     },
   },
   {

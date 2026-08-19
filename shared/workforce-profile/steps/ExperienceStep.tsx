@@ -24,8 +24,11 @@ export function ExperienceStep() {
   const { issuesByField } = useWizardContext();
   const [expOpen, setExpOpen] = useState(false);
 
+  const startErr =
+    issuesByField["experience.experiences[].startDate"]?.[0]?.message ?? null;
   const expErr =
     issuesByField["experience.experiences[].endDate"]?.[0]?.message ?? null;
+  const dateErr = startErr || expErr;
 
   return (
     <div className="p-4">
@@ -64,7 +67,7 @@ export function ExperienceStep() {
           + Add Experience
         </button>
       </div>
-      {expErr && <div className="text-red-500 text-sm mb-3">{expErr}</div>}
+      {dateErr && <div className="text-red-500 text-sm mb-3">{dateErr}</div>}
 
       {expOpen &&
         experiences.map((exp, index) => (
@@ -112,7 +115,7 @@ export function ExperienceStep() {
             </label>
             <input
               type="date"
-              className="form-control w-full !rounded-md"
+              className={`form-control w-full !rounded-md${startErr ? " border-red-500" : ""}`}
               value={exp.startDate}
               onChange={(e) => updateExperienceRow(exp.id, { startDate: e.target.value })}
             />
@@ -124,7 +127,7 @@ export function ExperienceStep() {
             </label>
             <input
               type="date"
-              className="form-control w-full !rounded-md"
+              className={`form-control w-full !rounded-md${expErr && !exp.currentlyWorking ? " border-red-500" : ""}`}
               value={exp.endDate}
               onChange={(e) => updateExperienceRow(exp.id, { endDate: e.target.value })}
               disabled={exp.currentlyWorking}

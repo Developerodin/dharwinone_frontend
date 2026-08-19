@@ -141,3 +141,166 @@ export function canJoinMeeting(scheduledAt: string, durationMinutes: number, now
   const t = now.getTime();
   return t >= start - 10 * 60000 && t <= start + durationMinutes * 60000;
 }
+
+/** TeamPulseCard header from PM TeamGroup names (sorted primary first). */
+export function formatTeamPulseTitle(teamNames: string[]): string {
+  const names = teamNames.map((n) => String(n ?? "").trim()).filter(Boolean);
+  if (names.length === 0) return "Your team";
+  if (names.length === 1) return `Your team · ${names[0]}`;
+  return `Your team · ${names[0]} +${names.length - 1}`;
+}
+
+/** Day-block reasons that prevent punch-in (priority: Holiday → Leave → Week Off). */
+export type PunchInBlockReason = "HOLIDAY" | "LEAVE" | "WEEK_OFF";
+
+export type PunchInEligibility =
+  | { allowed: true }
+  | {
+      allowed: false;
+      reason: PunchInBlockReason;
+      /** Button / chip label shown on the Today card. */
+      label: string;
+      holidayName?: string;
+      /** When holiday is primary but leave also applies. */
+      alsoOnLeave?: boolean;
+    };
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+function localDateIso(now: Date): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function localWeekdayName(now: Date): string {
+  return DAY_NAMES[now.getDay()];
+}
+
+/** True when an approved leave request covers the local calendar day. */
+export function isApprovedLeaveOnDate(
+  requests: LeaveRequest[],
+  now: Date = new Date(),
+): boolean {
+  const todayIso = localDateIso(now);
+  for (const r of requests) {
+    if (r.status !== "approved") continue;
+    const dates = Array.isArray(r.dates) ? r.dates : [];
+    if (dates.some((d) => String(d).slice(0, 10) === todayIso)) return true;
+  }
+  return false;
+}
+
+/** True when today's attendance ledger already has a Leave row. */
+export function hasLeaveAttendanceToday(
+  records: AttendanceRecord[],
+  now: Date = new Date(),
+): boolean {
+  const todayIso = localDateIso(now);
+  return records.some(
+    (r) =>
+      String(r.date).slice(0, 10) === todayIso &&
+      String(r.status).toLowerCase() === "leave",
+  );
+}
+
+/**
+ * Resolve punch-in eligibility for the employee dashboard Today card.
+ * Priority matches product: Holiday → Approved Leave → Week Off → Working Day.
+ * Week-off only blocks when the employee has an explicit weekOff list (matches backend policy).
+ */
+export function resolvePunchInEligibility(input: {
+  todayIsHoliday?: boolean;
+  todayHolidayTitle?: string | null;
+  leaveRequests?: LeaveRequest[];
+  attendanceRecords?: AttendanceRecord[];
+  weekOffDays?: string[];
+  now?: Date;
+}): PunchInEligibility {
+  const now = input.now ?? new Date();
+  const onLeave =
+    isApprovedLeaveOnDate(input.leaveRequests ?? [], now) ||
+    hasLeaveAttendanceToday(input.attendanceRecords ?? [], now);
+
+  if (input.todayIsHoliday) {
+    return {
+      allowed: false,
+      reason: "HOLIDAY",
+      label: "Holiday",
+      holidayName: input.todayHolidayTitle?.trim() || undefined,
+      alsoOnLeave: onLeave || undefined,
+    };
+  }
+
+  if (onLeave) {
+    return { allowed: false, reason: "LEAVE", label: "On leave" };
+  }
+
+  const weekOff = (input.weekOffDays ?? []).map((d) => d.trim()).filter(Boolean);
+  if (weekOff.length > 0 && weekOff.includes(localWeekdayName(now))) {
+    return { allowed: false, reason: "WEEK_OFF", label: "Week off" };
+  }
+
+  return { allowed: true };
+}
+
+export function punchInBlockedCopy(block: Extract<PunchInEligibility, { allowed: false }>): {
+  title: string;
+  body: string;
+} {
+  const title = "Punch in unavailable";
+  if (block.reason === "HOLIDAY") {
+    const name = block.holidayName || "Holiday";
+    const leaveNote = block.alsoOnLeave ? " You also have approved leave today." : "";
+    return {
+      title,
+      body: `Today is a holiday: ${name}. You cannot record attendance on a holiday.${leaveNote}`,
+    };
+  }
+  if (block.reason === "LEAVE") {
+    return {
+      title,
+      body: "You are on approved leave today. You cannot record attendance while you are on leave.",
+    };
+  }
+  return {
+    title,
+    body: "Today is your scheduled week off. You cannot record attendance on a week-off day.",
+  };
+}
+
+/** Parse PUNCH_IN_BLOCKED from axios error response (dashboard overlay). */
+export function parsePunchInBlockedError(err: unknown): Extract<PunchInEligibility, { allowed: false }> | null {
+  const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
+  if (!data) return null;
+
+  const details = (data.details ?? {}) as { reason?: string; holidayName?: string };
+  if (data.errorCode === "PUNCH_IN_BLOCKED") {
+    const reason = details.reason;
+    if (reason === "HOLIDAY" || reason === "LEAVE" || reason === "WEEK_OFF") {
+      const label = reason === "HOLIDAY" ? "Holiday" : reason === "LEAVE" ? "On leave" : "Week off";
+      return {
+        allowed: false,
+        reason,
+        label,
+        holidayName: typeof details.holidayName === "string" ? details.holidayName : undefined,
+      };
+    }
+  }
+
+  // Legacy policy codes (pre-PUNCH_IN_BLOCKED envelope)
+  const legacy = typeof data.errorCode === "string" ? String(data.errorCode) : "";
+  if (legacy === "HOLIDAY_BLOCKED") {
+    return {
+      allowed: false,
+      reason: "HOLIDAY",
+      label: "Holiday",
+      holidayName: typeof details.holidayName === "string" ? details.holidayName : undefined,
+    };
+  }
+  if (legacy === "LEAVE_BLOCKED") {
+    return { allowed: false, reason: "LEAVE", label: "On leave" };
+  }
+  if (legacy === "WEEK_OFF_BLOCKED") {
+    return { allowed: false, reason: "WEEK_OFF", label: "Week off" };
+  }
+  return null;
+}

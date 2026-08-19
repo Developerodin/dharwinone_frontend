@@ -261,7 +261,7 @@ function DraftFileButton({
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   return (
-    <div>
+    <div className="flex w-full flex-col">
       <input
         ref={inputRef}
         type="file"
@@ -276,7 +276,7 @@ function DraftFileButton({
       />
       <button
         type="button"
-        className="inline-flex h-11 items-center gap-1.5 self-start whitespace-nowrap rounded-[0.35rem] border border-gray-300 dark:border-white/10 bg-white dark:bg-gray-800 px-[0.85rem] text-[0.875rem] font-medium text-gray-700 dark:text-gray-200 hover:border-primary/45 hover:bg-primary/5 disabled:opacity-55 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+        className="inline-flex h-11 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[0.35rem] border border-gray-300 dark:border-white/10 bg-white dark:bg-gray-800 px-[0.85rem] text-[0.875rem] font-medium text-gray-700 dark:text-gray-200 hover:border-primary/45 hover:bg-primary/5 disabled:opacity-55 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
         disabled={disabled}
         onClick={() => inputRef.current?.click()}
       >
@@ -3319,7 +3319,7 @@ export const EmployeeForm = ({
             <div>
               <h6 className="text-sm font-semibold mb-3 text-gray-700 dark:text-gray-300">New Documents</h6>
               {documentsList.map((doc, index) => (
-                <div key={doc.id} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3">
+                <div key={doc.id} className="relative grid grid-cols-12 gap-4 items-start border rounded-sm p-3 mb-3">
                   <button
                     type="button"
                     onClick={() => setDocumentsList(documentsList.filter(d => d.id !== doc.id))}
@@ -3328,7 +3328,7 @@ export const EmployeeForm = ({
                     ✕
                   </button>
 
-              <div className="xl:col-span-4 col-span-12">
+              <div className="xl:col-span-4 col-span-12 flex flex-col">
                 <label className="form-label">Document Type <span className="text-red-500">*</span></label>
                 <select
                   className={`form-control w-full !rounded-md h-11 ${fieldErrors['documents'] ? 'border-red-500' : ''}`}
@@ -3364,11 +3364,14 @@ export const EmployeeForm = ({
                   </optgroup>
                   <option value="Other">Other</option>
                 </select>
+                <div className="mt-1 min-h-4 text-xs opacity-0 select-none" aria-hidden="true">
+                  helper
+                </div>
               </div>
 
               {/* Custom Document Name Input - Show only when "Other" is selected */}
               {doc.name === "Other" && (
-                <div className="xl:col-span-4 col-span-12">
+                <div className="xl:col-span-4 col-span-12 flex flex-col">
                   <label className="form-label">Custom Document Name <span className="text-red-500">*</span></label>
                   <input
                     type="text"
@@ -3382,10 +3385,13 @@ export const EmployeeForm = ({
                     }}
                     required
                   />
+                  <div className="mt-1 min-h-4 text-xs opacity-0 select-none" aria-hidden="true">
+                    helper
+                  </div>
                 </div>
               )}
 
-              <div className="xl:col-span-4 col-span-12">
+              <div className="xl:col-span-4 col-span-12 flex flex-col">
                 <label className="form-label">Upload File <span className="text-red-500">*</span></label>
                 <DraftFileButton
                   disabled={!doc.name || (doc.name === "Other" && !doc.customName.trim())}

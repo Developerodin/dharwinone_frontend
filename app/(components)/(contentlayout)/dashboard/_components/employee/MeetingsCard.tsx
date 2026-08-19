@@ -31,7 +31,7 @@ export default function MeetingsCard({ meetings, loading }: { meetings: Internal
       ) : !next ? (
         <div className="py-6 text-center">
           <p className="text-[0.8125rem] font-semibold">No meetings scheduled</p>
-          <p className="mt-1 text-[0.72rem] text-textmuted dark:text-white/50">Invitations you accept appear here.</p>
+                    <p className="mt-1 text-[0.72rem] text-textmuted dark:text-white/50">Meetings you&apos;re invited to appear here.</p>
         </div>
       ) : (
         <>

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import DashboardCard from "./DashboardCard";
 import { countByStatus, TASK_STATUS_META } from "@/shared/lib/dashboard/employeeDashboard";
-import type { Task, TaskStatus } from "@/shared/lib/api/tasks";
+import { getTaskId, type Task, type TaskStatus } from "@/shared/lib/api/tasks";
 
 export default function MyTasksCard({ tasks, loading }: { tasks: Task[]; loading: boolean }) {
   const [active, setActive] = useState<TaskStatus | "all">("all");
@@ -45,10 +45,11 @@ export default function MyTasksCard({ tasks, loading }: { tasks: Task[]; loading
             Nothing in {active === "all" ? "your list" : TASK_STATUS_META.find((s) => s.key === active)?.label}.
           </p>
         ) : (
-          shown.map((t) => {
+          shown.map((t, i) => {
             const meta = TASK_STATUS_META.find((s) => s.key === t.status);
+            const taskId = getTaskId(t) || t._id || t.id || `task-${i}`;
             return (
-              <div key={t._id} className="flex min-h-[2.625rem] items-center gap-2.5 border-b border-defaultborder/60 py-2 last:border-b-0 dark:border-white/[0.07]">
+              <div key={taskId} className="flex min-h-[2.625rem] items-center gap-2.5 border-b border-defaultborder/60 py-2 last:border-b-0 dark:border-white/[0.07]">
                 <span aria-hidden="true" title={meta?.label} className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: meta?.color }} />
                 <span className="min-w-0 flex-1 truncate text-[0.78rem]">{t.title}</span>
                 <span className="shrink-0 text-[0.7rem] text-textmuted dark:text-white/50">{meta?.label}</span>

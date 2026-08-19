@@ -10,6 +10,7 @@ import {
   nextMeeting,
   minutesUntil,
   canJoinMeeting,
+  formatTeamPulseTitle,
   TASK_STATUS_META,
 } from "@/shared/lib/dashboard/employeeDashboard";
 import type { Task, TaskStatus } from "@/shared/lib/api/tasks";
@@ -207,5 +208,18 @@ describe("meetings", () => {
   it("blocks joining after it ends", () => {
     const now = new Date("2026-08-18T11:45:00.000Z");
     expect(canJoinMeeting("2026-08-18T11:00:00.000Z", 30, now)).toBe(false);
+  });
+});
+
+describe("formatTeamPulseTitle", () => {
+  it("keeps Your team when unassigned", () => {
+    expect(formatTeamPulseTitle([])).toBe("Your team");
+    expect(formatTeamPulseTitle(["", "  "])).toBe("Your team");
+  });
+  it("shows a single team name after the label", () => {
+    expect(formatTeamPulseTitle(["Engineering"])).toBe("Your team · Engineering");
+  });
+  it("shows the first team plus overflow count", () => {
+    expect(formatTeamPulseTitle(["Engineering", "Platform", "QA"])).toBe("Your team · Engineering +2");
   });
 });

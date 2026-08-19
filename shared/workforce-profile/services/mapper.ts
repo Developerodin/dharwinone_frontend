@@ -36,6 +36,27 @@ function asBool(v: unknown): boolean {
   return v === true;
 }
 
+/**
+ * HTML `<input type="date">` only accepts `yyyy-mm-dd`.
+ * GET/PATCH `/auth/me/with-candidate` returns Mongo Date fields as full ISO
+ * (`2022-06-01T00:00:00.000Z`); feeding that straight into the input blanks it
+ * even though the value was saved — coerce to the date-only prefix.
+ */
+function asDateInputValue(v: unknown): string {
+  if (v == null || v === "") return "";
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    return v.toISOString().slice(0, 10);
+  }
+  const raw = typeof v === "string" ? v.trim() : String(v);
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const isoPrefix = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoPrefix) return isoPrefix[1];
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return "";
+}
+
 function readSchemaVersion(data: unknown): number {
   if (data && typeof data === "object" && "__schemaVersion" in (data as Record<string, unknown>)) {
     const raw = (data as Record<string, unknown>).__schemaVersion;
@@ -167,8 +188,8 @@ export function mapToFormState(source: WorkforceSource): WorkforceFormState {
     id: nextId(),
     company: asString(x.company),
     role: asString(x.role),
-    startDate: asString(x.startDate),
-    endDate: asString(x.endDate),
+    startDate: asDateInputValue(x.startDate),
+    endDate: asDateInputValue(x.endDate),
     currentlyWorking: asBool((x as { currentlyWorking?: boolean }).currentlyWorking),
     description: asString((x as { description?: string }).description),
   }));

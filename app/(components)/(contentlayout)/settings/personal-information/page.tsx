@@ -1957,11 +1957,15 @@ export default function PersonalInformationPage() {
                   </div>
                 )}
                 {documentsList.map((doc, i) => (
-                  <div key={doc.id} className="p-3 border border-defaultborder rounded-md sm:grid grid-cols-12 gap-3">
-                    <div className="col-span-12 sm:col-span-4">
-                      <label className="form-label text-xs">Type</label>
+                  <div key={doc.id} className="p-3 border border-defaultborder rounded-md grid grid-cols-12 gap-3 items-start">
+                    <div
+                      className={`col-span-12 ${
+                        doc.name === "Other" ? "sm:col-span-4" : "sm:col-span-6"
+                      } flex flex-col`}
+                    >
+                      <label className="form-label text-xs !mb-1">Type</label>
                       <select
-                        className="form-control !rounded-md"
+                        className="form-control !rounded-md h-11"
                         value={doc.name}
                         disabled={!candidate}
                         onChange={(e) => {
@@ -1995,22 +1999,32 @@ export default function PersonalInformationPage() {
                         </optgroup>
                         <option value="Other">Other</option>
                       </select>
+                      <div className="mt-1 min-h-4 text-xs opacity-0 select-none" aria-hidden="true">
+                        helper
+                      </div>
                     </div>
                     {doc.name === "Other" && (
-                      <div className="col-span-12 sm:col-span-4">
-                        <label className="form-label text-xs">Label</label>
+                      <div className="col-span-12 sm:col-span-4 flex flex-col">
+                        <label className="form-label text-xs !mb-1">Label</label>
                         <input
                           type="text"
-                          className="form-control !rounded-md"
+                          className="form-control !rounded-md h-11"
                           placeholder="Document name"
                           value={doc.customName}
                           disabled={!candidate}
                           onChange={(e) => setDocumentsList((arr) => arr.map((d, j) => (j === i ? { ...d, customName: e.target.value } : d)))}
                         />
+                        <div className="mt-1 min-h-4 text-xs opacity-0 select-none" aria-hidden="true">
+                          helper
+                        </div>
                       </div>
                     )}
-                    <div className="col-span-12 sm:col-span-4">
-                      <label className="form-label text-xs">File</label>
+                    <div
+                      className={`col-span-12 ${
+                        doc.name === "Other" ? "sm:col-span-4" : "sm:col-span-6"
+                      } flex flex-col`}
+                    >
+                      <label className="form-label text-xs !mb-1">File</label>
                       <input
                         type="file"
                         accept=".jpg,.jpeg,.png,.pdf"
@@ -2021,6 +2035,9 @@ export default function PersonalInformationPage() {
                           if (file) setDocumentsList((arr) => arr.map((d, j) => (j === i ? { ...d, file } : d)));
                         }}
                       />
+                      <small className="mt-1 min-h-4 text-xs text-defaulttextcolor/70">
+                        Supported formats: JPG, JPEG, PNG, PDF
+                      </small>
                     </div>
                     <div className="col-span-12 sm:col-span-12 flex justify-end">
                       <button type="button" className="ti-btn ti-btn-soft-danger ti-btn-sm" onClick={() => setDocumentsList((arr) => arr.filter((d) => d.id !== doc.id))}>
