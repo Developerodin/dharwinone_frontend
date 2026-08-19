@@ -191,6 +191,14 @@ describe("meetings", () => {
   it("returns null when all are past", () => {
     expect(nextMeeting([meetings[2]], NOW)).toBeNull();
   });
+  it("still returns an in-progress meeting after start", () => {
+    const now = new Date("2026-08-18T11:10:00.000Z");
+    expect(nextMeeting(meetings, now)?.meetingId).toBe("a");
+  });
+  it("drops a meeting once its duration window ends", () => {
+    const now = new Date("2026-08-18T11:35:00.000Z");
+    expect(nextMeeting([{ ...meetings[1] }], now)).toBeNull();
+  });
   it("counts minutes until start", () => {
     expect(minutesUntil("2026-08-18T11:00:00.000Z", NOW)).toBe(30);
   });

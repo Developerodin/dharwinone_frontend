@@ -123,11 +123,37 @@ export function monthStripDays(
   });
 }
 
+/** End instant = scheduled start + duration (defaults to 60 min if missing). */
+export function meetingEndsAtMs(scheduledAt: string, durationMinutes: number): number {
+  const start = new Date(scheduledAt).getTime();
+  if (Number.isNaN(start)) return NaN;
+  const mins = Number(durationMinutes) > 0 ? Number(durationMinutes) : 60;
+  return start + mins * 60000;
+}
+
+/** Still show on the dashboard until the meeting window ends (not only before start). */
+export function isMeetingActiveOrUpcoming(
+  scheduledAt: string,
+  durationMinutes: number,
+  now: Date = new Date(),
+): boolean {
+  const end = meetingEndsAtMs(scheduledAt, durationMinutes);
+  return !Number.isNaN(end) && end >= now.getTime();
+}
+
+/** Soonest meeting that has not ended yet (includes in-progress). */
 export function nextMeeting(meetings: InternalMeeting[], now: Date = new Date()): InternalMeeting | null {
-  const future = meetings
-    .filter((m) => new Date(m.scheduledAt).getTime() >= now.getTime())
+  const relevant = meetings
+    .filter((m) => isMeetingActiveOrUpcoming(m.scheduledAt, m.durationMinutes, now))
     .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
-  return future[0] ?? null;
+  return relevant[0] ?? null;
+}
+
+/** All not-yet-ended meetings, soonest first. */
+export function visibleMeetings(meetings: InternalMeeting[], now: Date = new Date()): InternalMeeting[] {
+  return meetings
+    .filter((m) => isMeetingActiveOrUpcoming(m.scheduledAt, m.durationMinutes, now))
+    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
 }
 
 export function minutesUntil(iso: string, now: Date = new Date()): number {
@@ -139,7 +165,8 @@ export function canJoinMeeting(scheduledAt: string, durationMinutes: number, now
   const start = new Date(scheduledAt).getTime();
   if (Number.isNaN(start)) return false;
   const t = now.getTime();
-  return t >= start - 10 * 60000 && t <= start + durationMinutes * 60000;
+  const end = meetingEndsAtMs(scheduledAt, durationMinutes);
+  return t >= start - 10 * 60000 && t <= end;
 }
 
 /** TeamPulseCard header from PM TeamGroup names (sorted primary first). */
