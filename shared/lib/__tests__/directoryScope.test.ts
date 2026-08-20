@@ -32,11 +32,17 @@ describe("deriveDirectoryScope", () => {
     expect(deriveDirectoryScope(["chats.manage", "users.manage"], true)).toBe("none");
   });
 
-  // Flag off must mirror the backend's { kind: 'all' } short-circuit, or "unset the flag" is not
-  // a real rollback: the UI would keep hiding a directory the API is still serving.
-  it("returns all when the flag is off, whatever the permissions", () => {
+  it("returns all when the flag is off and permissions are empty (legacy rollback / unloaded)", () => {
     expect(deriveDirectoryScope([], false)).toBe("all");
-    expect(deriveDirectoryScope(["chats.read"], false)).toBe("all");
-    expect(deriveDirectoryScope(["communication.directory:referred"], false)).toBe("all");
+  });
+
+  it("returns none for restricted permissions when the flag is off (stale frontend flag)", () => {
+    expect(deriveDirectoryScope(["chats.read"], false)).toBe("none");
+    expect(deriveDirectoryScope(["chats.manage", "users.manage"], false)).toBe("none");
+  });
+
+  it("still honors explicit directory permissions when the flag is off", () => {
+    expect(deriveDirectoryScope(["communication.directory:referred"], false)).toBe("referred");
+    expect(deriveDirectoryScope(["communication.directory:all"], false)).toBe("all");
   });
 });

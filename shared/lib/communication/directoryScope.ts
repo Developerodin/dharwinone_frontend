@@ -15,20 +15,27 @@ export const DIRECTORY_REFERRED_PERMISSION = "communication.directory:referred";
 export const DIRECTORY_RBAC_FLAG = "communicationDirectoryRbac";
 
 /**
- * `flagEnabled` is REQUIRED, not optional.
+ * `flagEnabled` gates the strict RBAC path but is not the only signal.
  *
- * The backend returns { kind: 'all' } whenever the flag is off, so a client that derived scope
- * from permissions alone would hide the directory from restricted roles while the API still served
- * it — meaning "unset the flag" would NOT roll the user-visible behaviour back. Taking the flag as
- * a parameter keeps this function pure and testable while making flag-off a genuine full rollback
- * on both sides.
+ * When the flag is on, scope follows permissions exactly (matches backend directoryScope()).
+ * When the flag is off/stale/missing on the client, users who lack both directory:* grants
+ * still get `"none"` once permissions are loaded — fail-closed for Employee-type roles on
+ * Vercel builds that omit NEXT_PUBLIC_COMMUNICATIONDIRECTORYRBAC. Empty permissions + flag
+ * off keeps legacy `"all"` for intentional rollback.
  */
 export function deriveDirectoryScope(
   permissions: string[],
   flagEnabled: boolean
 ): DirectoryScope {
-  if (!flagEnabled) return "all";
   if (permissions.includes(DIRECTORY_ALL_PERMISSION)) return "all";
   if (permissions.includes(DIRECTORY_REFERRED_PERMISSION)) return "referred";
-  return "none";
+  if (flagEnabled) return "none";
+
+  // Fail-closed when the frontend flag is missing or stale (NEXT_PUBLIC_* not baked at
+  // Vercel build, /feature-flags fetch failed, or session cache false) but the user
+  // clearly lacks directory grants. Employee-type roles still get EmailLookupPanel-only UI.
+  if (permissions.length > 0) return "none";
+
+  // Legacy rollback: flag off and permissions not yet known → full directory UI.
+  return "all";
 }
