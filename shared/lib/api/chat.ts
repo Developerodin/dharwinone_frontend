@@ -238,11 +238,73 @@ export async function endCallByRoom(roomName: string): Promise<{ success: boolea
   return data;
 }
 
+/** The single discovery projection returned by every contact surface. Spec §3.3. */
+export interface ContactCard {
+  id: string;
+  name: string;
+  avatar: string | null;
+  /** Directory surfaces only; withheld on exact-email lookup. */
+  roleName?: string | null;
+  /** Withheld on the group-relationship path. */
+  email?: string;
+}
+
+/** The directory response envelope, matching what the backend actually returns. */
+export interface PaginatedContactCards {
+  results: ContactCard[];
+  page: number;
+  limit: number;
+  totalPages: number;
+  totalResults: number;
+}
+
+// Typed as the full envelope even though the current UI reads only `results`: the backend
+// deliberately preserves the pagination metadata (spec §3.1), and a type that describes less than
+// the contract invites a future reader to assume the fields are absent.
 export async function searchUsers(params: {
   search: string;
   limit?: number;
-}): Promise<{ results: { id: string; name: string; email: string }[] }> {
+  page?: number;
+}): Promise<PaginatedContactCards> {
   const { data } = await apiClient.get(`${BASE}/users/search`, { params });
+  return data;
+}
+
+/** Distinguishes a real miss from every other failure mode. */
+export type LookupResult =
+  | { status: "found"; contact: ContactCard }
+  | { status: "not_found" }
+  | { status: "rate_limited" }
+  | { status: "error" };
+
+/**
+ * Exact-email discovery. Never call this on keystroke — submit only. Spec §7.2.
+ *
+ * Maps ONLY 404 to "not found". A blanket `catch { return null }` would report the 429 daily cap,
+ * a 400 validation error, and a 500 as "No registered user found with that email" — telling the
+ * user their colleague does not exist when the real cause was a rate limit, and hiding exactly the
+ * security behaviour §6 exists to provide.
+ */
+export async function lookupUserByEmail(email: string): Promise<LookupResult> {
+  try {
+    const { data } = await apiClient.get<{ contact: ContactCard }>(`${BASE}/users/lookup`, {
+      params: { email },
+    });
+    return { status: "found", contact: data.contact };
+  } catch (err: unknown) {
+    const code = (err as { response?: { status?: number } })?.response?.status;
+    if (code === 404) return { status: "not_found" };
+    if (code === 429) return { status: "rate_limited" };
+    return { status: "error" };
+  }
+}
+
+/**
+ * Start a direct conversation from an exact-email hit. Sends the ADDRESS, never the id from the
+ * ContactCard — the server re-resolves it. Spec §5.4.
+ */
+export async function createDirectConversationByEmail(email: string): Promise<Conversation> {
+  const { data } = await apiClient.post(`${BASE}/conversations`, { type: "direct", email });
   return data;
 }
 

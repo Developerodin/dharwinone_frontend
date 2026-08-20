@@ -1,7 +1,7 @@
 "use client";
 
 import Seo from "@/shared/layout-components/seo/seo";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
 import {
@@ -38,6 +38,12 @@ import { format, formatDistanceToNow } from "date-fns";
 import chatStyles from "./chats.module.scss";
 import { myReactionEmoji, reactionToggleEmoji, splitTextLinks, conversationPreviewText, conversationPreviewAfterDelete } from "./_utils/chatHelpers";
 import { ChatToast, useChatToast } from "./_components/ChatToast";
+import EmailLookupPanel from "./_components/EmailLookupPanel";
+import {
+  deriveDirectoryScope,
+  DIRECTORY_RBAC_FLAG,
+} from "@/shared/lib/communication/directoryScope";
+import { useFeatureFlag } from "@/shared/hooks/useFeatureFlag";
 
 const DEFAULT_AVATAR = "/assets/images/faces/1.jpg";
 
@@ -631,7 +637,13 @@ function GroupInfoPanel({
 
 const Chat = () => {
   const searchParams = useSearchParams();
-  const { user } = useAuth();
+  const { user, permissions, permissionsLoaded } = useAuth();
+  const rbacFlag = useFeatureFlag(DIRECTORY_RBAC_FLAG);
+  const scope = useMemo(
+    () => deriveDirectoryScope(permissions, rbacFlag),
+    [permissions, rbacFlag]
+  );
+  const scopeReady = permissionsLoaded;
   const {
     joinConversation,
     leaveConversation,
@@ -1321,6 +1333,9 @@ const Chat = () => {
 
   const handleSearchUsers = async () => {
     if (!userSearch.trim()) return;
+    // Do not call the directory at `none` scope — the API 403s by design. Also wait for scopeReady
+    // (permissions AND flag), or the directory flashes to a restricted user on first paint. Spec §7.1.
+    if (!scopeReady || scope === "none") return;
     try {
       const res = await searchUsers({ search: userSearch.trim(), limit: 20 });
       setSearchResults(res.results || []);
@@ -1341,6 +1356,7 @@ const Chat = () => {
   useEffect(() => {
     const q = addMemberSearch.trim();
     if (!q) { setAddMemberResults([]); return; }
+    if (!scopeReady || scope === "none") return;
     const t = setTimeout(async () => {
       try {
         const res = await searchUsers({ search: q, limit: 20 });
@@ -1349,7 +1365,7 @@ const Chat = () => {
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addMemberSearch]);
+  }, [addMemberSearch, scopeReady, scope]);
 
   const handleStartChat = async (userOrId: { id?: string; _id?: string }) => {
     const userId = (userOrId as any)?.id || (userOrId as any)?._id;
@@ -2510,6 +2526,7 @@ const Chat = () => {
               setAddMemberSelected={setAddMemberSelected}
               handleSearchUsers={async () => {
                 if (!addMemberSearch.trim()) return;
+                if (!scopeReady || scope === "none") return;
                 const res = await searchUsers({ search: addMemberSearch.trim(), limit: 20 });
                 setAddMemberResults(res.results || []);
               }}
@@ -2577,98 +2594,116 @@ const Chat = () => {
                   <i className="ri-chat-3-line me-1.5 align-middle" />
                   Direct
                 </button>
-                <button
-                  type="button"
-                  className={`${chatStyles.modeBtn} ${newChatMode === "group" ? chatStyles.modeBtnActive : ""}`}
-                  onClick={() => setNewChatMode("group")}
-                >
-                  <i className="ri-group-2-line me-1.5 align-middle" />
-                  Group
-                </button>
+                {scope !== "none" && (
+                  <button
+                    type="button"
+                    className={`${chatStyles.modeBtn} ${newChatMode === "group" ? chatStyles.modeBtnActive : ""}`}
+                    onClick={() => setNewChatMode("group")}
+                  >
+                    <i className="ri-group-2-line me-1.5 align-middle" />
+                    Group
+                  </button>
+                )}
               </div>
             </div>
             <div className={chatStyles.modalBody}>
-              {newChatMode === "group" && (
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-defaulttextcolor/80 mb-1.5">Group name</label>
-                  <input
-                    className="form-control rounded-lg"
-                    placeholder="Enter group name"
-                    value={groupName}
-                    onChange={(e) => setGroupName(e.target.value)}
-                  />
-                </div>
-              )}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-defaulttextcolor/80 mb-1.5" htmlFor="new-chat-user-search">
-                  Add participants
-                </label>
-                <div className={chatStyles.addSearchShell}>
-                  <input
-                    id="new-chat-user-search"
-                    className={chatStyles.addSearchInput}
-                    placeholder="Search by name or email…"
-                    value={userSearch}
-                    onChange={(e) => setUserSearch(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleSearchUsers())}
-                  />
-                  <button
-                    type="button"
-                    className={chatStyles.addSearchSubmit}
-                    onClick={handleSearchUsers}
-                    aria-label="Search users"
-                  >
-                    <i className="ri-search-line text-lg leading-none" />
-                  </button>
-                </div>
-              </div>
-              <div className="mb-4">
-                <p className="text-xs text-defaulttextcolor/60 mb-2">
-                  {newChatMode === "group"
-                    ? "Select at least one user. Click a user to toggle selection."
-                    : "Click a user to start a chat."}
-                </p>
-                <ul className={chatStyles.userPickList}>
-                  {searchResults.length === 0 ? (
-                    <li className="py-8 text-center text-defaulttextcolor/60 text-sm px-3">
-                      {userSearch.trim() ? "No users found. Try a different search." : "Search for users to add."}
-                    </li>
-                  ) : (
-                    searchResults.map((u) => {
-                      const uid = (u as any).id || (u as any)._id;
-                      const isSelected = selectedUserIds.has(String(uid));
-                      return (
-                        <li
-                          key={uid}
-                          className={`${chatStyles.userPickItem} ${
-                            newChatMode === "group" && isSelected ? chatStyles.userPickSelected : ""
-                          }`}
-                          onClick={() =>
-                            newChatMode === "group" ? toggleUserForGroup(String(uid)) : handleStartChat(u)
-                          }
-                        >
-                          {newChatMode === "group" && (
-                            <span
-                              className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center ${
-                                isSelected ? "bg-primary border-primary" : "border-defaultborder dark:border-white/20"
-                              }`}
-                            >
-                              {isSelected && <i className="ri-check-line text-white text-xs" />}
-                            </span>
-                          )}
-                          <span className="avatar avatar-sm avatar-rounded flex-shrink-0">
-                            <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&size=40`} alt="" />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="mb-0 font-medium truncate">{u.name}</p>
-                            <p className="text-[0.75rem] text-defaulttextcolor/60 truncate">{u.email}</p>
-                          </div>
-                        </li>
-                      );
-                    })
+              {scope === "none" ? (
+                <EmailLookupPanel
+                  onStarted={(conversationId) => {
+                    setShowNewChat(false);
+                    getConversation(conversationId).then((conv) => {
+                      setSelectedConversation(conv);
+                      fetchConversations();
+                    });
+                  }}
+                />
+              ) : (
+                <>
+                  {newChatMode === "group" && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-defaulttextcolor/80 mb-1.5">Group name</label>
+                      <input
+                        className="form-control rounded-lg"
+                        placeholder="Enter group name"
+                        value={groupName}
+                        onChange={(e) => setGroupName(e.target.value)}
+                      />
+                    </div>
                   )}
-                </ul>
-              </div>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-defaulttextcolor/80 mb-1.5" htmlFor="new-chat-user-search">
+                      Add participants
+                    </label>
+                    <div className={chatStyles.addSearchShell}>
+                      <input
+                        id="new-chat-user-search"
+                        className={chatStyles.addSearchInput}
+                        placeholder="Search by name or email…"
+                        value={userSearch}
+                        onChange={(e) => setUserSearch(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleSearchUsers())}
+                      />
+                      <button
+                        type="button"
+                        className={chatStyles.addSearchSubmit}
+                        onClick={handleSearchUsers}
+                        aria-label="Search users"
+                      >
+                        <i className="ri-search-line text-lg leading-none" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mb-4">
+                    <p className="text-xs text-defaulttextcolor/60 mb-2">
+                      {scope === "referred"
+                        ? "My referred candidates"
+                        : newChatMode === "group"
+                          ? "Select members"
+                          : "Search for users to add."}
+                    </p>
+                    <ul className={chatStyles.userPickList}>
+                      {searchResults.length === 0 ? (
+                        <li className="py-8 text-center text-defaulttextcolor/60 text-sm px-3">
+                          {userSearch.trim() ? "No users found. Try a different search." : "Search for users to add."}
+                        </li>
+                      ) : (
+                        searchResults.map((u) => {
+                          const uid = (u as any).id || (u as any)._id;
+                          const isSelected = selectedUserIds.has(String(uid));
+                          return (
+                            <li
+                              key={uid}
+                              className={`${chatStyles.userPickItem} ${
+                                newChatMode === "group" && isSelected ? chatStyles.userPickSelected : ""
+                              }`}
+                              onClick={() =>
+                                newChatMode === "group" ? toggleUserForGroup(String(uid)) : handleStartChat(u)
+                              }
+                            >
+                              {newChatMode === "group" && (
+                                <span
+                                  className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center ${
+                                    isSelected ? "bg-primary border-primary" : "border-defaultborder dark:border-white/20"
+                                  }`}
+                                >
+                                  {isSelected && <i className="ri-check-line text-white text-xs" />}
+                                </span>
+                              )}
+                              <span className="avatar avatar-sm avatar-rounded flex-shrink-0">
+                                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&size=40`} alt="" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="mb-0 font-medium truncate">{u.name}</p>
+                                <p className="text-[0.75rem] text-defaulttextcolor/60 truncate">{u.email}</p>
+                              </div>
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
+                  </div>
+                </>
+              )}
             </div>
             <div className={chatStyles.modalFoot}>
               <button
