@@ -11,7 +11,7 @@ export type DirectoryScope = "all" | "referred" | "none";
 export const DIRECTORY_ALL_PERMISSION = "communication.directory:all";
 export const DIRECTORY_REFERRED_PERMISSION = "communication.directory:referred";
 
-/** Same flag the backend reads in directoryScope(). Must stay in sync. */
+/** Frontend-only UI flag key (NEXT_PUBLIC_COMMUNICATIONDIRECTORYRBAC). Backend always enforces RBAC. */
 export const DIRECTORY_RBAC_FLAG = "communicationDirectoryRbac";
 
 /**

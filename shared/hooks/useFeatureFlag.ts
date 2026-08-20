@@ -8,6 +8,9 @@ const ENDPOINT = (key: string) => `/api/v1/feature-flags/${key}`;
 const TIMEOUT_MS = 800;
 const STORAGE_PREFIX = "ff:";
 
+/** Flags resolved only from NEXT_PUBLIC_* / session cache — never fetched from the API. */
+const FRONTEND_ONLY_FLAGS = new Set(["communicationDirectoryRbac"]);
+
 const ENV_KEY = (key: string) =>
   `NEXT_PUBLIC_${key.replace(/-/g, "_").toUpperCase()}`;
 
@@ -53,6 +56,8 @@ export function useFeatureFlag(key: FeatureFlagKey): boolean {
   }, [key]);
 
   useEffect(() => {
+    if (FRONTEND_ONLY_FLAGS.has(key)) return;
+
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     fetch(ENDPOINT(key), { signal: ctrl.signal, credentials: "include" })
