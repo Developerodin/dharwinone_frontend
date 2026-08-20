@@ -1348,10 +1348,11 @@ const Chat = () => {
   useEffect(() => {
     const q = userSearch.trim();
     if (!q) { setSearchResults([]); return; }
+    if (!scopeReady || scope === "none") return;
     const t = setTimeout(() => { handleSearchUsers(); }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userSearch]);
+  }, [userSearch, scopeReady, scope]);
 
   useEffect(() => {
     const q = addMemberSearch.trim();
@@ -2607,7 +2608,11 @@ const Chat = () => {
               </div>
             </div>
             <div className={chatStyles.modalBody}>
-              {scope === "none" ? (
+              {!scopeReady ? (
+                <div className="p-6 text-center text-defaulttextcolor/60 text-sm">
+                  Loading contact options…
+                </div>
+              ) : scope === "none" ? (
                 <EmailLookupPanel
                   onStarted={(conversationId) => {
                     setShowNewChat(false);
