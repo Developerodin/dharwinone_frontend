@@ -15,6 +15,10 @@ import {
   resolveApplicantEmail,
   dedupeApplicants,
 } from '@/shared/lib/ats/applicant-email'
+import {
+  INTERVIEW_SCHEDULE_REJECTED_MESSAGE,
+  isInterviewSchedulingBlocked,
+} from '@/shared/lib/ats/applicationPipeline'
 
 const FUNNEL_TONES: Record<string, string> = {
   Applied: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
@@ -671,19 +675,28 @@ const JobPreviewPanel: React.FC<JobPreviewPanelProps> = ({
                                   </td>
                                   <td className="!py-2 !px-3 text-center overflow-visible">
                                     <div className="flex flex-wrap items-center justify-center gap-1.5">
-                                      <Link
-                                        href={(() => {
-                                          const params = new URLSearchParams()
-                                          params.set('openSchedule', '1')
-                                          if (appId) params.set('applicationId', String(appId))
-                                          if (candidateId) params.set('candidateId', String(candidateId))
-                                          if (previewJob.id) params.set('jobId', String(previewJob.id))
-                                          return `/ats/interviews?${params.toString()}`
-                                        })()}
-                                        className="ti-btn ti-btn-sm ti-btn-primary inline-flex items-center justify-center !py-1 !px-2.5 !text-[0.75rem] whitespace-nowrap min-w-[8.5rem] overflow-visible"
-                                      >
-                                        Schedule Interview
-                                      </Link>
+                                      {isInterviewSchedulingBlocked(app.status) ? (
+                                        <span
+                                          title={INTERVIEW_SCHEDULE_REJECTED_MESSAGE}
+                                          className="ti-btn ti-btn-sm ti-btn-primary inline-flex items-center justify-center !py-1 !px-2.5 !text-[0.75rem] whitespace-nowrap min-w-[8.5rem] overflow-visible opacity-50 cursor-not-allowed"
+                                        >
+                                          Schedule Interview
+                                        </span>
+                                      ) : (
+                                        <Link
+                                          href={(() => {
+                                            const params = new URLSearchParams()
+                                            params.set('openSchedule', '1')
+                                            if (appId) params.set('applicationId', String(appId))
+                                            if (candidateId) params.set('candidateId', String(candidateId))
+                                            if (previewJob.id) params.set('jobId', String(previewJob.id))
+                                            return `/ats/interviews?${params.toString()}`
+                                          })()}
+                                          className="ti-btn ti-btn-sm ti-btn-primary inline-flex items-center justify-center !py-1 !px-2.5 !text-[0.75rem] whitespace-nowrap min-w-[8.5rem] overflow-visible"
+                                        >
+                                          Schedule Interview
+                                        </Link>
+                                      )}
                                       {candidateId && (
                                         <Link
                                           href={`/ats/employees/edit/?id=${candidateId}`}

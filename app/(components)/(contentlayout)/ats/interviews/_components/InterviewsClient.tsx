@@ -20,6 +20,10 @@ import { useConfirm } from '@/shared/components/ui/useConfirm'
 import { getCandidateFilterAgents, type AgentOption } from '@/shared/lib/api/employees'
 import { getJobApplicationById, type JobApplication } from '@/shared/lib/api/jobApplications'
 import { isPublicEmail, pickPublicEmail } from '@/shared/lib/ats/applicant-email'
+import {
+  INTERVIEW_SCHEDULE_REJECTED_MESSAGE,
+  isInterviewSchedulingBlocked,
+} from '@/shared/lib/ats/applicationPipeline'
 import { wallClockToUtc, formatDualZone, getViewerTimezone, utcInstantToWallClock, listTimezones, normalizeTimezone } from '@/shared/lib/timezone'
 import CreateInterviewModal, { type SchedulePrefill } from './CreateInterviewModal'
 import RecordingsModal from './RecordingsModal'
@@ -997,6 +1001,11 @@ export default function InterviewsClient() {
         const app = await appPromise
         addPrefillDebug(`application loaded: candidate=${app?.candidate?.fullName ?? '—'} job=${app?.job?.title ?? '—'} status=${app?.status ?? '—'}`)
         if (cancelled) return
+        if (isInterviewSchedulingBlocked(app?.status)) {
+          setFormError(INTERVIEW_SCHEDULE_REJECTED_MESSAGE)
+          stripParams()
+          return
+        }
         const cand = (app.candidate ?? {}) as {
           _id?: string; id?: string; fullName?: string; email?: string;
           phoneNumber?: string; department?: string | null;
@@ -1220,6 +1229,10 @@ export default function InterviewsClient() {
   const handleScheduleInterviewSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     setFormError(null)
+    if (isInterviewSchedulingBlocked(schedulePrefill?.applicationStatus)) {
+      setFormError(INTERVIEW_SCHEDULE_REJECTED_MESSAGE)
+      return
+    }
     const validHosts = hosts.filter((h) => h.email.trim())
     if (validHosts.length === 0) {
       setFormError('At least one host with email is required')
@@ -1323,7 +1336,7 @@ export default function InterviewsClient() {
     }
 
     await runCreate()
-  }, [hosts, emailInvites, jobs, fetchMeetings, selectedAgentIds, agents, authUser, assignedAgentRecruiter, buildOverlapMessage])
+  }, [hosts, emailInvites, jobs, fetchMeetings, selectedAgentIds, agents, authUser, assignedAgentRecruiter, buildOverlapMessage, schedulePrefill])
 
   // Define columns
   const columns = useMemo(

@@ -10,6 +10,10 @@ import { listJobApplications, type JobApplication } from '@/shared/lib/api/jobAp
 import { getCandidate, type AgentOption } from '@/shared/lib/api/employees'
 import MeetingCreatedSuccess from '@/shared/components/meeting/MeetingCreatedSuccess'
 import { isPublicEmail } from '@/shared/lib/ats/applicant-email'
+import {
+  INTERVIEW_SCHEDULE_REJECTED_MESSAGE,
+  isInterviewSchedulingBlocked,
+} from '@/shared/lib/ats/applicationPipeline'
 import { utcInstantToWallClock } from '@/shared/lib/timezone'
 import InterviewDateTimeOverlay from './InterviewDateTimeOverlay'
 import { to12Hour } from './interviewSlots'
@@ -167,6 +171,7 @@ export default function CreateInterviewModal({
   const [selectedJobId, setSelectedJobId] = useState('')
   const [jobsForCandidate, setJobsForCandidate] = useState<Job[]>([])
   const [applicationJobsLoading, setApplicationJobsLoading] = useState(false)
+  const scheduleBlocked = isInterviewSchedulingBlocked(prefill?.applicationStatus)
   const [applicationJobsError, setApplicationJobsError] = useState<string | null>(null)
   const [participantUsers, setParticipantUsers] = useState<ParticipantUser[]>([])
   const [participantUsersLoading, setParticipantUsersLoading] = useState(false)
@@ -536,6 +541,14 @@ export default function CreateInterviewModal({
           ) : (
             <form className="ti-modal-body !p-0 flex min-h-0 max-h-[min(88vh,46rem)] flex-col overflow-hidden" onSubmit={onSubmit} onChange={handleFormChange} noValidate>
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-6 py-5 space-y-5 scroll-smooth pb-6 motion-reduce:scroll-auto">
+                {scheduleBlocked && (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-rose-500/25 border-l-4 border-l-rose-500 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-300"
+                  >
+                    {INTERVIEW_SCHEDULE_REJECTED_MESSAGE}
+                  </div>
+                )}
                 {formError && (
                   <div
                     id="schedule-interview-form-error"
@@ -874,7 +887,7 @@ export default function CreateInterviewModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={formLoading}
+                  disabled={formLoading || scheduleBlocked}
                   aria-busy={formLoading}
                   className="ti-btn ti-btn-primary order-1 min-w-[11rem] !py-2.5 !px-5 !text-sm font-medium shadow-md shadow-primary/15 transition-[transform,box-shadow] duration-200 motion-reduce:transition-none sm:order-2 enabled:hover:shadow-lg enabled:hover:shadow-primary/25 disabled:opacity-80 active:scale-[0.98] motion-reduce:active:scale-100"
                 >

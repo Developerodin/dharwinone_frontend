@@ -355,6 +355,7 @@ export default function ReferralLeadsPage() {
         <ChangeSalesAgentModal
           lead={modalLead}
           isOpen={changeOpen}
+          canUnassign={canManageAttribution || canRevokeAttribution}
           onClose={() => {
             setChangeOpen(false);
             setActionLead(null);

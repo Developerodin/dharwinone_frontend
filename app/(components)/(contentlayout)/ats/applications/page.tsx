@@ -18,6 +18,11 @@ import {
   pickPublicEmail,
   resolveApplicantEmail,
 } from "@/shared/lib/ats/applicant-email";
+import {
+  INTERVIEW_SCHEDULE_REJECTED_MESSAGE,
+  isInterviewSchedulingBlocked,
+  REJECTED_REOPEN_STATUSES,
+} from "@/shared/lib/ats/applicationPipeline";
 
 const PIPELINE_STATUSES: JobApplicationStatus[] = [
   "Applied",
@@ -40,7 +45,7 @@ const MANUAL_NEXT_STATUSES: Record<JobApplicationStatus, JobApplicationStatus[]>
   Shortlisted: ["Offered", "Rejected"],
   Offered: ["Hired", "Rejected"],
   Hired: [],
-  Rejected: [],
+  Rejected: REJECTED_REOPEN_STATUSES,
 };
 
 const STATUS_STYLE: Record<JobApplicationStatus, string> = {
@@ -214,6 +219,7 @@ function ApplicationRowActions({
   onReject: () => void;
   onSchedule: () => void;
 }) {
+  const scheduleBlocked = isInterviewSchedulingBlocked(appStatus);
   return (
     <div className="inline-flex flex-wrap items-center gap-1 justify-end">
       <Link
@@ -237,10 +243,11 @@ function ApplicationRowActions({
       </a>
       <button
         type="button"
-        title="Schedule interview"
+        title={scheduleBlocked ? INTERVIEW_SCHEDULE_REJECTED_MESSAGE : "Schedule interview"}
         aria-label="Schedule interview"
+        disabled={isUpdating || scheduleBlocked}
         onClick={onSchedule}
-        className="inline-flex items-center justify-center w-9 h-9 sm:w-8 sm:h-8 rounded-md text-[#8c9097] hover:bg-primary/10 hover:text-primary"
+        className="inline-flex items-center justify-center w-9 h-9 sm:w-8 sm:h-8 rounded-md text-[#8c9097] hover:bg-primary/10 hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[#8c9097] disabled:cursor-not-allowed"
       >
         <i className="ri-calendar-event-line text-[0.875rem]" />
       </button>
