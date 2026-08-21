@@ -925,6 +925,9 @@ const Sidebar = ({ local_varaiable, ThemeChanger }: any) => {
 																<Link
 																	href={levelone.path}
 																	className={`side-menu__item ${levelone.selected ? "active" : ""}`}
+																	{...(levelone.openInNewTab
+																		? { target: "_blank", rel: "noopener noreferrer" }
+																		: {})}
 																>
 																	<span
 																		className={`hs-tooltip inline-block [--placement:right] leading-none ${local_varaiable?.dataVerticalStyle == "doublemenu" ? "" : "hidden"}`}
