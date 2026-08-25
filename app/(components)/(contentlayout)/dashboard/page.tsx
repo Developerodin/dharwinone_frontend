@@ -25,6 +25,13 @@ import { listJobs, type Job } from "@/shared/lib/api/jobs";
 import { listJobApplications, type JobApplication, type JobApplicationStatus } from "@/shared/lib/api/jobApplications";
 import { listProjects, type Project } from "@/shared/lib/api/projects";
 import {
+  PROJECT_SUMMARY_PAGE_SIZE,
+  filterAndSortProjects,
+  paginateProjectSummary,
+  getProjectSummaryPagination,
+  type ProjectSummarySort,
+} from "@/shared/lib/dashboard/projectSummary";
+import {
   getMyStudentForAttendance,
   getPunchInOutStatus,
   getPunchInOutStatusMe,
@@ -156,16 +163,6 @@ function getStatusBadgeClass(status: string): string {
   return "badge bg-secondary/10 text-secondary";
 }
 
-type ProjectSummarySort =
-  | "name-asc"
-  | "name-desc"
-  | "dueDate-asc"
-  | "dueDate-desc"
-  | "progress-desc"
-  | "progress-asc"
-  | "status-asc"
-  | "tasks-desc";
-
 const PROJECT_SUMMARY_SORT_OPTIONS: {
   value: ProjectSummarySort;
   label: string;
@@ -185,50 +182,6 @@ function projectProgressPct(p: Project): number {
   const total = p.totalTasks ?? 0;
   const completed = p.completedTasks ?? 0;
   return total > 0 ? Math.round((completed / total) * 100) : 0;
-}
-
-function parseProjectDueDate(p: Project): number {
-  if (!p.endDate) return Number.POSITIVE_INFINITY;
-  const t = new Date(p.endDate).getTime();
-  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
-}
-
-function filterAndSortProjects(
-  projects: Project[],
-  search: string,
-  sort: ProjectSummarySort
-): Project[] {
-  const q = (search ?? "").trim().toLowerCase();
-  const list = q
-    ? projects.filter((p) => (p.name ?? "").toLowerCase().includes(q))
-    : [...projects];
-
-  const cmpStr = (a: string, b: string) =>
-    a.localeCompare(b, undefined, { sensitivity: "base" });
-
-  list.sort((a, b) => {
-    switch (sort) {
-      case "name-asc":
-        return cmpStr(a.name ?? "", b.name ?? "");
-      case "name-desc":
-        return cmpStr(b.name ?? "", a.name ?? "");
-      case "dueDate-asc":
-        return parseProjectDueDate(a) - parseProjectDueDate(b);
-      case "dueDate-desc":
-        return parseProjectDueDate(b) - parseProjectDueDate(a);
-      case "progress-desc":
-        return projectProgressPct(b) - projectProgressPct(a);
-      case "progress-asc":
-        return projectProgressPct(a) - projectProgressPct(b);
-      case "status-asc":
-        return cmpStr(a.status ?? "", b.status ?? "");
-      case "tasks-desc":
-        return (b.totalTasks ?? 0) - (a.totalTasks ?? 0);
-      default:
-        return 0;
-    }
-  });
-  return list;
 }
 
 function getInitial(name: string | undefined | null): string {
@@ -553,6 +506,7 @@ export default function DashboardPage() {
   const [applicationsListingTotal, setApplicationsListingTotal] = useState<number | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectSearch, setProjectSearch] = useState<string>("");
+  const [projectPage, setProjectPage] = useState(1);
   const [projectSort, setProjectSort] = useState<ProjectSummarySort>("dueDate-asc");
   const [projectSortMenuOpen, setProjectSortMenuOpen] = useState(false);
   const projectSortRef = useRef<HTMLDivElement>(null);
@@ -944,9 +898,27 @@ export default function DashboardPage() {
   const applicationsStatCount =
     applicationsListingTotal != null ? applicationsListingTotal : totals?.totalApplications ?? 0;
   const projectCount = projects.length;
-  const displayedProjects = useMemo(
+  const filteredProjects = useMemo(
     () => filterAndSortProjects(projects, projectSearch, projectSort),
     [projects, projectSearch, projectSort]
+  );
+  const projectSummaryPagination = useMemo(
+    () =>
+      getProjectSummaryPagination(
+        filteredProjects.length,
+        projectPage,
+        PROJECT_SUMMARY_PAGE_SIZE
+      ),
+    [filteredProjects.length, projectPage]
+  );
+  const displayedProjects = useMemo(
+    () =>
+      paginateProjectSummary(
+        filteredProjects,
+        projectSummaryPagination.page,
+        PROJECT_SUMMARY_PAGE_SIZE
+      ),
+    [filteredProjects, projectSummaryPagination.page]
   );
   const studentCount = trainingData?.totalStudents ?? 0;
 
@@ -963,6 +935,16 @@ export default function DashboardPage() {
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [projectSortMenuOpen]);
+
+  useEffect(() => {
+    setProjectPage(1);
+  }, [projectSearch, projectSort]);
+
+  useEffect(() => {
+    if (projectPage !== projectSummaryPagination.page) {
+      setProjectPage(projectSummaryPagination.page);
+    }
+  }, [projectPage, projectSummaryPagination.page]);
 
   /* ---- Skeleton loader ---- */
   const Skeleton = ({ className = "" }: { className?: string }) => (
@@ -1651,7 +1633,7 @@ export default function DashboardPage() {
                 <p className="text-[#8c9097] dark:text-white/50 text-sm">
                   No projects yet.
                 </p>
-              ) : displayedProjects.length === 0 ? (
+              ) : filteredProjects.length === 0 ? (
                 <p className="text-[#8c9097] dark:text-white/50 text-sm">
                   No projects match your search.
                 </p>
@@ -1688,13 +1670,18 @@ export default function DashboardPage() {
                         const total = p.totalTasks ?? 0;
                         const completed = p.completedTasks ?? 0;
                         const pct = projectProgressPct(p);
+                        const rowNumber =
+                          (projectSummaryPagination.page - 1) *
+                            PROJECT_SUMMARY_PAGE_SIZE +
+                          i +
+                          1;
                         return (
                           <tr
                             key={p._id ?? p.id ?? i}
                             className="border border-inherit border-solid hover:bg-gray-100 dark:hover:bg-light dark:border-defaultborder/10"
                           >
                             <th scope="row" className="!text-start">
-                              {i + 1}
+                              {rowNumber}
                             </th>
                             <td>{p.name}</td>
                             <td>
@@ -1756,22 +1743,83 @@ export default function DashboardPage() {
               <div className="box-footer">
                 <div className="sm:flex items-center">
                   <div className="dark:text-defaulttextcolor/70">
-                    Showing {displayedProjects.length} Entries <i className="bi bi-arrow-right ms-2 font-semibold"></i>
+                    Showing {projectSummaryPagination.entryCount} Entries{" "}
+                    <i className="bi bi-arrow-right ms-2 font-semibold"></i>
                   </div>
-                  <div className="ms-auto">
-                    <nav aria-label="Page navigation" className="pagination-style-4">
-                      <ul className="ti-pagination mb-0">
-                        <li className="page-item disabled">
-                          <Link className="page-link" href="#!" scroll={false}>Prev</Link>
-                        </li>
-                        <li className="page-item"><Link className="page-link active" href="#!" scroll={false}>1</Link></li>
-                        <li className="page-item"><Link className="page-link" href="#!" scroll={false}>2</Link></li>
-                        <li className="page-item">
-                          <Link className="page-link !text-primary" href="#!" scroll={false}>Next</Link>
-                        </li>
-                      </ul>
-                    </nav>
-                  </div>
+                  {projectSummaryPagination.totalPages > 1 && (
+                    <div className="ms-auto">
+                      <nav aria-label="Page navigation" className="pagination-style-4">
+                        <ul className="ti-pagination mb-0">
+                          <li
+                            className={`page-item${
+                              projectSummaryPagination.page <= 1 ? " disabled" : ""
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              className="page-link"
+                              onClick={() =>
+                                setProjectPage((p) => Math.max(1, p - 1))
+                              }
+                              disabled={projectSummaryPagination.page <= 1}
+                            >
+                              Prev
+                            </button>
+                          </li>
+                          {Array.from(
+                            { length: projectSummaryPagination.totalPages },
+                            (_, idx) => idx + 1
+                          ).map((pageNum) => (
+                            <li
+                              key={pageNum}
+                              className={`page-item${
+                                pageNum === projectSummaryPagination.page
+                                  ? " active"
+                                  : ""
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                className="page-link"
+                                onClick={() => setProjectPage(pageNum)}
+                              >
+                                {pageNum}
+                              </button>
+                            </li>
+                          ))}
+                          <li
+                            className={`page-item${
+                              projectSummaryPagination.page >=
+                              projectSummaryPagination.totalPages
+                                ? " disabled"
+                                : ""
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              className={`page-link${
+                                projectSummaryPagination.page <
+                                projectSummaryPagination.totalPages
+                                  ? " !text-primary"
+                                  : ""
+                              }`}
+                              onClick={() =>
+                                setProjectPage((p) =>
+                                  Math.min(projectSummaryPagination.totalPages, p + 1)
+                                )
+                              }
+                              disabled={
+                                projectSummaryPagination.page >=
+                                projectSummaryPagination.totalPages
+                              }
+                            >
+                              Next
+                            </button>
+                          </li>
+                        </ul>
+                      </nav>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

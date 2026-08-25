@@ -105,6 +105,9 @@ export interface Meeting {
   publicMeetingUrl?: string;
   /** Set when interviewResult=selected but createPlacementFromInterview failed (PATCH response only). */
   moveToPreboardingError?: string;
+  /** Populated on GET /meetings/my-interviews for candidate dashboard rows. */
+  jobTitle?: string;
+  companyName?: string;
 }
 
 export interface MeetingsListResponse {
@@ -131,6 +134,16 @@ export async function listMeetings(params?: {
   sortBy?: string;
 }): Promise<MeetingsListResponse> {
   const { data } = await apiClient.get<MeetingsListResponse>("/meetings", { params });
+  return data;
+}
+
+/** Upcoming interviews for the signed-in candidate (auth only). */
+export async function getMyInterviews(params?: {
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+}): Promise<MeetingsListResponse> {
+  const { data } = await apiClient.get<MeetingsListResponse>("/meetings/my-interviews", { params });
   return data;
 }
 

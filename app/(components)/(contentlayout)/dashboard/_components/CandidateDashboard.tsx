@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import React, { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Seo from "@/shared/layout-components/seo/seo";
 import { useAuth } from "@/shared/contexts/auth-context";
@@ -9,6 +10,18 @@ import {
   type JobApplication,
   type JobApplicationStatus,
 } from "@/shared/lib/api/jobApplications";
+import { getMyInterviews } from "@/shared/lib/api/meetings";
+import {
+  canJoinInterview,
+  filterUpcomingInterviews,
+  formatInterviewDateBlock,
+  formatInterviewModeLabel,
+  formatInterviewTime,
+  resolveInterviewJoinHref,
+  resolveInterviewJobLine,
+  sortUpcomingInterviews,
+  type CandidateInterviewRow,
+} from "@/shared/lib/dashboard/candidateInterviews";
 import { ROUTES } from "@/shared/lib/constants";
 
 const BROWSE_JOBS_PATH = "/ats/browse-jobs";
@@ -156,29 +169,55 @@ function personalizedHeadline(
  * Candidate-only dashboard — applications and profile, no attendance.
  */
 export default function CandidateDashboard(): JSX.Element {
+  const router = useRouter();
   const { user } = useAuth();
   const [applications, setApplications] = useState<JobApplication[]>([]);
+  const [interviews, setInterviews] = useState<CandidateInterviewRow[]>([]);
   const [totalApplications, setTotalApplications] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [interviewsLoading, setInterviewsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [interviewsError, setInterviewsError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setInterviewsLoading(true);
     setError(null);
+    setInterviewsError(null);
     try {
-      const res = await getMyApplications({ limit: 50, sortBy: "createdAt:desc" });
-      setApplications(res.results ?? []);
-      setTotalApplications(res.totalResults ?? res.results?.length ?? 0);
-    } catch (e: unknown) {
-      const msg =
-        e && typeof e === "object" && "message" in e
-          ? String((e as { message: string }).message)
-          : "Failed to load dashboard";
-      setError(msg);
-      setApplications([]);
-      setTotalApplications(0);
+      const [appsRes, interviewsRes] = await Promise.allSettled([
+        getMyApplications({ limit: 50, sortBy: "createdAt:desc" }),
+        getMyInterviews({ limit: 20, sortBy: "scheduledAt:asc" }),
+      ]);
+
+      if (appsRes.status === "fulfilled") {
+        setApplications(appsRes.value.results ?? []);
+        setTotalApplications(appsRes.value.totalResults ?? appsRes.value.results?.length ?? 0);
+      } else {
+        const e = appsRes.reason;
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: string }).message)
+            : "Failed to load dashboard";
+        setError(msg);
+        setApplications([]);
+        setTotalApplications(0);
+      }
+
+      if (interviewsRes.status === "fulfilled") {
+        setInterviews((interviewsRes.value.results ?? []) as CandidateInterviewRow[]);
+      } else {
+        const e = interviewsRes.reason;
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message: string }).message)
+            : "Failed to load interviews";
+        setInterviewsError(msg);
+        setInterviews([]);
+      }
     } finally {
       setLoading(false);
+      setInterviewsLoading(false);
     }
   }, []);
 
@@ -198,6 +237,18 @@ export default function CandidateDashboard(): JSX.Element {
 
   const recentApplications = useMemo(() => applications.slice(0, 8), [applications]);
 
+  const upcomingInterviews = useMemo(
+    () => sortUpcomingInterviews(filterUpcomingInterviews(interviews)),
+    [interviews],
+  );
+
+  const primaryInterview = upcomingInterviews[0] ?? null;
+  const primaryInterviewJoinable = primaryInterview ? canJoinInterview(primaryInterview) : false;
+  const primaryInterviewHref = useMemo(
+    () => (primaryInterview ? resolveInterviewJoinHref(primaryInterview, user) : ""),
+    [primaryInterview, user],
+  );
+
   const latestApplication = applications[0] ?? null;
 
   const profilePct = useMemo(() => profileCompletionScore(user), [user]);
@@ -210,7 +261,7 @@ export default function CandidateDashboard(): JSX.Element {
     <Fragment>
       <Seo title="My Dashboard" />
 
-      <div className="relative mt-4 space-y-6 min-h-[50vh] w-full">
+      <div className="relative mt-4 space-y-6 w-full pb-4">
         <div
           className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(ellipse_90%_55%_at_10%_-10%,rgba(20,184,166,0.08),transparent_55%),radial-gradient(ellipse_70%_50%_at_95%_0%,rgba(99,102,241,0.06),transparent_50%)] dark:bg-[radial-gradient(ellipse_90%_55%_at_10%_-10%,rgba(20,184,166,0.12),transparent_55%),radial-gradient(ellipse_70%_50%_at_95%_0%,rgba(99,102,241,0.1),transparent_50%)]"
           aria-hidden
@@ -354,10 +405,8 @@ export default function CandidateDashboard(): JSX.Element {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          {/* Applications table */}
-          <div className="xl:col-span-2">
-            <section className="rounded-2xl border border-defaultborder/70 bg-white dark:bg-bodybg shadow-sm shadow-black/[0.03] dark:shadow-none overflow-hidden">
+        <div className="grid grid-cols-1 gap-4 min-[900px]:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] min-[900px]:gap-5 min-[1200px]:gap-6">
+            <section className="min-w-0 rounded-2xl border border-defaultborder/70 bg-white dark:bg-bodybg shadow-sm shadow-black/[0.03] dark:shadow-none overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-5 border-b border-defaultborder/50 bg-gradient-to-r from-slate-50/90 to-white dark:from-white/[0.03] dark:to-transparent">
                 <div className="flex items-center gap-3 min-w-0">
                   <span
@@ -468,11 +517,8 @@ export default function CandidateDashboard(): JSX.Element {
                 )}
               </div>
             </section>
-          </div>
 
-          {/* Sidebar — profile + candidate quick actions only */}
-          <div className="space-y-6">
-            <section className="rounded-2xl border border-defaultborder/70 bg-white dark:bg-bodybg shadow-sm shadow-black/[0.03] dark:shadow-none overflow-hidden">
+            <section className="min-w-0 rounded-2xl border border-defaultborder/70 bg-white dark:bg-bodybg shadow-sm shadow-black/[0.03] dark:shadow-none overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-5 border-b border-defaultborder/50 bg-gradient-to-r from-slate-50/90 to-white dark:from-white/[0.03] dark:to-transparent">
                 <div className="flex items-center gap-3 min-w-0">
                   <span
@@ -532,7 +578,126 @@ export default function CandidateDashboard(): JSX.Element {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-defaultborder/70 bg-white dark:bg-bodybg shadow-sm shadow-black/[0.03] dark:shadow-none overflow-hidden">
+            <section className="min-w-0 rounded-2xl border border-defaultborder/70 bg-white dark:bg-bodybg shadow-sm shadow-black/[0.03] dark:shadow-none overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-5 border-b border-defaultborder/50 bg-gradient-to-r from-slate-50/90 to-white dark:from-white/[0.03] dark:to-transparent">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-500/10 text-teal-600 dark:text-teal-400 ring-1 ring-teal-500/15"
+                    aria-hidden
+                  >
+                    <i className="ri-calendar-event-line text-lg" />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold text-defaulttextcolor dark:text-white tracking-tight">
+                      Upcoming Interviews
+                    </h2>
+                    <p className="text-xs text-defaulttextcolor/60 dark:text-white/50 mt-0.5">
+                      Scheduled interviews for your applications
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-6 py-4">
+                {interviewsError && (
+                  <div className="mb-3 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger">
+                    {interviewsError}
+                  </div>
+                )}
+
+                {interviewsLoading && upcomingInterviews.length === 0 ? (
+                  <div className="py-3 text-center" role="status">
+                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-teal-500/10 text-teal-600 mb-2 ring-1 ring-teal-500/15">
+                      <i className="ri-loader-4-line animate-spin text-lg" />
+                    </div>
+                    <p className="text-sm text-defaulttextcolor/70">Loading interviews…</p>
+                  </div>
+                ) : upcomingInterviews.length === 0 ? (
+                  <p className="text-sm text-defaulttextcolor/60 dark:text-white/50" role="status">
+                    No upcoming interviews scheduled.
+                  </p>
+                ) : (
+                  <>
+                    <ul className="m-0 list-none space-y-3 p-0" aria-label="Upcoming interviews">
+                      {upcomingInterviews.map((interview) => {
+                        const dateBlock = formatInterviewDateBlock(
+                          interview.scheduledAt,
+                          interview.timezone,
+                        );
+                        const joinable = canJoinInterview(interview);
+                        const joinHref = resolveInterviewJoinHref(interview, user);
+                        return (
+                          <li key={interview.id ?? interview._id ?? interview.meetingId}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (joinable && joinHref) router.push(joinHref);
+                              }}
+                              disabled={!joinable || !joinHref}
+                              className={`flex w-full min-h-11 items-center gap-3 rounded-xl border border-defaultborder/60 bg-slate-50/50 dark:bg-white/[0.02] px-3 py-3 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 ${
+                                joinable && joinHref
+                                  ? "cursor-pointer hover:border-teal-500/30 hover:bg-teal-500/[0.04] dark:hover:bg-white/[0.03]"
+                                  : "cursor-default opacity-100"
+                              }`}
+                              aria-label={`${interview.title}, ${resolveInterviewJobLine(interview)}, ${formatInterviewTime(interview.scheduledAt, interview.timezone)}`}
+                            >
+                              <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-lg border border-defaultborder/50 bg-white dark:bg-bodybg px-2 py-2 text-center">
+                                <span className="text-[0.65rem] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">
+                                  {dateBlock.month}
+                                </span>
+                                <span className="text-lg font-bold tabular-nums leading-none text-defaulttextcolor dark:text-white">
+                                  {dateBlock.day}
+                                </span>
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-defaulttextcolor dark:text-white truncate">
+                                  {interview.title}
+                                </p>
+                                <p className="text-xs text-defaulttextcolor/60 dark:text-white/50 truncate mt-0.5">
+                                  {resolveInterviewJobLine(interview)}
+                                </p>
+                              </div>
+                              <div className="shrink-0 text-end max-w-[40%]">
+                                <p className="text-sm font-medium tabular-nums text-defaulttextcolor dark:text-white whitespace-nowrap">
+                                  {formatInterviewTime(interview.scheduledAt, interview.timezone)}
+                                </p>
+                                <p className="text-[0.6875rem] text-defaulttextcolor/55 dark:text-white/45 mt-0.5 truncate">
+                                  {joinable
+                                    ? formatInterviewModeLabel(interview.interviewType, interview.requireApproval)
+                                    : "Scheduled"}
+                                </p>
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+
+                    {primaryInterview ? (
+                      primaryInterviewJoinable && primaryInterviewHref ? (
+                        <button
+                          type="button"
+                          onClick={() => router.push(primaryInterviewHref)}
+                          className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                        >
+                          Join interview
+                          <i className="ri-video-add-line" aria-hidden />
+                        </button>
+                      ) : (
+                        <p
+                          className="mt-4 rounded-xl border border-defaultborder/60 bg-slate-50/80 px-4 py-2.5 text-center text-xs text-defaulttextcolor/60 dark:bg-white/[0.03] dark:text-white/50"
+                          role="status"
+                        >
+                          Join opens 10 minutes before your interview starts
+                        </p>
+                      )
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </section>
+
+            <section className="min-w-0 rounded-2xl border border-defaultborder/70 bg-white dark:bg-bodybg shadow-sm shadow-black/[0.03] dark:shadow-none overflow-hidden">
               <div className="px-6 py-5 border-b border-defaultborder/50 bg-gradient-to-r from-slate-50/90 to-white dark:from-white/[0.03] dark:to-transparent">
                 <h2 className="text-base font-semibold text-defaulttextcolor dark:text-white tracking-tight">
                   Quick actions
@@ -562,7 +727,6 @@ export default function CandidateDashboard(): JSX.Element {
                 />
               </ul>
             </section>
-          </div>
         </div>
       </div>
     </Fragment>

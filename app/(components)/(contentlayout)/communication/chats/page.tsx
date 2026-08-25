@@ -5,7 +5,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
 import {
-  listConversations,
   getMessages,
   sendMessage,
   markAsRead,
@@ -44,6 +43,7 @@ import {
   DIRECTORY_RBAC_FLAG,
 } from "@/shared/lib/communication/directoryScope";
 import { useFeatureFlag } from "@/shared/hooks/useFeatureFlag";
+import { useConversationListPagination } from "./_hooks/useConversationListPagination";
 
 const DEFAULT_AVATAR = "/assets/images/faces/1.jpg";
 
@@ -663,12 +663,29 @@ const Chat = () => {
   } = useChatSocket();
 
   const [activeTab, setActiveTab] = useState<"recent" | "groups" | "calls">("recent");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [groupsTabEnabled, setGroupsTabEnabled] = useState(false);
+  const {
+    conversations,
+    setConversations,
+    loading: conversationsLoading,
+    loadingMore: conversationsLoadingMore,
+    hasMore: conversationsHasMore,
+    loadMore: loadMoreConversations,
+    refresh: refreshConversations,
+  } = useConversationListPagination();
+  const {
+    conversations: groupConversations,
+    setConversations: setGroupConversations,
+    loading: groupLoading,
+    loadingMore: groupLoadingMore,
+    hasMore: groupHasMore,
+    loadMore: loadMoreGroups,
+    refresh: refreshGroups,
+  } = useConversationListPagination("group", groupsTabEnabled);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [convCalls, setConvCalls] = useState<any[]>([]);
   const [messageInput, setMessageInput] = useState("");
-  const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
@@ -801,8 +818,46 @@ const Chat = () => {
   /** Set true right before prepending older messages so the auto-scroll effect
       doesn't yank the view back to the bottom (preserve the reader's position). */
   const skipAutoScrollRef = useRef(false);
+  const conversationListScrollRef = useRef<HTMLDivElement | null>(null);
 
   const myId = (user as any)?.id || (user as any)?._id?.toString?.();
+
+  const fetchConversations = useCallback(async () => {
+    await Promise.all([
+      refreshConversations(),
+      groupsTabEnabled ? refreshGroups() : Promise.resolve(),
+    ]);
+  }, [refreshConversations, refreshGroups, groupsTabEnabled]);
+
+  const handleConversationListScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const element = event.currentTarget;
+      const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 80;
+      if (!nearBottom) return;
+      if (activeTab === "recent") {
+        if (conversationsHasMore && !conversationsLoadingMore && !conversationsLoading) {
+          void loadMoreConversations();
+        }
+        return;
+      }
+      if (activeTab === "groups") {
+        if (groupHasMore && !groupLoadingMore && !groupLoading) {
+          void loadMoreGroups();
+        }
+      }
+    },
+    [
+      activeTab,
+      conversationsHasMore,
+      conversationsLoading,
+      conversationsLoadingMore,
+      groupHasMore,
+      groupLoading,
+      groupLoadingMore,
+      loadMoreConversations,
+      loadMoreGroups,
+    ]
+  );
 
   // ── Auto-scroll to bottom ──
   // Double rAF: the merged timeline (messages + call pills + date separators)
@@ -818,26 +873,6 @@ const Chat = () => {
   }, []);
 
   // ── Fetch helpers ──
-  const fetchConversations = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await listConversations({ page: 1, limit: 50 });
-      const next = res.results || [];
-      setConversations(next);
-      setSelectedConversation((sel) => {
-        if (!sel) return sel;
-        const sid = getId(sel);
-        const found = next.find((c) => getId(c) === sid);
-        return found ?? sel;
-      });
-    } catch (e: any) {
-      setError(e?.response?.data?.message || "Failed to load conversations");
-      setConversations([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const fetchMessages = useCallback(async (convId: string) => {
     if (!convId) return;
     setLoadingMessages(true);
@@ -912,8 +947,21 @@ const Chat = () => {
 
   // ── Effects ──
   useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    if (activeTab === "groups") {
+      setGroupsTabEnabled(true);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    setSelectedConversation((sel) => {
+      if (!sel) return sel;
+      const sid = getId(sel);
+      const found =
+        conversations.find((c) => getId(c) === sid) ||
+        groupConversations.find((c) => getId(c) === sid);
+      return found ?? sel;
+    });
+  }, [conversations, groupConversations]);
 
   // Select conversation from ?conv= when returning from meeting
   useEffect(() => {
@@ -969,7 +1017,7 @@ const Chat = () => {
   }, [convId, fetchMessages, joinConversation, leaveConversation]);
 
   useEffect(() => {
-    const userIds = conversations
+    const userIds = [...conversations, ...groupConversations]
       .flatMap((conversation) =>
         (conversation.participants || []).map((participant) =>
           String((participant.user as any)?.id || (participant.user as any)?._id || "").trim()
@@ -979,7 +1027,7 @@ const Chat = () => {
     if (userIds.length > 0) {
       syncOnlineUsers(userIds);
     }
-  }, [conversations, syncOnlineUsers]);
+  }, [conversations, groupConversations, syncOnlineUsers]);
 
   // New message from socket
   useEffect(() => {
@@ -1004,9 +1052,15 @@ const Chat = () => {
   useEffect(() => {
     const unsub = onConversationUpdated((data) => {
       if (data?.conversationId && data.lastMessage) {
+        const lastMessage = data.lastMessage as Conversation["lastMessage"];
         setConversations((prev) =>
           prev.map((c) =>
-            getId(c) === String(data.conversationId) ? { ...c, lastMessage: data.lastMessage } : c
+            getId(c) === String(data.conversationId) ? { ...c, lastMessage } : c
+          )
+        );
+        setGroupConversations((prev) =>
+          prev.map((c) =>
+            getId(c) === String(data.conversationId) ? { ...c, lastMessage } : c
           )
         );
       } else {
@@ -1026,6 +1080,7 @@ const Chat = () => {
       const deletedId = data?.conversationId && String(data.conversationId);
       if (!deletedId) return;
       setConversations((prev) => prev.filter((c) => getId(c) !== deletedId));
+      setGroupConversations((prev) => prev.filter((c) => getId(c) !== deletedId));
       setSelectedConversation((prev) => {
         if (prev && getId(prev) === deletedId) {
           setIsOpen(false);
@@ -1465,8 +1520,8 @@ const Chat = () => {
     return creatorId && myId && String(creatorId) === String(myId);
   };
 
-  const recentConvs = conversations.filter((c) => c.type === "direct" || c.type === "group");
-  const groupConvs = conversations.filter((c) => c.type === "group");
+  const recentConvs = conversations;
+  const groupConvs = groupConversations;
 
   const toggleForwardTarget = (conversationId: string) => {
     setForwardTargets((prev) => {
@@ -1815,17 +1870,22 @@ const Chat = () => {
             ))}
           </nav>
 
-          <div className={`tab-content ${chatStyles.listScroll}`}>
+          <div
+            ref={conversationListScrollRef}
+            className={`tab-content ${chatStyles.listScroll}`}
+            onScroll={handleConversationListScroll}
+          >
             {activeTab === "recent" && (
               <div className="tab-pane fade show active !border-0 chat-users-tab">
                 <div className={chatStyles.listPane}>
-                {loading ? (
+                {conversationsLoading ? (
                   <p className={chatStyles.emptyList}>Loading…</p>
                 ) : error ? (
                   <p className="text-danger px-1">{error}</p>
                 ) : recentConvs.length === 0 ? (
                   <p className={chatStyles.emptyList}>No conversations yet. Use + to start a chat.</p>
                 ) : (
+                  <>
                   <ul className="list-none mb-0">
                     {recentConvsByDate.map((g) => (
                       <React.Fragment key={g.label}>
@@ -1870,6 +1930,14 @@ const Chat = () => {
                       </React.Fragment>
                     ))}
                   </ul>
+                  {/* ponytail: no "Showing X of Y" here — backend total is counted
+                      pre-dedup (chat.service.js listConversations) while dedup is
+                      page-local, so total overcounts distinct groups. Re-add once
+                      the count uses the same uniqueness as the returned list. */}
+                  {conversationsLoadingMore ? (
+                    <p className={`${chatStyles.emptyList} !py-2 text-xs`}>Loading more…</p>
+                  ) : null}
+                  </>
                 )}
                 </div>
               </div>
@@ -1877,9 +1945,12 @@ const Chat = () => {
             {activeTab === "groups" && (
               <div className="tab-pane fade show active !border-0 chat-groups-tab">
                 <div className={chatStyles.listPane}>
-                {groupConvs.length === 0 ? (
+                {groupLoading ? (
+                  <p className={chatStyles.emptyList}>Loading…</p>
+                ) : groupConvs.length === 0 ? (
                   <p className={chatStyles.emptyList}>No groups yet. Create one with +</p>
                 ) : (
+                  <>
                   <ul className="list-none mb-0">
                     {groupConvs.map((c) => (
                       <li
@@ -1896,6 +1967,12 @@ const Chat = () => {
                       </li>
                     ))}
                   </ul>
+                  {/* ponytail: total display omitted here too — see the same note
+                      in the recent-tab pane above. */}
+                  {groupLoadingMore ? (
+                    <p className={`${chatStyles.emptyList} !py-2 text-xs`}>Loading more…</p>
+                  ) : null}
+                  </>
                 )}
                 </div>
               </div>

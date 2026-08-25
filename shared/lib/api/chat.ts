@@ -79,7 +79,14 @@ const BASE = "/chats";
 export async function listConversations(params?: {
   page?: number;
   limit?: number;
-}): Promise<{ results: Conversation[]; page: number; limit: number; totalPages: number }> {
+  type?: "direct" | "group";
+}): Promise<{
+  results: Conversation[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}> {
   const { data } = await apiClient.get(`${BASE}/conversations`, { params });
   return data;
 }
