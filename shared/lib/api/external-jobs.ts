@@ -10,6 +10,7 @@ export interface ExternalJob {
   title?: string | null;
   company?: string | null;
   location?: string | null;
+  locationMeta?: { city?: string; state?: string; country?: string; countryCode?: string } | null;
   description?: string | null;
   jobType?: string | null;
   experienceLevel?: string | null;

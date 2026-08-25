@@ -20,6 +20,8 @@ import {
   ExternalJobsButtonSpinner,
   ExternalJobsTableLoader,
 } from "./_components/ExternalJobsLoadingAnimation";
+import AutoFetchModal from "./_components/AutoFetchModal";
+import { getAutoFetchConfig, type AutoFetchConfig } from "@/shared/lib/api/external-jobs-autofetch";
 
 const SOURCE_OPTIONS: { value: ExternalJobSource; label: string }[] = [
   { value: "active-jobs-db", label: "Active Jobs DB" },
@@ -58,6 +60,25 @@ export default function ExternalJobsPage() {
   const [previewJob, setPreviewJob] = useState<ExternalJob | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [browseListedHint, setBrowseListedHint] = useState(false);
+  const [autoFetchModalOpen, setAutoFetchModalOpen] = useState(false);
+  const [autoFetchStatus, setAutoFetchStatus] = useState<AutoFetchConfig | null>(null);
+
+  const loadAutoFetchStatus = useCallback(() => {
+    getAutoFetchConfig()
+      .then(setAutoFetchStatus)
+      .catch(() => setAutoFetchStatus(null));
+  }, []);
+
+  useEffect(() => {
+    loadAutoFetchStatus();
+  }, [loadAutoFetchStatus]);
+
+  // Poll while a run is in flight so the badge reflects RUNNING without the modal open.
+  useEffect(() => {
+    if (autoFetchStatus?.lastRun?.status !== "running") return;
+    const id = setInterval(loadAutoFetchStatus, 5000);
+    return () => clearInterval(id);
+  }, [autoFetchStatus?.lastRun?.status, loadAutoFetchStatus]);
 
   const [filters, setFilters] = useState({
     job_title: "",
@@ -519,6 +540,33 @@ export default function ExternalJobsPage() {
                   </div>
                 </div>
                 <div className="relative z-20 flex flex-wrap items-center gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setAutoFetchModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-defaultborder/70 bg-white px-3 py-1.5 text-[0.75rem] font-semibold text-defaulttextcolor shadow-sm hover:bg-black/[0.03] dark:border-white/15 dark:bg-transparent dark:text-white dark:hover:bg-white/5"
+                  >
+                    <i className="ri-radar-line text-xs" aria-hidden />
+                    Auto Fetch Jobs
+                    <span
+                      className={`ms-0.5 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide ${
+                        autoFetchStatus?.lastRun?.status === "running"
+                          ? "bg-amber-500/15 text-amber-600"
+                          : autoFetchStatus?.lastRun?.status === "failed"
+                          ? "bg-danger/15 text-danger"
+                          : autoFetchStatus?.enabled
+                          ? "bg-success/15 text-success"
+                          : "bg-black/[0.06] text-textmuted dark:bg-white/10 dark:text-white/50"
+                      }`}
+                    >
+                      {autoFetchStatus?.lastRun?.status === "running"
+                        ? "Running"
+                        : autoFetchStatus?.lastRun?.status === "failed"
+                        ? "Failed"
+                        : autoFetchStatus?.enabled
+                        ? "Active"
+                        : "Off"}
+                    </span>
+                  </button>
                   <div className="me-2 inline-flex items-center gap-2">
                     <label
                       htmlFor="external-jobs-page-size"
@@ -1231,6 +1279,12 @@ export default function ExternalJobsPage() {
         onSave={handleSave}
         onUnsave={handleUnsave}
         savingId={savingId}
+      />
+
+      <AutoFetchModal
+        open={autoFetchModalOpen}
+        onClose={() => setAutoFetchModalOpen(false)}
+        onConfigChanged={loadAutoFetchStatus}
       />
     </Fragment>
   );
