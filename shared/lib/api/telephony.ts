@@ -87,8 +87,22 @@ export async function searchAvailableTelephonyNumbers(
   return res.data;
 }
 
-export async function buyTelephonyNumber(number: string): Promise<BuyTelephonyNumberResponse> {
-  const res = await apiClient.post<BuyTelephonyNumberResponse>("/plivo/numbers/buy", { number });
+export type BuyTelephonyNumberParams = {
+  number: string;
+  countryIso: string;
+  type?: TelephonyNumberType;
+  friendlyName?: string;
+};
+
+export async function buyTelephonyNumber(
+  params: BuyTelephonyNumberParams
+): Promise<BuyTelephonyNumberResponse> {
+  const res = await apiClient.post<BuyTelephonyNumberResponse>("/plivo/numbers/buy", {
+    number: params.number,
+    countryIso: params.countryIso,
+    type: params.type,
+    friendlyName: params.friendlyName,
+  });
   return res.data;
 }
 

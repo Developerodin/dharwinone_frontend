@@ -260,7 +260,11 @@ export default function CompanyWorkNumberPanel({ onPurchased }: { onPurchased?: 
     setConfirmNumber(null);
     setBuyingNumber(num);
     try {
-      const res = await buyTelephonyNumber(num);
+      const res = await buyTelephonyNumber({
+        number: num,
+        countryIso: countryIso.toUpperCase(),
+        type: confirmNumber.type as TelephonyNumberType,
+      });
       setPurchased((prev) => ({ ...prev, [num]: true }));
       showToast("success", res.message || `Purchased ${num}.`);
       void loadOwned();
@@ -270,7 +274,7 @@ export default function CompanyWorkNumberPanel({ onPurchased }: { onPurchased?: 
     } finally {
       setBuyingNumber(null);
     }
-  }, [canCreateCalls, confirmNumber, showToast, loadOwned, onPurchased]);
+  }, [canCreateCalls, confirmNumber, countryIso, showToast, loadOwned, onPurchased]);
 
   return (
     <div className="min-w-0 max-w-full space-y-5 overflow-x-hidden">

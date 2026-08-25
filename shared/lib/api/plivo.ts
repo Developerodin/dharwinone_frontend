@@ -84,10 +84,20 @@ export async function searchAvailablePlivoNumbers(
   return res.data;
 }
 
+export type BuyPlivoNumberParams = {
+  number: string;
+  countryIso: string;
+  type?: PlivoNumberType;
+  friendlyName?: string;
+};
+
 /** Buy a Plivo number — REAL, PAID action. Confirm in the UI before calling. */
-export async function buyPlivoNumber(number: string): Promise<BuyPlivoNumberResponse> {
+export async function buyPlivoNumber(params: BuyPlivoNumberParams): Promise<BuyPlivoNumberResponse> {
   const res = await apiClient.post<BuyPlivoNumberResponse>("/plivo/numbers/buy", {
-    number,
+    number: params.number,
+    countryIso: params.countryIso,
+    type: params.type,
+    friendlyName: params.friendlyName,
   });
   return res.data;
 }
