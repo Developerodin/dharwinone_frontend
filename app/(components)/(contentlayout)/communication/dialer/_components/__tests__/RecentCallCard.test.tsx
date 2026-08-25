@@ -18,6 +18,7 @@ it("renders name and number and fires callbacks", () => {
     onSelect={onSelect} onDial={onDial} onTogglePin={noop} />);
   expect(screen.getByText("John Doe")).toBeInTheDocument();
   expect(screen.getByText("+919876543210")).toBeInTheDocument();
+  expect(screen.getByLabelText(/call status: completed/i)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /john doe/i }));
   expect(onSelect).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByLabelText("Dial"));

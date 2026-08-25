@@ -8,6 +8,8 @@ import {
   placeTelephonyCall,
   getTelephonySdkToken,
   registerTelephonyBrowserCallIntent,
+  reportDialerInitiate,
+  reportDialerOutcome,
   setTelephonyRecording,
   type OwnedTelephonyNumber,
   type TelephonyProvider,
@@ -93,6 +95,7 @@ export default function Dialpad({
   defaultTo,
   embedded = false,
   onCallPlaced,
+  onDialerEvent,
   contactName,
   contactAvatar,
   dialTarget,
@@ -101,6 +104,8 @@ export default function Dialpad({
   defaultTo?: string;
   embedded?: boolean;
   onCallPlaced?: () => void;
+  /** Fired after dialer initiate/outcome writes so Recent can refresh immediately. */
+  onDialerEvent?: () => void;
   contactName?: string;
   contactAvatar?: string;
   dialTarget?: string;
@@ -138,6 +143,9 @@ export default function Dialpad({
   // Recording is a separate role toggle (Call Recording), independent of place-call.
   const canRecord = hasPermission({ permissions, isPlatformSuperUser, isAdministrator }, "toggle_call_recording");
   const [showDtmf, setShowDtmf] = useState(false); // in-call DTMF keypad panel
+  const dialerExecutionIdRef = useRef("");
+  const dialerOutcomeReportedRef = useRef("");
+  const wasConnectedRef = useRef(false);
 
   // ponytail: toll-free numbers are inbound-only — Plivo rejects them as an outbound
   // caller ID, surfacing as "Busy" with no CDR. Keep them out of originating options.
@@ -230,9 +238,26 @@ export default function Dialpad({
     setDest((prev) => (prev === "+" && k !== "+" ? `+${k}` : prev + k));
   }, []);
 
+  // The select already shows the dial code ("IN +91") — the box below only
+  // ever holds the national digits, so the code never appears twice and
+  // can't get doubled into an invalid number by manual typing.
+  const dialCode = useMemo(() => DIAL_OPTIONS.find((o) => o.code === country)?.dialCode || "", [country]);
+  const destNational = dest.startsWith(dialCode) ? dest.slice(dialCode.length) : dest.replace(/^\+/, "");
+
+  const handleDestInput = useCallback(
+    (raw: string) => {
+      const trimmed = raw.trim();
+      // Pasted/typed full number (starts with +) — auto-detect its own
+      // country instead of prefixing it with whatever's currently selected.
+      if (trimmed.startsWith("+") && applyDialNumber(trimmed)) return;
+      setDest(dialCode + raw.replace(/\D/g, ""));
+    },
+    [dialCode, applyDialNumber]
+  );
+
   const backspace = useCallback(() => {
-    setDest((prev) => (prev.length <= 1 ? "+" : prev.slice(0, -1)));
-  }, []);
+    setDest((prev) => (prev.length <= dialCode.length ? dialCode || "+" : prev.slice(0, -1)));
+  }, [dialCode]);
 
   // --- WebRTC softphone --------------------------------------------------------
   const connectingRef = useRef(false);
@@ -245,6 +270,56 @@ export default function Dialpad({
     setCallState("idle");
   }, []);
 
+  const seedDialerRecord = useCallback(
+    async (executionId: string, status: "initiated" | "ringing" = "initiated") => {
+      if (!executionId) return;
+      dialerExecutionIdRef.current = executionId;
+      dialerOutcomeReportedRef.current = "";
+      try {
+        await reportDialerInitiate({
+          executionId,
+          toNumber: dest.trim(),
+          fromPhoneNumber: callerId,
+          direction: "outbound",
+          businessName: contactName?.trim() || undefined,
+          status,
+        });
+        onDialerEvent?.();
+        onCallPlaced?.();
+      } catch {
+        /* webhook may still seed — don't block the call */
+      }
+    },
+    [dest, callerId, contactName, onDialerEvent, onCallPlaced]
+  );
+
+  const reportDialerCallOutcome = useCallback(
+    async (status: "completed" | "no_answer" | "declined" | "failed" | "busy") => {
+      const executionId = dialerExecutionIdRef.current;
+      if (!executionId) return;
+      if (dialerOutcomeReportedRef.current === executionId) return;
+      dialerOutcomeReportedRef.current = executionId;
+      try {
+        await reportDialerOutcome({
+          executionId,
+          status,
+          direction: "outbound",
+          fromPhoneNumber: callerId,
+          toPhoneNumber: dest.trim(),
+          businessName: contactName?.trim() || undefined,
+        });
+        onDialerEvent?.();
+      } catch {
+        /* status webhooks may still reconcile */
+      } finally {
+        dialerExecutionIdRef.current = "";
+        dialerOutcomeReportedRef.current = "";
+        wasConnectedRef.current = false;
+      }
+    },
+    [dest, callerId, contactName, onDialerEvent]
+  );
+
   const attachTwilioCallEvents = useCallback(
     (call: TwilioCall, opts: { incoming?: boolean } = {}) => {
       call.on("accept", () => {
@@ -254,18 +329,30 @@ export default function Dialpad({
           setIncomingCall(null);
         }
         setMuted(false);
-        setCallSid(getTwilioCallParam(call, "CallSid"));
+        const sid = getTwilioCallParam(call, "CallSid");
+        if (sid) setCallSid(sid);
+        wasConnectedRef.current = true;
         setCallState("connected");
       });
-      call.on("disconnect", () => resetTwilioCallState(call));
-      call.on("cancel", () => resetTwilioCallState(call));
-      call.on("reject", () => resetTwilioCallState(call));
+      call.on("disconnect", () => {
+        void reportDialerCallOutcome(wasConnectedRef.current ? "completed" : "no_answer");
+        resetTwilioCallState(call);
+      });
+      call.on("cancel", () => {
+        void reportDialerCallOutcome("no_answer");
+        resetTwilioCallState(call);
+      });
+      call.on("reject", () => {
+        void reportDialerCallOutcome("declined");
+        resetTwilioCallState(call);
+      });
       call.on("error", () => {
+        void reportDialerCallOutcome("failed");
         resetTwilioCallState(call);
         setFeedback({ kind: "err", msg: "Call failed" });
       });
     },
-    [resetTwilioCallState]
+    [resetTwilioCallState, reportDialerCallOutcome]
   );
 
   const connectSoftphone = useCallback(async () => {
@@ -371,9 +458,16 @@ export default function Dialpad({
         }
       });
       client.on("onCallRemoteRinging", () => setCallState("ringing"));
-      client.on("onCallAnswered", () => setCallState("connected"));
-      client.on("onCallTerminated", () => setCallState("idle"));
+      client.on("onCallAnswered", () => {
+        wasConnectedRef.current = true;
+        setCallState("connected");
+      });
+      client.on("onCallTerminated", () => {
+        void reportDialerCallOutcome(wasConnectedRef.current ? "completed" : "no_answer");
+        setCallState("idle");
+      });
       client.on("onCallFailed", (e: string) => {
+        void reportDialerCallOutcome("failed");
         setCallState("idle");
         setFeedback({ kind: "err", msg: `Call failed: ${e || "unknown"}` });
       });
@@ -386,7 +480,7 @@ export default function Dialpad({
       setWebrtc("error");
       setFeedback({ kind: "err", msg: apiErr(e, "Could not start the softphone") });
     }
-  }, [attachTwilioCallEvents, callerId]);
+  }, [attachTwilioCallEvents, callerId, reportDialerCallOutcome]);
 
   // Connect on entering browser mode; login persists across toggles.
   useEffect(() => {
@@ -446,6 +540,8 @@ export default function Dialpad({
   const handleBrowserCall = useCallback(async () => {
     setFeedback(null);
     setPlacing(true);
+    wasConnectedRef.current = false;
+    dialerExecutionIdRef.current = "";
     try {
       if (provider === "twilio") {
         const device = twilioDeviceRef.current;
@@ -458,17 +554,26 @@ export default function Dialpad({
           },
         });
         twilioCallRef.current = call;
+        const sid = getTwilioCallParam(call, "CallSid");
+        if (sid) void seedDialerRecord(sid, "ringing");
         attachTwilioCallEvents(call);
         return;
       }
 
       const client = plivoRef.current?.client;
       if (!client) return;
-      const { intent } = await registerTelephonyBrowserCallIntent({ toNumber: dest.trim(), callerId });
+      const intentRes = await registerTelephonyBrowserCallIntent({
+        toNumber: dest.trim(),
+        callerId,
+        businessName: contactName?.trim() || undefined,
+      });
+      if (intentRes.executionId) dialerExecutionIdRef.current = intentRes.executionId;
+      onDialerEvent?.();
+      onCallPlaced?.();
       setCallState("ringing");
       client.call(dest.trim(), {
         "X-PH-callerId": callerId.replace(/\D/g, ""),
-        "X-PH-intent": intent,
+        "X-PH-intent": intentRes.intent,
       });
     } catch (e) {
       setCallState("idle");
@@ -476,7 +581,7 @@ export default function Dialpad({
     } finally {
       setPlacing(false);
     }
-  }, [attachTwilioCallEvents, dest, callerId, provider]);
+  }, [attachTwilioCallEvents, dest, callerId, provider, contactName, seedDialerRecord, onDialerEvent, onCallPlaced]);
 
   const acceptIncoming = useCallback(() => {
     const call = incomingTwilioCallRef.current;
@@ -501,6 +606,7 @@ export default function Dialpad({
   }, [resetTwilioCallState]);
 
   const hangup = useCallback(() => {
+    const connected = wasConnectedRef.current;
     try {
       if (provider === "twilio") {
         if (incomingTwilioCallRef.current && !twilioCallRef.current) {
@@ -515,12 +621,15 @@ export default function Dialpad({
     } catch {
       /* ignore */
     }
+    if (provider !== "twilio" && dialerExecutionIdRef.current) {
+      void reportDialerCallOutcome(connected ? "completed" : "no_answer");
+    }
     twilioCallRef.current = null;
     incomingTwilioCallRef.current = null;
     setIncomingCall(null);
     setMuted(false);
     setCallState("idle");
-  }, [provider]);
+  }, [provider, reportDialerCallOutcome]);
 
   // Mute/unmute the live call. Twilio: Call.mute(bool); Plivo: client.mute()/unmute().
   const toggleMute = useCallback(() => {
@@ -617,12 +726,13 @@ export default function Dialpad({
       setFeedback({ kind: "ok", msg: res.message || "Call initiated — your phone will ring." });
       setPlaced(true);
       onCallPlaced?.();
+      onDialerEvent?.();
     } catch (e) {
       setFeedback({ kind: "err", msg: apiErr(e, "Failed to place call") });
     } finally {
       setPlacing(false);
     }
-  }, [dest, agentPhone, callerId, onCallPlaced]);
+  }, [dest, agentPhone, callerId, onCallPlaced, onDialerEvent]);
 
   // A fresh edit means a new call — unlock the button.
   useEffect(() => {
@@ -957,9 +1067,10 @@ export default function Dialpad({
               <input
                 type="tel"
                 inputMode="tel"
+                placeholder="phone number"
                 className={`min-w-0 flex-1 basis-[7rem] rounded-md border-0 bg-transparent font-mono text-defaulttextcolor focus:outline-none dark:text-white ${embedded ? "text-lg tracking-wide" : "text-base font-medium tabular-nums"}`}
-                value={dest}
-                onChange={(e) => setDest(e.target.value)}
+                value={destNational}
+                onChange={(e) => handleDestInput(e.target.value)}
                 aria-label="Number to dial"
               />
               <button

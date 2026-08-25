@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  primaryPhone, contactInitials, linkedType, blankDraft, draftFromCall,
-  toCreateBody, validateDraft, sortContacts, normalizedDigits, type ContactDraft,
+  primaryPhone, contactInitials, linkedType, blankDraft, draftFromContact, draftFromCall,
+  toCreateBody, validateDraft, sortContacts, normalizedDigits, detectCountry, type ContactDraft,
 } from "../contactView";
 import type { Contact } from "@/shared/lib/api/contacts";
 
@@ -35,20 +35,32 @@ describe("contactView", () => {
     expect(validateDraft(ok)).toEqual([]);
     expect(validateDraft({ ...ok, name: "  " }).some((e) => e.field === "name")).toBe(true);
     expect(validateDraft({ ...ok, phones: [] }).some((e) => e.field === "phones")).toBe(true);
-    expect(validateDraft({ ...ok, phones: [{ label: "mobile", number: "+", isPrimary: true }] })
+    expect(validateDraft({ ...ok, phones: [{ country: "IN", number: "+", isPrimary: true }] })
       .some((e) => e.field === "phones")).toBe(true);
   });
 
   it("toCreateBody trims, drops empties, keeps exactly one primary", () => {
     const d: ContactDraft = { ...blankDraft(), name: " Anita ", company: "", email: " a@b.co ",
-      phones: [{ label: "mobile", number: " +91 1 ", isPrimary: false },
-               { label: "work", number: "+91 2", isPrimary: false }] };
+      phones: [{ country: "IN", number: " +91 1 ", isPrimary: false },
+               { country: "IN", number: "+91 2", isPrimary: false }] };
     const body = toCreateBody(d);
     expect(body.name).toBe("Anita");
     expect("company" in body).toBe(false);       // empty dropped
     expect(body.email).toBe("a@b.co");
     expect(body.phones.filter((p) => p.isPrimary).length).toBe(1);
     expect(body.phones[0].isPrimary).toBe(true);  // none flagged → first
+    expect(body.phones[0]).not.toHaveProperty("label"); // phone type moved to tags, not sent
+  });
+
+  it("detectCountry matches the longest dial-code prefix, falls back to default", () => {
+    expect(detectCountry("+919876543210")).toBe("IN");
+    expect(detectCountry("+447911123456")).toBe("GB");
+    expect(detectCountry("no plus sign")).toBe("IN"); // DEFAULT_COUNTRY_CODE
+  });
+
+  it("draftFromContact derives each phone's country from its number", () => {
+    const d = draftFromContact(c({ phones: [{ number: "+447911123456", isPrimary: true }] }));
+    expect(d.phones[0].country).toBe("GB");
   });
 
   it("draftFromCall prefills a from_call primary phone", () => {

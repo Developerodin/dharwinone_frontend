@@ -2,6 +2,7 @@
 import React from "react";
 import { getBolnaCallRecord, type CallRecord } from "@/shared/lib/api/bolna";
 import { callName, callNumber, callDirection, fmtDuration } from "../_lib/recentCalls";
+import CallStatusBadge from "./CallStatusBadge";
 import CallRecordings from "../../calling/_components/CallRecordings";
 
 const INTEL_POLL_MS = 8000;
@@ -22,10 +23,12 @@ function intelPending(intel: CallRecord["intelligence"]): boolean {
  * this the "Generating summary…" skeleton would sit until the user re-selects.
  */
 function useLiveRecord(record: CallRecord | null) {
-  const [live, setLive] = React.useState(record);
-  React.useEffect(() => setLive(record), [record]);
+  const [pollPatch, setPollPatch] = React.useState<Partial<CallRecord>>({});
+  const recordKey = record ? (record._id ?? record.id ?? record.executionId ?? "") : "";
+  React.useEffect(() => { setPollPatch({}); }, [recordKey]);
 
-  const executionId = record?.executionId;
+  const live = record ? ({ ...record, ...pollPatch } as CallRecord) : null;
+  const executionId = live?.executionId;
   const pending = intelPending(live?.intelligence);
   const requestedAt = live?.intelligence?.requestedAt;
   const stalled =
@@ -37,7 +40,7 @@ function useLiveRecord(record: CallRecord | null) {
     const timer = setInterval(async () => {
       try {
         const { record: fresh } = await getBolnaCallRecord(executionId);
-        if (!cancelled && fresh) setLive((prev) => ({ ...prev, ...fresh }));
+        if (!cancelled && fresh) setPollPatch((prev) => ({ ...prev, ...fresh }));
       } catch {
         // Transient poll failure — the next tick retries.
       }
@@ -195,18 +198,11 @@ export default function CallContextPanel(
   const dir = callDirection(record);
   const name = callName(record);
   const duration = fmtDuration(record.duration);
-  const status = record.status || "";
   // Pinned locale — must match the Call Records table so dates read the same for every user.
   const date = record.createdAt
     ? new Date(record.createdAt).toLocaleString("en-US", { dateStyle: "short", timeStyle: "medium" })
     : "";
 
-  const s = status.toLowerCase();
-  const statusTone = /complete/.test(s)
-    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-    : /(fail|busy|no.?answer|error|disconnect|cancel|reject|decline)/.test(s)
-      ? "bg-danger/10 text-danger"
-      : "bg-amber-500/10 text-amber-600 dark:text-amber-400";
   const dirIcon = dir === "outbound" ? "ri-arrow-right-up-line" : dir === "inbound" ? "ri-arrow-left-down-line" : "ri-phone-line";
   // Initials for the avatar; fall back to an icon when the "name" is really a phone number.
   const nameIsNumber = !name || /^[+\d]/.test(name.trim());
@@ -232,7 +228,7 @@ export default function CallContextPanel(
         {dir !== "unknown" ? (
           <span className={`${chip} ${chipNeutral} capitalize`}><i className={`${dirIcon} text-sm`} />{dir}</span>
         ) : null}
-        {status ? <span className={`${chip} ${statusTone} capitalize`}>{status}</span> : null}
+        {record.status ? <CallStatusBadge status={record.status} /> : null}
         {duration ? (
           <span className={`${chip} ${chipNeutral}`}><i className="ri-time-line text-sm" />{duration}</span>
         ) : null}

@@ -1,6 +1,15 @@
 import type { Contact, Phone, LinkedTo, CreateContactBody } from "@/shared/lib/api/contacts";
+import { COUNTRY_PHONE_RULES, DEFAULT_COUNTRY_CODE } from "@/shared/lib/country-phone";
 
-export type PhoneDraft = { label: "work" | "mobile" | "other"; number: string; isPrimary: boolean };
+export type PhoneDraft = { country: string; number: string; isPrimary: boolean };
+
+// Longest dial-code prefix match (so +91... -> IN, not a shorter false match).
+export function detectCountry(number: string): string {
+  const n = String(number ?? "").trim();
+  const match = COUNTRY_PHONE_RULES.filter((r) => r.dialCode && n.startsWith(r.dialCode))
+    .sort((a, b) => b.dialCode.length - a.dialCode.length)[0];
+  return match?.code ?? DEFAULT_COUNTRY_CODE;
+}
 export type ContactDraft = {
   name: string; phones: PhoneDraft[]; company: string; email: string; notes: string;
   tags: string[]; favorite: boolean; doNotCall: boolean;
@@ -30,14 +39,14 @@ export function linkedType(linkedTo: LinkedTo | undefined): string | null {
 
 export function blankDraft(): ContactDraft {
   return {
-    name: "", phones: [{ label: "mobile", number: "", isPrimary: true }],
+    name: "", phones: [{ country: DEFAULT_COUNTRY_CODE, number: "", isPrimary: true }],
     company: "", email: "", notes: "", tags: [], favorite: false, doNotCall: false, source: "manual",
   };
 }
 
 export function draftFromContact(c: Contact): ContactDraft {
   const phones: PhoneDraft[] = (c.phones ?? []).map((p: Phone) => ({
-    label: p.label ?? "mobile", number: p.number, isPrimary: Boolean(p.isPrimary),
+    country: detectCountry(p.number), number: p.number, isPrimary: Boolean(p.isPrimary),
   }));
   return {
     name: c.name ?? "", phones: phones.length ? phones : blankDraft().phones,
@@ -51,7 +60,7 @@ export function draftFromCall(input: { name: string; number: string; callId: str
   return {
     ...blankDraft(),
     name: input.name || input.number,
-    phones: [{ label: "mobile", number: input.number, isPrimary: true }],
+    phones: [{ country: detectCountry(input.number), number: input.number, isPrimary: true }],
     source: "from_call", sourceCallId: input.callId,
   };
 }
@@ -64,6 +73,8 @@ export function validateDraft(draft: ContactDraft): DraftError[] {
     errors.push({ field: "phones", message: "At least one phone number is required" });
   } else if (phones.some((p) => normalizedDigits(p.number).length === 0)) {
     errors.push({ field: "phones", message: "Remove blank phone rows" });
+  } else if (phones.some((p) => !p.country)) {
+    errors.push({ field: "phones", message: "Select a country code for every number" });
   }
   return errors;
 }
@@ -71,7 +82,7 @@ export function validateDraft(draft: ContactDraft): DraftError[] {
 export function toCreateBody(draft: ContactDraft): CreateContactBody {
   const phones = (draft.phones ?? [])
     .filter((p) => normalizedDigits(p.number).length >= 1)
-    .map((p) => ({ label: p.label, number: p.number.trim(), isPrimary: false }));
+    .map((p) => ({ number: p.number.trim(), isPrimary: false }));
   const flagged = draft.phones.findIndex((p) => p.isPrimary && normalizedDigits(p.number).length >= 1);
   const primaryIdx = flagged === -1 ? 0 : Math.min(flagged, phones.length - 1);
   if (phones[primaryIdx]) phones[primaryIdx].isPrimary = true;

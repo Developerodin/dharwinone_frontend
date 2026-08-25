@@ -79,6 +79,13 @@ export default function CompanyWorkNumberAssignmentPanel({ reloadToken = 0 }: { 
     setError("");
     setLoading(true);
     try {
+      if (canManage) {
+        try {
+          await syncCompanyPhoneNumbers();
+        } catch {
+          // Non-fatal: roster still loads from registry; user can retry Sync from Twilio.
+        }
+      }
       const data = await getCompanyPhoneUserAssignments();
       setUsers(data.users || []);
       setNumbers(data.numbers || []);
@@ -92,7 +99,7 @@ export default function CompanyWorkNumberAssignmentPanel({ reloadToken = 0 }: { 
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canManage]);
 
   useEffect(() => {
     void load();

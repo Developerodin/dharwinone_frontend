@@ -1,7 +1,7 @@
 "use client";
 
 import { apiClient } from "@/shared/lib/api/client";
-import type { ExternalJobSource } from "@/shared/lib/api/external-jobs";
+import type { ExternalJob, ExternalJobSource } from "@/shared/lib/api/external-jobs";
 
 export type AutoFetchFrequencyMinutes = 60 | 360 | 720 | 1440;
 export type AutoFetchPostedRange = "24h" | "7d";
@@ -17,10 +17,13 @@ export interface AutoFetchLastRun {
     created: number;
     updated: number;
     staleArchived: number;
+    expiredRemoved: number;
     queriesRun: number;
     queriesFailed: number;
   };
   errorMessage: string | null;
+  currentQuery: { title: string; location: string; index: number; total: number } | null;
+  fetchedJobs: ExternalJob[];
 }
 
 export interface AutoFetchConfig {

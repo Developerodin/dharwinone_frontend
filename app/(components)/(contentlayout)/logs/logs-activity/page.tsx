@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Fragment, useEffect, useMemo, useState } from "react";
+import React, { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Seo from "@/shared/layout-components/seo/seo";
 import { useAuth } from "@/shared/contexts/auth-context";
@@ -226,6 +226,7 @@ export default function LogsActivityPage() {
   const [totalResults, setTotalResults] = useState(0);
 
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>("");
   const [forbidden, setForbidden] = useState(false);
 
@@ -318,6 +319,51 @@ export default function LogsActivityPage() {
     endDate,
   ]);
 
+  const buildExportParams = useCallback((): activityLogsApi.ExportActivityLogsParams => {
+    const range =
+      datePreset === "custom"
+        ? { start: startDate, end: endDate }
+        : presetToRange(datePreset);
+    return {
+      action: action.trim() || undefined,
+      entityType: entityType.trim() || undefined,
+      q: q.trim() || undefined,
+      startDate: toIsoStartOfDay(range.start || null) ?? undefined,
+      endDate: toIsoEndOfDay(range.end || null) ?? undefined,
+    };
+  }, [action, entityType, q, datePreset, startDate, endDate]);
+
+  const handleExportExcel = async () => {
+    setExporting(true);
+    setError("");
+    try {
+      await activityLogsApi.downloadActivityLogsExcel(buildExportParams());
+    } catch (err) {
+      if (err instanceof AxiosError && err.response?.status === 404) {
+        setError("No activity logs match the selected filters.");
+        return;
+      }
+      let msg = "Export failed.";
+      if (err instanceof AxiosError && err.response?.data) {
+        const d = err.response.data;
+        if (d instanceof Blob) {
+          try {
+            const t = await d.text();
+            const j = JSON.parse(t) as { message?: string };
+            msg = j.message ?? msg;
+          } catch {
+            msg = String(d);
+          }
+        } else if (typeof d === "object" && d != null && "message" in d) {
+          msg = String((d as { message: string }).message);
+        }
+      }
+      setError(msg);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleClearFilters = () => {
     setSearchInput("");
     setQ("");
@@ -367,6 +413,21 @@ export default function LogsActivityPage() {
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            className="ti-btn ti-btn-soft-primary !py-1 !px-3 !text-[0.75rem] !mb-0"
+            onClick={handleExportExcel}
+            disabled={loading || exporting}
+            aria-label="Export activity logs as Excel"
+            aria-busy={exporting}
+          >
+            {exporting ? (
+              <i className="ri-loader-4-line animate-spin motion-reduce:animate-none me-1" aria-hidden />
+            ) : (
+              <i className="ri-download-2-line me-1" aria-hidden />
+            )}
+            {exporting ? "Exporting..." : "Export Excel"}
+          </button>
           {currentUser && (
             <span className="text-[0.75rem] text-defaulttextcolor/70">
               Viewing as: <span className="font-medium">{currentUser.name ?? currentUser.email}</span>

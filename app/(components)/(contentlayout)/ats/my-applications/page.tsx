@@ -7,6 +7,7 @@ import { getMyApplications, withdrawMyApplication, type JobApplication, type Job
 import { useAuth } from "@/shared/contexts/auth-context";
 import { ROUTES } from "@/shared/lib/constants";
 import DocumentsActionCard from "./_components/DocumentsActionCard";
+import { useConfirm } from "@/shared/components/ui/useConfirm";
 
 const WITHDRAWABLE_STATUSES: JobApplicationStatus[] = ["Applied", "Screening"];
 
@@ -22,6 +23,7 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; border: string }>
 
 export default function MyApplicationsPage() {
   const { user } = useAuth();
+  const { confirm, confirmDialog } = useConfirm();
   const [applications, setApplications] = useState<JobApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<JobApplicationStatus | "">("");
@@ -52,6 +54,14 @@ export default function MyApplicationsPage() {
   const handleWithdraw = async (app: JobApplication) => {
     const id = app._id ?? app.id;
     if (!id || !WITHDRAWABLE_STATUSES.includes(app.status)) return;
+    const ok = await confirm({
+      title: "Are you sure?",
+      message: "Your application will be withdrawn from this role.",
+      confirmLabel: "Yes",
+      cancelLabel: "No",
+      tone: "danger",
+    });
+    if (!ok) return;
     setWithdrawingId(id);
     try {
       await withdrawMyApplication(id);
@@ -279,6 +289,7 @@ export default function MyApplicationsPage() {
           </>
         )}
       </div>
+      {confirmDialog}
     </Fragment>
   );
 }

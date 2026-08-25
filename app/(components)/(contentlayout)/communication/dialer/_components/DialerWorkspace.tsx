@@ -1,11 +1,12 @@
 "use client";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useChatSocket } from "@/shared/contexts/ChatSocketContext";
 import Dialpad from "@/app/(components)/(contentlayout)/communication/calling/_components/Dialpad";
 import DialerRail, { type View } from "./DialerRail";
 import CallContextPanel from "./CallContextPanel";
 import ContactContextPanel from "./ContactContextPanel";
-import { callId, callName, callNumber } from "../_lib/recentCalls";
+import { callId, callName, callNumber, matchesCallUpdate, mergeCallUpdate } from "../_lib/recentCalls";
 import { draftFromCall, blankDraft, normalizedDigits, type ContactDraft } from "../_lib/contactView";
 import type { CallRecord } from "@/shared/lib/api/bolna";
 import type { Contact } from "@/shared/lib/api/contacts";
@@ -24,17 +25,22 @@ export default function DialerWorkspace() {
   const [contactMode, setContactMode] = useState<ContactMode | null>(null);
   const [createDraft, setCreateDraft] = useState<ContactDraft | null>(null);
   const [dialTarget, setDialTarget] = useState<string | undefined>();
-  // Bumped by a "Call" CTA to tell the Dialpad to place the call (not just prefill).
   const [dialNowToken, setDialNowToken] = useState(0);
-  const dialNow = useCallback((n: string) => {
-    setDialTarget(n); setDialNowToken((t) => t + 1); setMobileTab("dialer");
-  }, []);
+  const [dialContactName, setDialContactName] = useState<string | undefined>();
   const [mobileTab, setMobileTab] = useState<MobileTab>("dialer");
   const [refreshKey, setRefreshKey] = useState(0);
+  const bumpRecent = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const dialNow = useCallback((n: string, name?: string) => {
+    setDialTarget(n);
+    setDialContactName(name);
+    setDialNowToken((t) => t + 1);
+    setMobileTab("dialer");
+  }, []);
   const [loadedContacts, setLoadedContacts] = useState<Contact[]>([]);
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<null | (() => void)>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const { onCallUpdate } = useChatSocket();
 
   const syncCallUrl = useCallback((id: string | null) => {
     const params = new URLSearchParams(Array.from(searchParams.entries()));
@@ -54,6 +60,20 @@ export default function DialerWorkspace() {
     setSelectedCall(r); setSelectedCallId(callId(r)); setDialTarget(callNumber(r));
     syncCallUrl(callId(r)); setMobileTab("context");
   }), [guard, syncCallUrl]);
+
+  const syncSelectedCall = useCallback((r: CallRecord) => {
+    setSelectedCall((prev) => {
+      if (!prev || callId(prev) !== callId(r)) return prev;
+      return r;
+    });
+  }, []);
+
+  useEffect(() => onCallUpdate((evt) => {
+    setSelectedCall((prev) => {
+      if (!prev || !matchesCallUpdate(prev, evt)) return prev;
+      return mergeCallUpdate(prev, evt);
+    });
+  }), [onCallUpdate]);
 
   const selectContact = useCallback((c: Contact) => guard(() => {
     setSelectedCall(null); setSelectedCallId(null); syncCallUrl(null);
@@ -122,14 +142,29 @@ export default function DialerWorkspace() {
           <DialerRail view={view} missedCount={missed} onViewChange={changeView}
             selectedCallId={selectedCallId} selectedContactId={selectedContact?.id ?? null}
             refreshKey={refreshKey} searchRef={searchRef}
-            onSelectCall={selectCall} onDialCall={(r) => { setDialTarget(callNumber(r)); setMobileTab("dialer"); }}
+            onSelectCall={selectCall} onDialCall={(r) => {
+              setDialTarget(callNumber(r));
+              const label = callName(r);
+              setDialContactName(label && label !== callNumber(r) ? label : undefined);
+              setMobileTab("dialer");
+            }}
+            onSelectedCallSync={syncSelectedCall}
             onMissedCount={setMissed} onSelectContact={selectContact}
-            onDialContact={(n) => { setDialTarget(n); setMobileTab("dialer"); }}
+            onDialContact={(n, name) => {
+              setDialTarget(n);
+              setDialContactName(name);
+              setMobileTab("dialer");
+            }}
             onEditContact={editContact} onNewContact={newContact} onLoaded={setLoadedContacts} />
         </div>
 
         <div className={`min-h-0 overflow-y-auto rounded-2xl border border-defaultborder/70 bg-white p-4 dark:bg-black/10 ${mobileTab === "dialer" ? "block" : "hidden"} lg:block`}>
-          <Dialpad dialTarget={dialTarget} dialNowToken={dialNowToken} />
+          <Dialpad
+            dialTarget={dialTarget}
+            dialNowToken={dialNowToken}
+            contactName={dialContactName}
+            onDialerEvent={bumpRecent}
+          />
         </div>
 
         <div className={`sticky top-0 min-h-0 overflow-y-auto rounded-2xl border border-defaultborder/70 bg-white dark:bg-black/10 ${mobileTab === "context" ? "block" : "hidden"} lg:hidden xl:block`}>

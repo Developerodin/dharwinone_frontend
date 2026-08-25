@@ -17,9 +17,10 @@ type Props = {
   searchRef: React.Ref<HTMLInputElement>;
   onSelectCall: (r: CallRecord) => void;
   onDialCall: (r: CallRecord) => void;
+  onSelectedCallSync?: (r: CallRecord) => void;
   onMissedCount: (n: number) => void;
   onSelectContact: (c: Contact) => void;
-  onDialContact: (number: string) => void;
+  onDialContact: (number: string, contactName?: string) => void;
   onEditContact: (c: Contact) => void;
   onNewContact: () => void;
   onLoaded: (contacts: Contact[]) => void;
@@ -62,7 +63,9 @@ export default function DialerRail(props: Props) {
         ) : (
           <RecentCallsList activeView={view === "missed" ? "missed" : "recent"}
             selectedCallId={props.selectedCallId} onSelectCall={props.onSelectCall}
-            onDialCall={props.onDialCall} searchRef={props.searchRef} onMissedCount={props.onMissedCount} />
+            onDialCall={props.onDialCall} onSelectedCallSync={props.onSelectedCallSync}
+            searchRef={props.searchRef} onMissedCount={props.onMissedCount}
+            refreshKey={props.refreshKey} />
         )}
       </div>
     </div>

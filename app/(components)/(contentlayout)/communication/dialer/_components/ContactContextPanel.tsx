@@ -6,8 +6,11 @@ import { CallCards } from "./CallContextPanel";
 import { callDirection, fmtDuration } from "../_lib/recentCalls";
 import {
   blankDraft, draftFromContact, validateDraft, toCreateBody, primaryPhone, linkedType,
-  normalizedDigits, type ContactDraft, type PhoneDraft, type DraftError,
+  normalizedDigits, detectCountry, type ContactDraft, type PhoneDraft, type DraftError,
 } from "../_lib/contactView";
+import { COUNTRY_PHONE_RULES, DEFAULT_COUNTRY_CODE, getCountryRuleByCode, toFullPhone, digitsOnly } from "@/shared/lib/country-phone";
+
+const PHONE_TAG_SUGGESTIONS = ["mobile", "work", "other"];
 
 type Mode = "read" | "edit" | "create";
 type Props = {
@@ -15,7 +18,7 @@ type Props = {
   contact: Contact | null;
   initialDraft: ContactDraft | null;
   visibleNumbers: string[]; // normalized digits of the currently-loaded contacts (best-effort dup check)
-  onCall: (number: string) => void;
+  onCall: (number: string, displayName?: string) => void;
   onEdit: () => void;
   onCancel: () => void;
   onSaved: (c: Contact) => void;
@@ -188,11 +191,11 @@ function ReadView({ contact, onCall, onEdit, onDeleted, onDirtyChange }: Props &
         <p className={LABEL}>Phones</p>
         <div className="space-y-2">
           {(contact.phones ?? []).map((p, i) => (
-            <button key={i} type="button" onClick={() => onCall(p.number)}
+            <button key={i} type="button" onClick={() => onCall(p.number, contact.name)}
               className="group flex w-full items-center gap-3 rounded-xl border border-defaultborder/60 px-3 py-2.5 text-left transition-colors hover:border-emerald-600/40 hover:bg-emerald-600/[0.06] dark:border-white/10">
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-600/10 text-emerald-600"><i className="ri-phone-line" /></span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[0.65rem] font-medium uppercase tracking-wide text-defaulttextcolor/45">{p.label ?? "mobile"}</span>
+                <span className="block text-[0.65rem] font-medium uppercase tracking-wide text-defaulttextcolor/45">{getCountryRuleByCode(detectCountry(p.number)).dialCode || detectCountry(p.number)}</span>
                 <span className="block truncate font-mono text-sm text-defaulttextcolor/80 dark:text-white/70">{p.number}</span>
               </span>
               {p.isPrimary ? <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.6rem] font-semibold uppercase text-primary">primary</span> : null}
@@ -218,7 +221,7 @@ function ReadView({ contact, onCall, onEdit, onDeleted, onDirtyChange }: Props &
       </Section>
 
       <div className="mt-auto space-y-2 border-t border-defaultborder/60 pt-4 dark:border-white/10">
-        <button type="button" onClick={() => onCall(primaryPhone(contact))}
+        <button type="button" onClick={() => onCall(primaryPhone(contact), contact.name)}
           className={`flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-white shadow-lg ${
             contact.doNotCall ? "bg-amber-500 shadow-amber-500/25 hover:bg-amber-600" : "bg-emerald-600 shadow-emerald-600/25 hover:bg-emerald-700"}`}>
           <i className="ri-phone-line" /> Call
@@ -287,7 +290,7 @@ function FormView({ mode, contact, initialDraft, visibleNumbers, onCancel, onSav
     setDraft((d) => ({ ...d, phones: d.phones.map((p, j) => (j === i ? { ...p, ...v } : p)) }));
   const setPrimary = (i: number) =>
     setDraft((d) => ({ ...d, phones: d.phones.map((p, j) => ({ ...p, isPrimary: j === i })) }));
-  const addPhone = () => setDraft((d) => ({ ...d, phones: [...d.phones, { label: "mobile", number: "", isPrimary: false }] }));
+  const addPhone = () => setDraft((d) => ({ ...d, phones: [...d.phones, { country: d.phones[0]?.country || DEFAULT_COUNTRY_CODE, number: "", isPrimary: false }] }));
   const removePhone = (i: number) => setDraft((d) => ({ ...d, phones: d.phones.filter((_, j) => j !== i) }));
   const addTag = () => {
     const t = tagInput.trim();
@@ -329,13 +332,27 @@ function FormView({ mode, contact, initialDraft, visibleNumbers, onCancel, onSav
         <p className={LABEL}>Phones *</p>
         {errFor("phones") ? <p className="mb-1 text-xs text-danger">{errFor("phones")}</p> : null}
         <div className="space-y-2">
-          {draft.phones.map((p, i) => (
+          {draft.phones.map((p, i) => {
+            const rule = getCountryRuleByCode(p.country);
+            const national = p.number.startsWith(rule.dialCode) ? p.number.slice(rule.dialCode.length) : digitsOnly(p.number);
+            return (
             <div key={i} className="flex items-center gap-2">
-              <select value={p.label} onChange={(e) => setPhone(i, { label: e.target.value as PhoneDraft["label"] })}
-                aria-label={`Phone ${i + 1} label`} className="rounded-lg border border-defaultborder/70 bg-transparent px-2 py-1.5 text-xs">
-                <option value="mobile">mobile</option><option value="work">work</option><option value="other">other</option>
+              <select value={p.country} onChange={(e) => {
+                  const country = e.target.value;
+                  const newDialCode = getCountryRuleByCode(country).dialCode;
+                  setPhone(i, { country, number: toFullPhone(newDialCode, national) });
+                }}
+                aria-label={`Phone ${i + 1} country code`} className="max-w-[6.5rem] rounded-lg border border-defaultborder/70 bg-transparent px-2 py-1.5 text-xs">
+                {COUNTRY_PHONE_RULES.map((r) => <option key={r.code} value={r.code}>{r.code} {r.dialCode}</option>)}
               </select>
-              <input value={p.number} onChange={(e) => setPhone(i, { number: e.target.value })}
+              <input value={national} onChange={(e) => {
+                  const raw = e.target.value;
+                  // Pasted/typed full number (starts with +) — auto-detect its own
+                  // country instead of prefixing it with whatever's currently selected.
+                  const trimmed = raw.trim();
+                  if (trimmed.startsWith("+")) { setPhone(i, { country: detectCountry(trimmed), number: trimmed }); return; }
+                  setPhone(i, { number: toFullPhone(rule.dialCode, raw) });
+                }}
                 aria-label={`Phone ${i + 1} number`} placeholder="Number" className={`${inputCls} flex-1`} />
               <button type="button" onClick={() => setPrimary(i)} aria-label={`Make phone ${i + 1} primary`}
                 className={`grid h-8 w-8 place-items-center rounded-lg ${p.isPrimary ? "text-primary" : "text-defaulttextcolor/30"}`}>
@@ -348,7 +365,8 @@ function FormView({ mode, contact, initialDraft, visibleNumbers, onCancel, onSav
                 </button>
               ) : null}
             </div>
-          ))}
+            );
+          })}
         </div>
         <button type="button" onClick={addPhone} className="mt-2 text-xs font-semibold text-primary">+ Add another number</button>
         {dupWarning ? (
@@ -373,6 +391,16 @@ function FormView({ mode, contact, initialDraft, visibleNumbers, onCancel, onSav
         <input value={tagInput} onChange={(e) => setTagInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
           placeholder="Add tag, press Enter" aria-label="Add tag" className={inputCls} />
+        {PHONE_TAG_SUGGESTIONS.filter((t) => !draft.tags.includes(t)).length ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {PHONE_TAG_SUGGESTIONS.filter((t) => !draft.tags.includes(t)).map((t) => (
+              <button key={t} type="button" onClick={() => patch("tags", [...draft.tags, t])}
+                className="rounded-full border border-dashed border-defaultborder/70 px-2 py-0.5 text-[0.7rem] text-defaulttextcolor/55 hover:border-primary/50 hover:text-primary">
+                + {t}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <Field label="Notes"><textarea value={draft.notes} onChange={(e) => patch("notes", e.target.value)} aria-label="Notes" rows={3} className={inputCls} /></Field>

@@ -748,7 +748,7 @@ export function StudentAttendanceClient() {
                   type="button"
                   onClick={openRegularizationModal}
                   title="Add Back-Dated Attendance"
-                  className="inline-flex items-center gap-2 rounded-xl border-0 bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-primary/90 hover:shadow active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 dark:focus:ring-offset-bodydark"
+                  className="inline-flex items-center gap-2 rounded-xl border-0 bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-primary/90 hover:shadow active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 dark:focus:ring-offset-bodybg"
                 >
                   <i className="ri-calendar-line text-[1.1rem]" aria-hidden />
                   <span>Regularization</span>
@@ -756,7 +756,7 @@ export function StudentAttendanceClient() {
               )}
               <Link
                 href="/training/attendance"
-                className="inline-flex items-center gap-2 rounded-xl border border-defaultborder/80 bg-transparent px-4 py-2.5 text-sm font-medium text-defaulttextcolor transition-colors hover:bg-defaultborder/20 hover:border-defaultborder dark:border-white/20 dark:hover:bg-white/10 dark:hover:border-white/30 focus:outline-none focus:ring-2 focus:ring-defaultborder/30 focus:ring-offset-2 dark:focus:ring-offset-bodydark"
+                className="inline-flex items-center gap-2 rounded-xl border border-defaultborder/80 bg-transparent px-4 py-2.5 text-sm font-medium text-defaulttextcolor transition-colors hover:bg-defaultborder/20 hover:border-defaultborder dark:border-white/20 dark:hover:bg-white/10 dark:hover:border-white/30 focus:outline-none focus:ring-2 focus:ring-defaultborder/30 focus:ring-offset-2 dark:focus:ring-offset-bodybg"
               >
                 <i className="ri-close-line text-[1.1rem]" aria-hidden />
                 <span>Close</span>
@@ -1053,7 +1053,7 @@ export function StudentAttendanceClient() {
                       </div>
                     ))}
                   </div>
-                  <div className="grid grid-cols-7 bg-white dark:bg-bodydark">
+                  <div className="grid grid-cols-7 bg-white dark:bg-bodybg">
                     {getCalendarData().map((cell, idx) => {
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
@@ -1088,7 +1088,7 @@ export function StudentAttendanceClient() {
                                           ? "bg-danger/5"
                                           : isFuture
                                             ? "bg-gray-50 dark:bg-white/5"
-                                            : "bg-white dark:bg-bodydark"
+                                            : "bg-white dark:bg-bodybg"
                           }`}
                         >
                           {cell.day > 0 && (
@@ -1164,7 +1164,7 @@ export function StudentAttendanceClient() {
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
             <div className="fixed inset-0 bg-black/50" onClick={() => { if (!addingBackDate) { setShowBackDateModal(false); if (excelFileInputRef.current) excelFileInputRef.current.value = ""; } }} aria-hidden />
-            <div className="relative bg-white dark:bg-bodydark rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="relative bg-white dark:bg-bodybg rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
               <div className="px-4 sm:px-6 py-4 border-b border-defaultborder">
                 <div className="flex items-center justify-between">
                   <div>
@@ -1303,7 +1303,7 @@ export function StudentAttendanceClient() {
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
             <div className="fixed inset-0 bg-black/50" onClick={() => { if (!submittingRequest) setShowRequestModal(false); }} aria-hidden />
-            <div className="relative bg-white dark:bg-bodydark rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="relative bg-white dark:bg-bodybg rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
               <div className="px-4 sm:px-6 py-4 border-b border-defaultborder">
                 <div className="flex items-center justify-between">
                   <div>

@@ -734,7 +734,7 @@ const Evaluation = () => {
                     style={{ minHeight: 0 }}
                   >
                   <div
-                    className={`${pipelineStyles.tableWrap} table-responsive max-h-[min(70vh,42rem)] [scrollbar-width:thin]`}
+                    className={`${pipelineStyles.tableWrap} table-responsive evaluation-table-scroll max-h-[min(70vh,42rem)] [scrollbar-width:thin]`}
                     style={{ minHeight: 0 }}
                   >
                     <table

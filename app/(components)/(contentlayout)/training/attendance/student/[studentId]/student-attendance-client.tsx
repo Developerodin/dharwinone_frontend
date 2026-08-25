@@ -1140,7 +1140,7 @@ export default function StudentAttendancePage() {
                   type="button"
                   onClick={openRegularizationModal}
                   title="Add Back-Dated Attendance"
-                  className="inline-flex items-center gap-2 rounded-xl border-0 bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-primary/90 hover:shadow active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 dark:focus:ring-offset-bodydark"
+                  className="inline-flex items-center gap-2 rounded-xl border-0 bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-primary/90 hover:shadow active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 dark:focus:ring-offset-bodybg"
                 >
                   <i className="ri-calendar-line text-[1.1rem]" aria-hidden />
                   <span>Regularization</span>
@@ -1151,7 +1151,7 @@ export default function StudentAttendancePage() {
                   type="button"
                   onClick={openAddLeaveModal}
                   title="Add leave for this student"
-                  className="inline-flex items-center gap-2 rounded-xl border-0 bg-sky-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-sky-700 hover:shadow active:bg-sky-800 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:ring-offset-2 dark:focus:ring-offset-bodydark"
+                  className="inline-flex items-center gap-2 rounded-xl border-0 bg-sky-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-sky-700 hover:shadow active:bg-sky-800 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:ring-offset-2 dark:focus:ring-offset-bodybg"
                 >
                   <i className="ri-calendar-event-line text-[1.1rem]" aria-hidden />
                   <span>Leave</span>
@@ -1159,7 +1159,7 @@ export default function StudentAttendancePage() {
               )}
               <Link
                 href="/training/attendance"
-                className="inline-flex items-center gap-2 rounded-xl border border-defaultborder/80 bg-transparent px-4 py-2.5 text-sm font-medium text-defaulttextcolor transition-colors hover:bg-defaultborder/20 hover:border-defaultborder dark:border-white/20 dark:hover:bg-white/10 dark:hover:border-white/30 focus:outline-none focus:ring-2 focus:ring-defaultborder/30 focus:ring-offset-2 dark:focus:ring-offset-bodydark"
+                className="inline-flex items-center gap-2 rounded-xl border border-defaultborder/80 bg-transparent px-4 py-2.5 text-sm font-medium text-defaulttextcolor transition-colors hover:bg-defaultborder/20 hover:border-defaultborder dark:border-white/20 dark:hover:bg-white/10 dark:hover:border-white/30 focus:outline-none focus:ring-2 focus:ring-defaultborder/30 focus:ring-offset-2 dark:focus:ring-offset-bodybg"
               >
                 <i className="ri-close-line text-[1.1rem]" aria-hidden />
                 <span>Close</span>
@@ -1541,7 +1541,7 @@ export default function StudentAttendancePage() {
                       </div>
                     ))}
                   </div>
-                  <div className="grid grid-cols-7 bg-white dark:bg-bodydark">
+                  <div className="grid grid-cols-7 bg-white dark:bg-bodybg">
                     {getCalendarData().map((cell, idx) => {
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
@@ -1574,7 +1574,7 @@ export default function StudentAttendancePage() {
                               : inactiveEmployment && !isHoliday && !isLeave && !cell.present && !cell.incomplete
                                 ? "bg-slate-50 dark:bg-white/[0.03]"
                                 : isWeekOff
-                                  ? "bg-gray-50 dark:bg-white/5"
+                                  ? "bg-gray-100 dark:bg-white/10"
                                   : isHoliday
                                     ? "bg-info/10"
                                     : isLeave
@@ -1587,7 +1587,7 @@ export default function StudentAttendancePage() {
                                             ? "bg-danger/5"
                                             : isFuture
                                               ? "bg-gray-50 dark:bg-white/5"
-                                              : "bg-white dark:bg-bodydark"
+                                              : "bg-white dark:bg-bodybg"
                           }`}
                         >
                           {cell.day > 0 && (
@@ -1597,7 +1597,7 @@ export default function StudentAttendancePage() {
                                   isToday
                                     ? "text-primary font-semibold"
                                     : isWeekOff
-                                      ? "text-defaulttextcolor/70 dark:text-white/50"
+                                      ? "text-gray-600 dark:text-white/70"
                                       : isHoliday
                                         ? "text-info"
                                         : isLeave
@@ -1623,7 +1623,7 @@ export default function StudentAttendancePage() {
                                 <span className="text-[0.7rem] text-defaulttextcolor/50 dark:text-white/35 mt-0.5">Before joining</span>
                               )}
                               {isWeekOff && !isToday && (
-                                <span className="text-[0.7rem] text-defaulttextcolor/60 dark:text-white/40 mt-0.5">Week-Off</span>
+                                <span className="text-[0.7rem] text-gray-600 dark:text-white/70 mt-0.5">Week-Off</span>
                               )}
                               {isHoliday && (
                                 <span
@@ -1661,7 +1661,7 @@ export default function StudentAttendancePage() {
                   <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-info" /> Holiday</span>
                   <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-secondary" /> Leave</span>
                   <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-danger" /> Absent</span>
-                  <span className="flex items-center gap-1.5 text-[#8c9097] dark:text-white/50"><span className="h-2.5 w-2.5 rounded-full bg-[#8c9097] dark:bg-white/40" /> Week Off</span>
+                  <span className="flex items-center gap-1.5 text-gray-600 dark:text-white/70"><span className="h-2.5 w-2.5 rounded-full bg-gray-500 dark:bg-white/50" /> Week Off</span>
                 </div>
                 {listLoading && attendanceList.length === 0 && (
                   <div className="py-4 text-center text-defaulttextcolor/70 text-sm">Loading calendar…</div>
@@ -1677,7 +1677,7 @@ export default function StudentAttendancePage() {
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
             <div className="fixed inset-0 bg-black/50" onClick={() => { if (!addingBackDate) { setShowBackDateModal(false); if (excelFileInputRef.current) excelFileInputRef.current.value = ""; } }} aria-hidden />
-            <div className="relative bg-white dark:bg-bodydark rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="relative bg-white dark:bg-bodybg rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
               <div className="px-4 sm:px-6 py-4 border-b border-defaultborder">
                 <div className="flex items-center justify-between">
                   <div>
@@ -1992,7 +1992,7 @@ export default function StudentAttendancePage() {
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex min-h-full items-center justify-center p-4">
             <div className="fixed inset-0 bg-black/50" onClick={() => { if (!submittingRequest) setShowRequestModal(false); }} aria-hidden />
-            <div className="relative bg-white dark:bg-bodydark rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="relative bg-white dark:bg-bodybg rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
               <div className="px-4 sm:px-6 py-4 border-b border-defaultborder">
                 <div className="flex items-center justify-between">
                   <div>

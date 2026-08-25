@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getBolnaCallRecords, type CallRecord } from "@/shared/lib/api/bolna";
 import { useChatSocket } from "@/shared/contexts/ChatSocketContext";
 import RecentCallCard from "./RecentCallCard";
-import { callId, matchesSearch, filterRecents, isMissed, missedCount, sortWithPins, groupByDate, type RecentFilter } from "../_lib/recentCalls";
+import { callId, matchesSearch, filterRecents, isMissed, missedCount, sortWithPins, groupByDate, matchesCallUpdate, mergeCallUpdate, type RecentFilter } from "../_lib/recentCalls";
 
 const PIN_KEY = "dialer_pinned_recents";
 const CHIPS: RecentFilter[] = ["all", "inbound", "outbound", "recorded"];
@@ -13,15 +13,17 @@ type Props = {
   selectedCallId: string | null;
   onSelectCall: (r: CallRecord) => void;
   onDialCall: (r: CallRecord) => void;
+  onSelectedCallSync?: (r: CallRecord) => void;
   searchRef: React.Ref<HTMLInputElement>;
   onMissedCount: (n: number) => void;
+  refreshKey?: number;
 };
 
 function loadPins(): string[] {
   try { return JSON.parse(localStorage.getItem(PIN_KEY) || "[]"); } catch { return []; }
 }
 
-export default function RecentCallsList({ activeView, selectedCallId, onSelectCall, onDialCall, searchRef, onMissedCount }: Props) {
+export default function RecentCallsList({ activeView, selectedCallId, onSelectCall, onDialCall, onSelectedCallSync, searchRef, onMissedCount, refreshKey = 0 }: Props) {
   const [records, setRecords] = useState<CallRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +49,27 @@ export default function RecentCallsList({ activeView, selectedCallId, onSelectCa
   }, []);
 
   useEffect(() => { setPins(loadPins()); void load(); }, [load]);
-  // Live refresh: backend callSync emits call:update as calls complete/record.
-  useEffect(() => onCallUpdate(() => void load(true)), [onCallUpdate, load]);
+  useEffect(() => { if (refreshKey > 0) void load(true); }, [refreshKey, load]);
+  useEffect(() => {
+    if (!selectedCallId || !onSelectedCallSync) return;
+    const match = records.find((r) => callId(r) === selectedCallId);
+    if (match) onSelectedCallSync(match);
+  }, [records, selectedCallId, onSelectedCallSync]);
+  // Live refresh: merge socket deltas immediately; fall back to list reload for new calls.
+  useEffect(() => onCallUpdate((evt) => {
+    setRecords((prev) => {
+      const idx = prev.findIndex((r) => matchesCallUpdate(r, evt));
+      if (idx < 0) {
+        void load(true);
+        return prev;
+      }
+      const merged = mergeCallUpdate(prev[idx], evt);
+      if (merged === prev[idx]) return prev;
+      const next = [...prev];
+      next[idx] = merged;
+      return next;
+    });
+  }), [onCallUpdate, load]);
   // Fallback poll: dialer calls finalize via HMAC-gated Plivo webhooks that don't emit
   // call:update, so the socket alone misses them. Silently refresh every 20s while the
   // tab is visible (and immediately on re-focus). ponytail: swap for a socket emit on the

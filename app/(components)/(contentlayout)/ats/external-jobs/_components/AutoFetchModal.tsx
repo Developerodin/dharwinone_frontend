@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getAutoFetchConfig,
   saveAutoFetchConfig,
+  patchAutoFetchConfig,
   runAutoFetchNow,
   type AutoFetchConfig,
   type AutoFetchFrequencyMinutes,
@@ -16,6 +17,8 @@ type Props = {
   onClose: () => void;
   /** Bumped so the page-level status badge refreshes after save/run without duplicating the fetch here. */
   onConfigChanged: () => void;
+  /** Fired once "Fetch Now" successfully kicks off, so the page can mirror live results into the Search tab. */
+  onFetchStarted: () => void;
 };
 
 const SOURCE_OPTIONS: { value: ExternalJobSource; label: string }[] = [
@@ -109,11 +112,12 @@ const STATUS_LABEL: Record<string, string> = {
   partial: "Partial",
 };
 
-export default function AutoFetchModal({ open, onClose, onConfigChanged }: Props) {
+export default function AutoFetchModal({ open, onClose, onConfigChanged, onFetchStarted }: Props) {
   const [config, setConfig] = useState<AutoFetchConfig | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -175,12 +179,31 @@ export default function AutoFetchModal({ open, onClose, onConfigChanged }: Props
     setError(null);
     try {
       await runAutoFetchNow();
+      onFetchStarted();
       onConfigChanged();
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start fetch.");
     } finally {
       setRunning(false);
+    }
+  };
+
+  const toggleEnabled = async () => {
+    if (!config || toggling) return;
+    const nextEnabled = !config.enabled;
+    setConfig({ ...config, enabled: nextEnabled });
+    setToggling(true);
+    setError(null);
+    try {
+      const updated = await patchAutoFetchConfig({ enabled: nextEnabled });
+      setConfig(updated);
+      onConfigChanged();
+    } catch (e) {
+      setConfig({ ...config, enabled: !nextEnabled });
+      setError(e instanceof Error ? e.message : "Could not update automatic fetching.");
+    } finally {
+      setToggling(false);
     }
   };
 
@@ -239,15 +262,18 @@ export default function AutoFetchModal({ open, onClose, onConfigChanged }: Props
                   type="button"
                   role="switch"
                   aria-checked={config.enabled}
-                  onClick={() => setConfig({ ...config, enabled: !config.enabled })}
-                  className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                  aria-label="Automatic fetching"
+                  disabled={toggling}
+                  onClick={toggleEnabled}
+                  className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors duration-200 motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-60 ${
                     config.enabled ? "bg-primary" : "bg-black/15 dark:bg-white/15"
                   }`}
                 >
                   <span
-                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                      config.enabled ? "translate-x-[1.375rem]" : "translate-x-0.5"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+                      config.enabled ? "translate-x-5" : "translate-x-0.5"
                     }`}
+                    style={{ marginTop: "1px" }}
                   />
                 </button>
               </div>
@@ -349,10 +375,25 @@ export default function AutoFetchModal({ open, onClose, onConfigChanged }: Props
                       </span>{" "}
                       · {new Date(config.lastRun.startedAt).toLocaleString()}
                     </p>
-                    {config.lastRun.status !== "running" && (
+                    {config.lastRun.status === "running" ? (
+                      <p className="flex flex-wrap items-center gap-x-1.5 text-defaulttextcolor">
+                        <i className="ri-loader-4-line animate-spin text-primary" aria-hidden />
+                        {config.lastRun.currentQuery ? (
+                          <span>
+                            Fetching {config.lastRun.currentQuery.index} of {config.lastRun.currentQuery.total}:{" "}
+                            <span className="font-medium">{config.lastRun.currentQuery.title || "any title"}</span>{" "}
+                            in <span className="font-medium">{config.lastRun.currentQuery.location || "any location"}</span>
+                          </span>
+                        ) : (
+                          <span>Starting…</span>
+                        )}
+                        <span>· {config.lastRun.stats.fetched} found so far</span>
+                      </p>
+                    ) : (
                       <p>
                         {config.lastRun.stats.fetched} fetched · {config.lastRun.stats.created} new ·{" "}
-                        {config.lastRun.stats.updated} updated · {config.lastRun.stats.staleArchived} stale archived
+                        {config.lastRun.stats.updated} updated · {config.lastRun.stats.staleArchived} stale archived ·{" "}
+                        {config.lastRun.stats.expiredRemoved ?? 0} expired removed
                       </p>
                     )}
                     {config.lastRun.errorMessage && <p className="text-danger">Reason: {config.lastRun.errorMessage}</p>}

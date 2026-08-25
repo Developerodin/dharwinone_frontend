@@ -15,6 +15,7 @@ import {
   BROWSE_JOB_DETAIL_PROSE_CLASS,
 } from "@/shared/lib/ats/jobDescriptionHtml";
 import { readStoredJobReferralRef, rememberJobReferralRef } from "@/shared/lib/jobReferralRef";
+import { useConfirm } from "@/shared/components/ui/useConfirm";
 
 const WITHDRAWABLE_STATUSES = ["Applied", "Screening"];
 
@@ -44,6 +45,7 @@ export default function BrowseJobDetailsPage() {
   const referralRefFromUrl = searchParams.get("ref")?.trim() || null;
   const [effectiveReferralRef, setEffectiveReferralRef] = useState<string | null>(null);
   const { user } = useAuth();
+  const { confirm, confirmDialog } = useConfirm();
 
   const [job, setJob] = useState<PublicJob | null>(null);
   const [jobLoading, setJobLoading] = useState(true);
@@ -138,6 +140,14 @@ export default function BrowseJobDetailsPage() {
     if (!existingApplication?.id && !existingApplication?._id) return;
     const appId = existingApplication._id ?? existingApplication.id;
     if (!appId) return;
+    const ok = await confirm({
+      title: "Are you sure?",
+      message: "Your application will be withdrawn from this role.",
+      confirmLabel: "Yes",
+      cancelLabel: "No",
+      tone: "danger",
+    });
+    if (!ok) return;
     setWithdrawSubmitting(true);
     setMessage(null);
     try {
@@ -503,6 +513,7 @@ export default function BrowseJobDetailsPage() {
             referralRef={effectiveReferralRef}
           />
         ) : null}
+        {confirmDialog}
       </div>
     </Fragment>
   );

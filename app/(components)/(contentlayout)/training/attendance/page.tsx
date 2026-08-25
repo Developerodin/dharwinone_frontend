@@ -1108,7 +1108,7 @@ export default function AttendanceTracking() {
                       <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-secondary" /> Leave</span>
                       <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-danger" /> Absent</span>
                       {myWeekOff.length > 0 && (
-                        <span className="flex items-center gap-1.5 text-[#8c9097] dark:text-white/50"><span className="h-2.5 w-2.5 rounded-full bg-[#8c9097] dark:bg-white/40" /> Week Off</span>
+                        <span className="flex items-center gap-1.5 text-gray-600 dark:text-white/70"><span className="h-2.5 w-2.5 rounded-full bg-gray-500 dark:bg-white/50" /> Week Off</span>
                       )}
                     </div>
 
@@ -1121,7 +1121,7 @@ export default function AttendanceTracking() {
                             <div key={d} className="py-2 text-center text-[0.6875rem] font-semibold text-[#8c9097] dark:text-white/50 uppercase tracking-wider">{d}</div>
                           ))}
                         </div>
-                        <div className="grid grid-cols-7">
+                        <div className="grid grid-cols-7 bg-white dark:bg-bodybg">
                           {getMyAttendanceCalendarData().map((cell, idx) => {
                             const today = new Date(); today.setHours(0, 0, 0, 0);
                             const cellDate = new Date(cell.date); cellDate.setHours(0, 0, 0, 0);
@@ -1137,12 +1137,12 @@ export default function AttendanceTracking() {
                             else if (cell.absent) { cellBg = "bg-danger/10 dark:bg-danger/15"; dotColor = "bg-danger"; }
                             else if (cell.present) { cellBg = "bg-success/10 dark:bg-success/15"; dotColor = "bg-success"; }
                             else if (cell.incomplete) { cellBg = "bg-warning/10 dark:bg-warning/15"; dotColor = "bg-warning"; }
-                            else if (cell.weekOff) { cellBg = "bg-gray-50 dark:bg-white/5"; dotColor = "bg-[#8c9097] dark:bg-white/40"; }
+                            else if (cell.weekOff) { cellBg = "bg-gray-100 dark:bg-white/10"; dotColor = "bg-gray-500 dark:bg-white/50"; }
 
                             return (
                               <div
                                 key={idx}
-                                className={"min-h-[76px] p-2 border border-defaultborder/40 transition-colors " + (isToday ? "ring-2 ring-primary ring-inset bg-primary/10 " : "") + (isEmpty || isFuture ? "bg-gray-50/50 dark:bg-white/5 " : "") + cellBg}
+                                className={"min-h-[76px] p-2 border border-defaultborder/40 transition-colors " + (isToday ? "ring-2 ring-primary ring-inset bg-primary/10 " : "") + (isEmpty || isFuture ? "bg-gray-50/50 dark:bg-white/5 " : !cellBg ? "bg-white dark:bg-bodybg " : "") + cellBg}
                               >
                                 {cell.day > 0 && (
                                   <div className="flex flex-col h-full">
@@ -1161,7 +1161,7 @@ export default function AttendanceTracking() {
                                       </span>
                                     )}
                                     {cell.absent && <span className="text-[0.65rem] text-danger font-medium">Absent</span>}
-                                    {cell.weekOff && <span className="text-[0.6875rem] text-[#8c9097] dark:text-white/50 font-medium">Week Off</span>}
+                                    {cell.weekOff && <span className="text-[0.6875rem] text-gray-600 dark:text-white/70 font-medium">Week Off</span>}
                                     {!cell.weekOff && cell.present && cell.durationLabel && (
                                       <span className="text-[0.65rem] text-success font-semibold mt-auto">{cell.durationLabel}</span>
                                     )}

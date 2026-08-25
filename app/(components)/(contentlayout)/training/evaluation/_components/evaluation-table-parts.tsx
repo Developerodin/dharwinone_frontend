@@ -6,7 +6,7 @@ export const EVAL_TABLE_SURFACE_CLASS =
   'overflow-hidden rounded-lg border border-defaultborder/70 bg-white dark:border-white/10 dark:bg-bodybg'
 
 export const EVAL_TH_CLASS =
-  'px-3 py-2.5 text-start text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-defaulttextcolor/50 bg-slate-50/80 dark:bg-white/[0.03] sticky top-0 z-20 border-b border-defaultborder/70 dark:border-white/10'
+  'px-3 py-2.5 text-start text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-slate-500 dark:text-slate-400 !bg-slate-50 dark:!bg-bodybg sticky top-0 z-10 border-b border-defaultborder/70 dark:border-white/10 shadow-[0_1px_0_0_rgba(15,23,42,0.06)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.06)]'
 
 export const EVAL_TD_CLASS =
   'px-3 py-2 align-middle text-[0.8125rem] text-defaulttextcolor'

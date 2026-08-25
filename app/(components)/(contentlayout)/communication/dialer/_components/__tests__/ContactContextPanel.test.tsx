@@ -34,7 +34,7 @@ it("read mode renders detail, linked, dials primary", () => {
   expect(screen.getByText("Lead")).toBeInTheDocument();
   expect(screen.getByText(/candidate/)).toBeInTheDocument();       // linked label
   fireEvent.click(screen.getByRole("button", { name: /^call$/i }));
-  expect(onCall).toHaveBeenCalledWith("+91 98765 43210");
+    expect(onCall).toHaveBeenCalledWith("+91 98765 43210", "Anita");
 });
 
 it("delete shows inline confirm then calls deleteContact", async () => {
@@ -73,4 +73,26 @@ it("duplicate number surfaces a non-blocking warning", async () => {
   expect(await screen.findByText(/already exists in another contact/i)).toBeInTheDocument();
   // still allows create
   expect(screen.getByRole("button", { name: /^create$/i })).not.toBeDisabled();
+});
+
+it("phone box holds only national digits; the country select composes the full number", async () => {
+  const { createContact } = await import("@/shared/lib/api/contacts");
+  render(<ContactContextPanel {...base} mode="create" contact={null} initialDraft={blankDraft()} />);
+  fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: "Sam" } });
+  const numberInput = screen.getByLabelText("Phone 1 number") as HTMLInputElement;
+  fireEvent.change(numberInput, { target: { value: "9876543210" } });
+  expect(numberInput.value).toBe("9876543210"); // no dial code baked into the box
+  fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+  await waitFor(() => expect(createContact).toHaveBeenCalled());
+  const body = (createContact as ReturnType<typeof vi.fn>).mock.calls[0][0];
+  expect(body.phones[0].number).toBe("+919876543210"); // default country IN
+  expect(body.phones[0]).not.toHaveProperty("label");
+});
+
+it("mobile/work/other are optional tag suggestions, not a required phone-type dropdown", () => {
+  render(<ContactContextPanel {...base} mode="create" contact={null} initialDraft={blankDraft()} />);
+  expect(screen.queryByLabelText(/Phone 1 label/i)).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Phone 1 country code")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "+ mobile" }));
+  expect(screen.getByText("mobile")).toBeInTheDocument(); // added as a removable tag chip
 });

@@ -41,6 +41,7 @@ export async function listActivityLogs(
 
 /**
  * Download CSV for all rows matching filters (GET /v1/activity-logs/export), up to server cap.
+ * Platform audit console only (designated superadmin).
  */
 export async function exportActivityLogsCsv(params?: ExportActivityLogsParams): Promise<Blob> {
   const { data } = await apiClient.get<Blob>("/activity-logs/export", {
@@ -48,4 +49,24 @@ export async function exportActivityLogsCsv(params?: ExportActivityLogsParams): 
     responseType: "blob",
   });
   return data;
+}
+
+/**
+ * Download Excel for all rows matching filters (GET /v1/activity-logs/export/excel).
+ * Same RBAC/scope as the Activity Logs list (not Platform Audit).
+ */
+export async function downloadActivityLogsExcel(
+  params?: ExportActivityLogsParams
+): Promise<void> {
+  const { data } = await apiClient.get<Blob>("/activity-logs/export/excel", {
+    params,
+    responseType: "blob",
+  });
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const url = URL.createObjectURL(data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `activity-logs-${dateStamp}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

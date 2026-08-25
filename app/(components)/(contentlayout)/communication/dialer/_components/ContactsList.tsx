@@ -10,7 +10,7 @@ type Props = {
   selectedContactId: string | null;
   refreshKey: number;
   onSelectContact: (c: Contact) => void;
-  onDialContact: (number: string) => void;
+  onDialContact: (number: string, contactName?: string) => void;
   onEditContact: (c: Contact) => void;
   onNewContact: () => void;
   onLoaded: (contacts: Contact[]) => void;
@@ -91,7 +91,7 @@ export default function ContactsList({
           <div className="space-y-1">
             {contacts.map((c) => (
               <ContactCard key={c.id} contact={c} selected={selectedContactId === c.id}
-                onSelect={() => onSelectContact(c)} onDial={() => onDialContact(primaryPhone(c))}
+                onSelect={() => onSelectContact(c)} onDial={() => onDialContact(primaryPhone(c), c.name)}
                 onEdit={() => onEditContact(c)} />
             ))}
           </div>

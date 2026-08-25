@@ -34,6 +34,23 @@ const PAGE_SIZES = [10, 25, 50];
 const SEARCH_BATCH_SIZE = 10;
 const SAVED_LIST_LIMIT = 100;
 
+// timePosted ("Today", "3 days ago"...) is computed once at fetch time and stored
+// verbatim -- a job saved "Today" still reads "Today" a week later. Recompute live
+// from postedAt on every render instead; fall back to the stored string only when
+// postedAt itself is missing (legacy rows).
+function formatPostedAgo(postedAt?: string | null, fallback?: string | null): string {
+  if (!postedAt) return fallback || "—";
+  const d = new Date(postedAt);
+  if (Number.isNaN(d.getTime())) return fallback || "—";
+  const days = Math.max(0, Math.floor((Date.now() - d.getTime()) / (24 * 60 * 60 * 1000)));
+  if (days === 0) return "Today";
+  if (days === 1) return "1 day ago";
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
+  if (days < 365) return `${Math.floor(days / 30)} months ago`;
+  return `${Math.floor(days / 365)} years ago`;
+}
+
 function formatSalary(job: ExternalJob): string {
   if (job.salaryMin != null && job.salaryMax != null) {
     return `${job.salaryCurrency || ""} ${job.salaryMin.toLocaleString()} – ${job.salaryMax.toLocaleString()}`.trim();
@@ -62,6 +79,8 @@ export default function ExternalJobsPage() {
   const [browseListedHint, setBrowseListedHint] = useState(false);
   const [autoFetchModalOpen, setAutoFetchModalOpen] = useState(false);
   const [autoFetchStatus, setAutoFetchStatus] = useState<AutoFetchConfig | null>(null);
+  const [mirrorFetchRun, setMirrorFetchRun] = useState(false);
+  const fetchStartedAtRef = useRef(0);
 
   const loadAutoFetchStatus = useCallback(() => {
     getAutoFetchConfig()
@@ -79,6 +98,22 @@ export default function ExternalJobsPage() {
     const id = setInterval(loadAutoFetchStatus, 5000);
     return () => clearInterval(id);
   }, [autoFetchStatus?.lastRun?.status, loadAutoFetchStatus]);
+
+  // "Fetch Now" clicked: switch to Search, poll faster than the badge-only interval
+  // above so the tab fills in live instead of only reflecting the final result.
+  const handleFetchStarted = useCallback(() => {
+    fetchStartedAtRef.current = Date.now();
+    setSearchResults([]);
+    setHasMore(false);
+    setActiveTab("search");
+    setMirrorFetchRun(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mirrorFetchRun) return;
+    const id = setInterval(loadAutoFetchStatus, 2000);
+    return () => clearInterval(id);
+  }, [mirrorFetchRun, loadAutoFetchStatus]);
 
   const [filters, setFilters] = useState({
     job_title: "",
@@ -107,6 +142,22 @@ export default function ExternalJobsPage() {
   useEffect(() => {
     if (activeTab === "saved") loadSavedJobs(1);
   }, [activeTab, loadSavedJobs]);
+
+  // Mirror the manual run just kicked off into the Search tab as it progresses --
+  // startedAt-gated (not a "have we seen running yet" flag) so it's still correct
+  // if the run finishes between two 2s polls. Scheduled (background) runs are
+  // ignored so they never hijack whatever the user is currently looking at.
+  useEffect(() => {
+    if (!mirrorFetchRun) return;
+    const lastRun = autoFetchStatus?.lastRun;
+    if (!lastRun || lastRun.trigger !== "manual") return;
+    if (new Date(lastRun.startedAt).getTime() < fetchStartedAtRef.current - 2000) return;
+    setSearchResults(lastRun.fetchedJobs || []);
+    if (lastRun.status !== "running") {
+      setMirrorFetchRun(false);
+      loadSavedJobs(1); // fetched jobs are already saved -- refresh so their bookmark icons show filled
+    }
+  }, [mirrorFetchRun, autoFetchStatus, loadSavedJobs]);
 
   const loadSavedContacts = useCallback(() => {
     setSavedContactsLoading(true);
@@ -325,9 +376,7 @@ export default function ExternalJobsPage() {
         Header: "Posted",
         accessor: "timePosted",
         Cell: ({ row }: any) => {
-          const tp = row.original.timePosted;
-          const pa = row.original.postedAt;
-          const text = tp || (pa ? new Date(pa).toLocaleDateString() : "—");
+          const text = formatPostedAgo(row.original.postedAt, row.original.timePosted);
           return <span className="text-gray-600 dark:text-gray-300 text-[0.8125rem]">{text}</span>;
         },
       },
@@ -1061,9 +1110,7 @@ export default function ExternalJobsPage() {
                           const saved = isSaved(job);
                           const saving = savingId === job.externalId;
                           const salaryStr = formatSalary(job);
-                          const postedStr =
-                            job.timePosted ||
-                            (job.postedAt ? new Date(job.postedAt).toLocaleDateString() : null);
+                          const postedStr = formatPostedAgo(job.postedAt, job.timePosted);
                           return (
                             <div
                               role="button"
@@ -1285,6 +1332,7 @@ export default function ExternalJobsPage() {
         open={autoFetchModalOpen}
         onClose={() => setAutoFetchModalOpen(false)}
         onConfigChanged={loadAutoFetchStatus}
+        onFetchStarted={handleFetchStarted}
       />
     </Fragment>
   );

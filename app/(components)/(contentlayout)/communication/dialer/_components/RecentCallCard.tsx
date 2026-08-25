@@ -2,6 +2,7 @@
 import React from "react";
 import type { CallRecord } from "@/shared/lib/api/bolna";
 import { callName, callNumber, callDirection, isMissed, fmtDuration, hasRecording } from "../_lib/recentCalls";
+import CallStatusBadge from "./CallStatusBadge";
 
 function initials(name: string): string {
   const t = name.trim();
@@ -47,6 +48,7 @@ export default function RecentCallCard({ record, selected, pinned, onSelect, onD
           <span className="flex items-center gap-1.5">
             <i className={`text-xs ${dir === "inbound" ? "ri-arrow-left-down-line text-emerald-600" : dir === "outbound" ? "ri-arrow-right-up-line text-primary" : "ri-phone-line text-defaulttextcolor/40"}`} aria-hidden />
             <span className={`truncate text-sm font-medium ${missed ? "text-danger" : "text-defaulttextcolor dark:text-white"}`}>{name}</span>
+            <CallStatusBadge status={record.status} compact />
             {recorded ? <i className="ri-play-circle-fill shrink-0 text-[0.85rem] text-primary" aria-label="has recording" title="Recording available" /> : null}
           </span>
           <span className="block truncate text-[0.72rem] text-defaulttextcolor/55 dark:text-white/45">{callNumber(record)}</span>

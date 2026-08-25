@@ -167,13 +167,34 @@ export async function getTelephonySdkToken(): Promise<TelephonySdkTokenResponse>
 export type RegisterTelephonyBrowserCallIntentParams = {
   toNumber: string;
   callerId: string;
+  businessName?: string;
+  executionId?: string;
 };
 
 export type RegisterTelephonyBrowserCallIntentResponse = {
   intent: string;
+  executionId?: string;
 };
 
-/** Plivo-only fallback when browser SDK cannot pass CallerId (Twilio uses Device.connect params). */
+export type ReportDialerInitiateParams = {
+  executionId: string;
+  toNumber: string;
+  fromPhoneNumber: string;
+  direction?: "inbound" | "outbound";
+  businessName?: string;
+  status?: "initiated" | "ringing";
+};
+
+export type ReportDialerOutcomeParams = {
+  executionId: string;
+  status: "busy" | "no_answer" | "canceled" | "cancelled" | "completed" | "failed" | "declined" | "rejected";
+  direction?: "inbound" | "outbound";
+  fromPhoneNumber?: string;
+  toPhoneNumber?: string;
+  businessName?: string;
+};
+
+/** Register dest+callerId before browser client.call(); also seeds a dialer CallRecord for Recent. */
 export async function registerTelephonyBrowserCallIntent(
   params: RegisterTelephonyBrowserCallIntentParams
 ): Promise<RegisterTelephonyBrowserCallIntentResponse> {
@@ -181,5 +202,19 @@ export async function registerTelephonyBrowserCallIntent(
     "/plivo/browser-call-intent",
     params
   );
+  return res.data;
+}
+
+/** Seed a dialer CallRecord when the web softphone starts an outbound call (Twilio CallSid). */
+export async function reportDialerInitiate(
+  params: ReportDialerInitiateParams
+): Promise<{ success: boolean; executionId: string }> {
+  const res = await apiClient.post<{ success: boolean; executionId: string }>("/plivo/dialer-initiate", params);
+  return res.data;
+}
+
+/** Report terminal dialer outcome from the web softphone (disconnect / cancel / fail). */
+export async function reportDialerOutcome(params: ReportDialerOutcomeParams): Promise<{ success: boolean }> {
+  const res = await apiClient.post<{ success: boolean }>("/plivo/dialer-outcome", params);
   return res.data;
 }

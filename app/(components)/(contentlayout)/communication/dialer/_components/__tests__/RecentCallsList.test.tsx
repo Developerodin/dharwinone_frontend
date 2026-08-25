@@ -30,3 +30,19 @@ it("loads, reports missed count, filters by outbound", async () => {
   await waitFor(() => expect(screen.queryByText("Sara In")).not.toBeInTheDocument());
   expect(screen.getByText("John Out")).toBeInTheDocument();
 });
+
+it("reloads when refreshKey bumps", async () => {
+  const { getBolnaCallRecords } = await import("@/shared/lib/api/bolna");
+  const onMissed = vi.fn();
+  const { rerender } = render(
+    <RecentCallsList activeView="recent" selectedCallId={null} onSelectCall={() => {}} onDialCall={() => {}}
+      searchRef={null} onMissedCount={onMissed} refreshKey={0} />
+  );
+  await screen.findByText("John Out");
+  expect(getBolnaCallRecords).toHaveBeenCalledTimes(1);
+  rerender(
+    <RecentCallsList activeView="recent" selectedCallId={null} onSelectCall={() => {}} onDialCall={() => {}}
+      searchRef={null} onMissedCount={onMissed} refreshKey={1} />
+  );
+  await waitFor(() => expect(getBolnaCallRecords).toHaveBeenCalledTimes(2));
+});

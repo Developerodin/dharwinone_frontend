@@ -22,6 +22,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it("updates the status badge when the selected record changes", () => {
+  const rec: CallRecord = {
+    _id: "1", displayName: "Jane", toPhoneNumber: "+911", status: "ringing",
+    telephonyData: { direction: "outbound" }, createdAt: "2026-07-01T08:00:00Z",
+  };
+  const { rerender } = render(<CallContextPanel record={rec} onCall={() => {}} />);
+  expect(screen.getByLabelText(/call status: ringing/i)).toBeInTheDocument();
+  rerender(<CallContextPanel record={{ ...rec, status: "completed", duration: 30 }} onCall={() => {}} />);
+  expect(screen.getByLabelText(/call status: completed/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/call status: ringing/i)).not.toBeInTheDocument();
+});
+
 it("shows empty state when no record", () => {
   render(<CallContextPanel record={null} onCall={() => {}} />);
   expect(screen.getByText(/start a conversation/i)).toBeInTheDocument();
