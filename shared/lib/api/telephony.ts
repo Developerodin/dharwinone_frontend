@@ -1,8 +1,21 @@
 "use client";
 
+import axios from "axios";
 import { apiClient } from "@/shared/lib/api/client";
 
 export type TelephonyProvider = "plivo" | "twilio";
+
+/** Active telephony provider for client-side API path selection. */
+export function getConfiguredTelephonyProvider(): TelephonyProvider {
+  const raw = process.env.NEXT_PUBLIC_TELEPHONY_PROVIDER?.trim().toLowerCase();
+  return raw === "twilio" ? "twilio" : "plivo";
+}
+
+export function telephonyNumbersBuyPath(
+  provider: TelephonyProvider = getConfiguredTelephonyProvider()
+): string {
+  return provider === "twilio" ? "/twilio/numbers/buy" : "/plivo/numbers/buy";
+}
 
 export type TelephonyNumberType = "local" | "tollfree" | "mobile" | "national" | "fixed";
 
@@ -92,18 +105,46 @@ export type BuyTelephonyNumberParams = {
   countryIso: string;
   type?: TelephonyNumberType;
   friendlyName?: string;
+  provider?: TelephonyProvider;
 };
 
-export async function buyTelephonyNumber(
+function providerFromGateError(error: unknown): TelephonyProvider | null {
+  if (!axios.isAxiosError(error)) return null;
+  const message = (error.response?.data as { message?: string } | undefined)?.message;
+  if (!message) return null;
+  const match = message.match(/TELEPHONY_PROVIDER=(plivo|twilio)/i);
+  if (!match) return null;
+  return match[1].toLowerCase() === "twilio" ? "twilio" : "plivo";
+}
+
+async function postBuyTelephonyNumber(
+  provider: TelephonyProvider,
   params: BuyTelephonyNumberParams
 ): Promise<BuyTelephonyNumberResponse> {
-  const res = await apiClient.post<BuyTelephonyNumberResponse>("/plivo/numbers/buy", {
+  const res = await apiClient.post<BuyTelephonyNumberResponse>(telephonyNumbersBuyPath(provider), {
     number: params.number,
     countryIso: params.countryIso,
     type: params.type,
     friendlyName: params.friendlyName,
   });
   return res.data;
+}
+
+export async function buyTelephonyNumber(
+  params: BuyTelephonyNumberParams
+): Promise<BuyTelephonyNumberResponse> {
+  const provider = params.provider ?? getConfiguredTelephonyProvider();
+  try {
+    return await postBuyTelephonyNumber(provider, params);
+  } catch (error) {
+    // Recover from frontend/backend provider drift by retrying only when the backend
+    // explicitly reports provider-gated route mismatch.
+    const expectedProvider = providerFromGateError(error);
+    if (expectedProvider && expectedProvider !== provider) {
+      return postBuyTelephonyNumber(expectedProvider, params);
+    }
+    throw error;
+  }
 }
 
 export async function listOwnedTelephonyNumbers(): Promise<ListOwnedTelephonyNumbersResponse> {
