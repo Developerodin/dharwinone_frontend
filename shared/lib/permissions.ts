@@ -334,3 +334,72 @@ export function hasSettingsFeatureAction(
 export function hasAnySettingsModulePermission(rawPermissions: string[]): boolean {
   return rawPermissions.some((p) => typeof p === "string" && p.startsWith("settings."));
 }
+
+/** True when the role matrix grants a specific action on `communication.<featureId>`. */
+export function hasCommunicationFeatureAction(
+  rawPermissions: string[],
+  featureId: string,
+  action: "view" | "create" | "edit" | "delete"
+): boolean {
+  const prefix = `communication.${featureId}:`;
+  return rawPermissions.some((p) => {
+    if (typeof p !== "string" || !p.startsWith(prefix)) return false;
+    const colon = p.indexOf(":");
+    const actionsPart = colon >= 0 ? p.slice(colon + 1) : "";
+    return actionsPart
+      .split(",")
+      .map((a) => a.trim().toLowerCase())
+      .filter(Boolean)
+      .includes(action);
+  });
+}
+
+export interface MeetingActionVisibility {
+  /**
+   * Row action: open the meeting detail view. VIEW-tier — mirrors the backend, where
+   * GET /internal-meetings/:id requires `meetings.read`, NOT `meetings.edit`.
+   */
+  canView: boolean;
+  /** Row action: view recordings. VIEW-tier — available to anyone who can see the list. */
+  canViewRecordings: boolean;
+  /** Row action: copy the meeting join link. VIEW-tier. */
+  canCopyLink: boolean;
+  /** "Schedule meeting" button + create API. */
+  canSchedule: boolean;
+  /** Row actions: edit this meeting / edit series. */
+  canEdit: boolean;
+  /** Row actions: cancel this meeting / delete series. */
+  canDelete: boolean;
+  /** VIEW+CREATE+EDIT+DELETE all present — admin-like: see every meeting, not just own. */
+  canSeeAllMeetings: boolean;
+}
+
+/**
+ * Derives Meeting module ("Communication -> Meetings & Recordings" role-matrix row,
+ * `communication.meetings:view,create,edit,delete`) UI visibility from the raw permission
+ * strings. Single source of truth for the row-action icons AND the "own vs all meetings"
+ * distinction, so the component and its tests read the same rule:
+ *   - VIEW is the baseline (page access, own-meetings list, meeting detail, Recording + Copy Link).
+ *   - CREATE only adds "Schedule meeting".
+ *   - EDIT only adds Edit this meeting / Edit series.
+ *   - DELETE only adds Cancel this meeting / Delete series.
+ *   - Any single management permission (create/edit/delete) does NOT widen the list —
+ *     only the full VIEW+CREATE+EDIT+DELETE combination sees every meeting (admin-like).
+ */
+export function getMeetingActionVisibility(rawPermissions: string[]): MeetingActionVisibility {
+  const has = (action: "view" | "create" | "edit" | "delete") =>
+    hasCommunicationFeatureAction(rawPermissions, "meetings", action);
+  const view = has("view");
+  const create = has("create");
+  const edit = has("edit");
+  const del = has("delete");
+  return {
+    canView: view,
+    canViewRecordings: view,
+    canCopyLink: view,
+    canSchedule: create,
+    canEdit: edit,
+    canDelete: del,
+    canSeeAllMeetings: view && create && edit && del,
+  };
+}

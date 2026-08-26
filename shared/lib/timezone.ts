@@ -38,6 +38,32 @@ export function utcInstantToWallClock(
   return { date: format(zoned, 'yyyy-MM-dd'), time: format(zoned, 'HH:mm') };
 }
 
+/**
+ * Local calendar date as YYYY-MM-DD. toISOString() would UTC-shift and misfile
+ * rows by a day for any positive-offset timezone (e.g. IST) — avoid it here.
+ * Pair with `utcInstantToWallClock(instant, viewerTz).date` so a calendar grid's
+ * column keys and its row keys share one timezone interpretation.
+ */
+export function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * The row-side partner of `localDateKey`: an instant's calendar date in `tz`
+ * as YYYY-MM-DD. Defaults to the viewer's zone so a calendar grid's rows and
+ * columns share one timezone interpretation. Returns "" for a bad instant/zone.
+ */
+export function wallClockDateKey(instant: string | number | Date, tz?: string): string {
+  try {
+    return utcInstantToWallClock(instant, tz || getViewerTimezone()).date;
+  } catch {
+    return '';
+  }
+}
+
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 function getFormatter(timeZone: string, locale = 'en-GB'): Intl.DateTimeFormat {
   const key = `${locale}|${timeZone}`;
@@ -56,6 +82,37 @@ function getFormatter(timeZone: string, locale = 'en-GB'): Intl.DateTimeFormat {
     formatterCache.set(key, f);
   }
   return f;
+}
+
+const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * Calendar date of an instant rendered in `tz`, e.g. "Aug 19, 2026".
+ * Formats straight off the instant — never re-parse a YYYY-MM-DD key with
+ * `new Date(key)`, which reads as UTC midnight and shifts the label.
+ */
+export function formatDateInZone(
+  instant: string | number | Date,
+  tz: string,
+  withYear = true
+): string {
+  const date = instant instanceof Date ? instant : new Date(instant);
+  if (Number.isNaN(date.getTime())) return '—';
+  const timeZone = normalizeTimezone(tz);
+  // Cached like getFormatter: constructing Intl.DateTimeFormat is the expensive
+  // part, and table rows call this twice each on every memo recompute.
+  const key = `${timeZone}|${withYear}`;
+  let f = dateFormatterCache.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      month: 'short',
+      day: 'numeric',
+      ...(withYear ? { year: 'numeric' as const } : {}),
+    });
+    dateFormatterCache.set(key, f);
+  }
+  return f.format(date);
 }
 
 /** Render a UTC instant in a zone, e.g. "20 May 2026, 04:30 pm UTC". */

@@ -73,6 +73,9 @@ export type CallQuality = {
   evaluatedAt?: string | null;
 };
 
+/** The three call categories the backend classifies into. */
+export type CallSource = "ai_agent" | "telephony" | "in_app";
+
 export type CallRecord = {
   _id?: string;
   id?: string;
@@ -96,6 +99,12 @@ export type CallRecord = {
   extractedData?: unknown;
   /** Telephony provider metadata; provider="twilio" marks a Dialer call. */
   telephonyData?: { provider?: string; direction?: string } | null;
+  /**
+   * Backend call-type classification. Never infer this from phone numbers here —
+   * the AI agent dials over Twilio too, so provider alone cannot tell them apart.
+   * null = legacy row the backend could not classify; shows only under All Calls.
+   */
+  callSource?: CallSource | null;
   purpose?: string | null;
   job?: string;
   candidate?: string;
@@ -173,6 +182,8 @@ export type GetCallRecordsParams = {
   sortBy?: "date" | "createdAt";
   order?: "asc" | "desc";
   channel?: "dialer";
+  /** Read-side filter. The server classifies; sending this cannot re-tag a record. */
+  callSource?: CallSource;
 };
 
 export type GetCallRecordsResponse = {

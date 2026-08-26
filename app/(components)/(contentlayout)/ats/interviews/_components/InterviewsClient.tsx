@@ -24,7 +24,7 @@ import {
   INTERVIEW_SCHEDULE_REJECTED_MESSAGE,
   isInterviewSchedulingBlocked,
 } from '@/shared/lib/ats/applicationPipeline'
-import { wallClockToUtc, formatDualZone, getViewerTimezone, utcInstantToWallClock, listTimezones, normalizeTimezone } from '@/shared/lib/timezone'
+import { wallClockToUtc, formatDualZone, getViewerTimezone, utcInstantToWallClock, listTimezones, normalizeTimezone, localDateKey, wallClockDateKey, formatDateInZone } from '@/shared/lib/timezone'
 import CreateInterviewModal, { type SchedulePrefill } from './CreateInterviewModal'
 import RecordingsModal from './RecordingsModal'
 import InterviewsFilterPanel from './InterviewsFilterPanel'
@@ -39,7 +39,11 @@ function isMongoObjectIdString(value: string | undefined): boolean {
 interface InterviewTableRow {
   id: string
   position: string
+  /** Viewer-local calendar date, YYYY-MM-DD. Week View grouping key — matches weekDays[].key. */
   date: string
+  /** Display labels built from the instant, never by re-parsing `date`. */
+  dateLabel: string
+  dateLabelShort: string
   time: string
   type: string
   candidate: {
@@ -109,15 +113,6 @@ function useMinWidth(minWidth: number): boolean {
   return matches
 }
 
-function formatMeetingDate(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return d.toISOString().slice(0, 10)
-  } catch {
-    return '—'
-  }
-}
-
 /** Referral lead rows use the same candidate id as employees — map for schedule/edit dropdowns. */
 function mapReferralLeadsToScheduleCandidates(rows: ReferralLeadRow[]): CandidateListItem[] {
   return rows.map((lead) => ({
@@ -149,7 +144,14 @@ function editScheduleDefaults(meeting: Meeting | null): { date: string; time: st
 }
 
 function meetingToTableRow(m: Meeting, viewerTz?: string): InterviewTableRow {
-  const date = formatMeetingDate(m.scheduledAt)
+  // Pre-mount viewerTz is undefined so SSR output stays deterministic (same contract
+  // as formatDualZone). No rows exist before mount — meetings load in an effect.
+  const calendarTz = viewerTz || 'UTC'
+  // Week View grouping key, in the VIEWER's zone — same reading weekDays[].key uses.
+  // Deriving it from toISOString() (UTC) filed every interview a day late in IST.
+  const date = wallClockDateKey(m.scheduledAt, calendarTz)
+  const dateLabel = formatDateInZone(m.scheduledAt, calendarTz)
+  const dateLabelShort = formatDateInZone(m.scheduledAt, calendarTz, false)
   const time = formatDualZone(m.scheduledAt, m.timezone || 'UTC', viewerTz)
   const position = m.title || m.jobPosition || 'Interview'
   return {
@@ -157,6 +159,8 @@ function meetingToTableRow(m: Meeting, viewerTz?: string): InterviewTableRow {
     id: String(m.id ?? m._id ?? m.meetingId ?? ''),
     position,
     date,
+    dateLabel,
+    dateLabelShort,
     time,
     type: m.interviewType || 'Video',
     candidate: {
@@ -1370,7 +1374,7 @@ export default function InterviewsClient() {
               <div className="text-[0.6875rem] text-gray-600 dark:text-gray-400 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
                   <i className="ri-calendar-line text-primary"></i>
-                  {new Date(interview.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {interview.dateLabelShort}
                 </span>
                 <span className="inline-flex items-center gap-1 whitespace-nowrap">
                   <i className="ri-time-line text-info"></i>
@@ -1715,7 +1719,9 @@ export default function InterviewsClient() {
       d.setDate(weekStart.getDate() + i)
       days.push({
         date: d,
-        key: d.toISOString().slice(0, 10),
+        // Key and label must come from the same timezone reading of `d`. toISOString()
+        // here made every column's key one day behind its own label for IST viewers.
+        key: localDateKey(d),
         label: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
       })
     }
@@ -2272,7 +2278,7 @@ export default function InterviewsClient() {
                             <div className="flex items-start gap-1.5 min-w-0">
                               <i className="ri-calendar-line text-primary text-[0.75rem] shrink-0 mt-0.5" />
                               <span className="break-words leading-snug">
-                                {new Date(interview.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                {interview.dateLabel}
                               </span>
                             </div>
                             <div className="flex items-start gap-1.5 min-w-0">

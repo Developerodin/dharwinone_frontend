@@ -38,6 +38,13 @@ const PATH_ACCESS_ACTIONS: Record<string, PathAccessRule> = {
   "/ats/onboarding": { permissionPrefixes: ["ats.onboarding:"], anyOf: ["view"] },
   /** Dialer (softphone) page: placing calls needs the create action, not just view. */
   "/communication/dialer": { permissionPrefixes: ["communication.calling:"], anyOf: ["create"] },
+  /**
+   * Meetings: nav + page visibility require view specifically. Without this rule the
+   * fallback prefix-match grants visibility for ANY CRUD action, so a create/edit/delete-only
+   * role (no view) would see the tab even though "VIEW alone does NOT mean see all meetings"
+   * and non-view combos must never render the tab per the Meeting module permission spec.
+   */
+  "/communication/meetings": { permissionPrefixes: ["communication.meetings:"], anyOf: ["view"] },
   "/ats/employees": {
     permissionPrefixes: EMPLOYEES_PATH_PREFIXES,
     anyOf: ["view", "create", "edit", "delete"],

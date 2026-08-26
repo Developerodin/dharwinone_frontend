@@ -120,6 +120,14 @@ export async function updateInternalMeeting(
   return data;
 }
 
+/** Cancel a one-off (non-recurring) meeting. Distinct from `updateInternalMeeting` so the
+ *  backend can require the DELETE permission here instead of EDIT — recurring meetings/series
+ *  are cancelled via `deleteInternalMeeting` (mode param), which already enforces DELETE. */
+export async function cancelInternalMeeting(id: string): Promise<InternalMeeting> {
+  const { data } = await apiClient.patch<InternalMeeting>(`/internal-meetings/${id}/cancel`);
+  return data;
+}
+
 export async function deleteInternalMeeting(
   id: string,
   mode?: SeriesEditMode,

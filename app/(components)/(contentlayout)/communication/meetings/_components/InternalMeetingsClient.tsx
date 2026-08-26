@@ -4,7 +4,7 @@ import Seo from "@/shared/layout-components/seo/seo"
 import React, { Fragment, useMemo, useState, useEffect, useCallback, useRef } from "react"
 import { useAuth } from "@/shared/contexts/auth-context"
 import { appendJoinIdentityToUrl } from "@/shared/lib/join-room-url"
-import { wallClockToUtc, utcInstantToWallClock, getViewerTimezone } from "@/shared/lib/timezone"
+import { wallClockToUtc, utcInstantToWallClock, getViewerTimezone, localDateKey, wallClockDateKey, formatDateInZone } from "@/shared/lib/timezone"
 import { useTable, useSortBy, usePagination } from "react-table"
 import {
   createInternalMeeting,
@@ -12,6 +12,7 @@ import {
   getInternalMeeting,
   getInternalMeetingRecordings,
   updateInternalMeeting,
+  cancelInternalMeeting,
   deleteInternalMeeting,
   type InternalMeeting,
   type CreateInternalMeetingPayload,
@@ -25,6 +26,7 @@ import ParticipantInvitesField, { type ParticipantUser } from "@/shared/componen
 import MeetingReadOnlyView from "@/shared/components/meeting/MeetingReadOnlyView"
 import { useConfirm } from "@/shared/components/ui/useConfirm"
 import { useRecurringScopeDialog } from "@/shared/components/meeting/RecurringScopeDialog"
+import { getMeetingActionVisibility } from "@/shared/lib/permissions"
 
 interface InternalMeetingRow {
   id: string
@@ -52,33 +54,14 @@ function formatMeetingTime(iso: string): string {
   }
 }
 
-function formatMeetingDate(iso: string, tz?: string): string {
-  try {
-    const w = utcInstantToWallClock(iso, tz || getViewerTimezone())
-    const [year, month, day] = w.date.split("-").map(Number)
-    const local = new Date(year, month - 1, day)
-    return local.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-  } catch {
-    return "—"
-  }
-}
-
-/** ISO (YYYY-MM-DD) wall-clock date, for matching against weekDays keys — NOT for display. */
-function meetingDateKey(iso: string, tz?: string): string {
-  try {
-    return utcInstantToWallClock(iso, tz || getViewerTimezone()).date
-  } catch {
-    return ""
-  }
-}
-
-/** Local calendar date as YYYY-MM-DD. toISOString() would UTC-shift and misfile
- *  meetings by a day for any positive-offset timezone (e.g. IST) — avoid it here. */
-function localDateKey(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  return `${y}-${m}-${day}`
+/**
+ * Calendar date shown in the table, in the VIEWER's zone — the same zone
+ * formatMeetingTime renders and localDateKey builds the week columns from.
+ * Was the meeting's stored zone, which paired a meeting-zone date with a
+ * browser-local time in the same row.
+ */
+function formatMeetingDate(iso: string): string {
+  return formatDateInZone(iso, getViewerTimezone())
 }
 
 function participantsSummary(m: InternalMeeting): string {
@@ -115,8 +98,12 @@ function meetingToRow(m: InternalMeeting, index: number): InternalMeetingRow {
   return {
     id: baseId || `meeting-${index}`,
     title: m.title || "Meeting",
-    date: formatMeetingDate(m.scheduledAt, m.timezone),
-    dateKey: meetingDateKey(m.scheduledAt, m.timezone),
+    date: formatMeetingDate(m.scheduledAt),
+    // Viewer's zone, NOT m.timezone: the week grid's columns are viewer-local
+    // (localDateKey), so keying rows off the stored meeting zone filed a meeting
+    // stored as UTC 20:30 under the viewer's previous day. The meeting's own zone
+    // is still what the edit form reads/writes wall-clock in.
+    dateKey: wallClockDateKey(m.scheduledAt),
     time: formatMeetingTime(m.scheduledAt),
     type: m.meetingType || "Video",
     durationMinutes: Number.isFinite(Number(m.durationMinutes)) ? Math.max(1, Number(m.durationMinutes)) : 60,
@@ -135,7 +122,11 @@ function meetingToRow(m: InternalMeeting, index: number): InternalMeetingRow {
 }
 
 export default function InternalMeetingsClient() {
-  const { user: authUser } = useAuth()
+  const { user: authUser, permissions: rawPermissions } = useAuth()
+  const { canView, canViewRecordings, canCopyLink, canSchedule, canEdit, canDelete } = useMemo(
+    () => getMeetingActionVisibility(rawPermissions),
+    [rawPermissions]
+  )
 
   const defaultScheduleHosts = useMemo(() => {
     const email = authUser?.email?.trim()
@@ -181,9 +172,14 @@ export default function InternalMeetingsClient() {
   const editUsersLoadedRef = useRef(false)
   const { confirm, confirmDialog } = useConfirm()
   const { pickScope, recurringScopeDialog } = useRecurringScopeDialog()
-  /** Terminal meetings (ended/completed/cancelled) are view-only after the cycle ends. */
+  /**
+   * The detail modal is read-only when the meeting is terminal (ended/completed/cancelled)
+   * OR when the actor lacks EDIT. VIEW-tier users reach the same modal — the backend now
+   * serves GET /internal-meetings/:id on `meetings.read` — but must not see a save form.
+   */
   const editStatusRaw = (editMeeting?.status || "").toLowerCase()
-  const editReadOnly = editStatusRaw === "ended" || editStatusRaw === "completed" || editStatusRaw === "cancelled"
+  const editTerminal = editStatusRaw === "ended" || editStatusRaw === "completed" || editStatusRaw === "cancelled"
+  const editReadOnly = editTerminal || !canEdit
   const editStatusLabel = editStatusRaw === "cancelled" ? "cancelled" : "completed"
   const [editLoading, setEditLoading] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
@@ -601,7 +597,9 @@ export default function InternalMeetingsClient() {
       })
       if (!ok) return
       try {
-        await updateInternalMeeting(row.id, { status: "cancelled" })
+        // Dedicated cancel endpoint (not updateInternalMeeting) — backend gates it on
+        // DELETE, matching the Cancel-icon's permission tier instead of EDIT.
+        await cancelInternalMeeting(row.id)
         await fetchMeetings()
       } catch (err: any) {
         alert(err?.response?.data?.message || err?.message || "Failed to cancel")
@@ -736,18 +734,20 @@ export default function InternalMeetingsClient() {
         disableSortBy: true,
         Cell: ({ row }: any) => (
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="ti-btn ti-btn-icon ti-btn-sm ti-btn-success"
-              title="Recordings"
-              onClick={() => {
-                setRecordingsModalMeetingId(row.original.id)
-                ;(window as any).HSOverlay?.open(document.querySelector("#view-recordings-modal"))
-              }}
-            >
-              <i className="ri-video-line"></i>
-            </button>
-            {row.original.status?.toLowerCase() !== "cancelled" && (
+            {canViewRecordings && (
+              <button
+                type="button"
+                className="ti-btn ti-btn-icon ti-btn-sm ti-btn-success"
+                title="Recordings"
+                onClick={() => {
+                  setRecordingsModalMeetingId(row.original.id)
+                  ;(window as any).HSOverlay?.open(document.querySelector("#view-recordings-modal"))
+                }}
+              >
+                <i className="ri-video-line"></i>
+              </button>
+            )}
+            {canCopyLink && row.original.status?.toLowerCase() !== "cancelled" && (
               <button
                 type="button"
                 className="ti-btn ti-btn-icon ti-btn-sm ti-btn-light"
@@ -757,15 +757,18 @@ export default function InternalMeetingsClient() {
                 {copiedLinkId === row.original.id ? <i className="ri-check-line text-success"></i> : <i className="ri-links-line"></i>}
               </button>
             )}
-            <button
-              type="button"
-              className="ti-btn ti-btn-icon ti-btn-sm ti-btn-info"
-              title={row.original.seriesId ? "Edit this occurrence" : "Edit meeting"}
-              onClick={() => openEditModal(row.original.id, "single")}
-            >
-              <i className="ri-pencil-line"></i>
-            </button>
-            {row.original.seriesId && row.original.status?.toLowerCase() !== "cancelled" ? (
+            {/* VIEW opens the same modal read-only; EDIT turns it into the edit form. */}
+            {canView && (
+              <button
+                type="button"
+                className={`ti-btn ti-btn-icon ti-btn-sm ${canEdit ? "ti-btn-info" : "ti-btn-light"}`}
+                title={canEdit ? (row.original.seriesId ? "Edit this occurrence" : "Edit meeting") : "View details"}
+                onClick={() => openEditModal(row.original.id, "single")}
+              >
+                <i className={canEdit ? "ri-pencil-line" : "ri-eye-line"}></i>
+              </button>
+            )}
+            {canEdit && row.original.seriesId && row.original.status?.toLowerCase() !== "cancelled" ? (
               <button
                 type="button"
                 className="ti-btn ti-btn-icon ti-btn-sm ti-btn-primary"
@@ -775,7 +778,7 @@ export default function InternalMeetingsClient() {
                 <i className="ri-repeat-2-line"></i>
               </button>
             ) : null}
-            {row.original.status?.toLowerCase() !== "cancelled" && (
+            {canDelete && row.original.status?.toLowerCase() !== "cancelled" && (
               <button
                 type="button"
                 className="ti-btn ti-btn-icon ti-btn-sm ti-btn-danger"
@@ -785,7 +788,7 @@ export default function InternalMeetingsClient() {
                 <i className="ri-close-circle-line"></i>
               </button>
             )}
-            {row.original.seriesId ? (
+            {canDelete && row.original.seriesId ? (
               <button
                 type="button"
                 className="ti-btn ti-btn-icon ti-btn-sm ti-btn-danger"
@@ -803,7 +806,18 @@ export default function InternalMeetingsClient() {
         ),
       },
     ],
-    [selectedRows, copiedLinkId, copyMeetingLink, openEditModal, handleCancelMeeting, handleDeleteEntireSeries]
+    [
+      selectedRows,
+      copiedLinkId,
+      copyMeetingLink,
+      openEditModal,
+      handleCancelMeeting,
+      handleDeleteEntireSeries,
+      canViewRecordings,
+      canCopyLink,
+      canEdit,
+      canDelete,
+    ]
   )
 
   const data = tableData
@@ -1011,6 +1025,7 @@ export default function InternalMeetingsClient() {
                   </button>
                 </div>
                 </div>
+                {canSchedule && (
                 <div className="flex flex-wrap items-center gap-1.5 sm:contents sm:gap-2">
                 <button
                   type="button"
@@ -1022,6 +1037,7 @@ export default function InternalMeetingsClient() {
                   <span className="sm:hidden">Schedule</span>
                 </button>
                 </div>
+                )}
               </div>
             </div>
             <div className="box-body relative z-0 !p-0 flex-1 min-w-0 flex flex-col overflow-hidden">
@@ -1238,7 +1254,8 @@ export default function InternalMeetingsClient() {
           <div className="ti-modal-content border border-defaultborder dark:border-defaultborder/10 rounded-xl shadow-xl overflow-hidden">
             <div className="ti-modal-header bg-gray-50 dark:bg-black/20 border-b border-defaultborder dark:border-defaultborder/10 px-6 py-4">
               <h3 id="edit-internal-meeting-modal-label" className="ti-modal-title text-lg font-semibold flex items-center gap-2">
-                <i className="ri-pencil-line text-info"></i> Edit meeting
+                <i className={`${canEdit ? "ri-pencil-line" : "ri-eye-line"} text-info`}></i>{" "}
+                {canEdit ? "Edit meeting" : "Meeting details"}
               </h3>
               <button
                 type="button"
@@ -1262,9 +1279,13 @@ export default function InternalMeetingsClient() {
               {!editLoading && editMeeting && editReadOnly && (
                 <div className="space-y-5">
                   <MeetingReadOnlyView
-                    banner={`This meeting is ${editStatusLabel} — view only. ${editStatusLabel === "cancelled" ? "Cancelled" : "Completed"} meetings can't be edited.`}
+                    banner={
+                      editTerminal
+                        ? `This meeting is ${editStatusLabel} — view only. ${editStatusLabel === "cancelled" ? "Cancelled" : "Completed"} meetings can't be edited.`
+                        : "View only — you don't have permission to edit meetings."
+                    }
                     rows={[
-                      { label: "Status", value: editStatusLabel === "cancelled" ? "Cancelled" : "Completed" },
+                      { label: "Status", value: editTerminal ? (editStatusLabel === "cancelled" ? "Cancelled" : "Completed") : "Scheduled" },
                       { label: "Title", value: editMeeting.title },
                       {
                         label: "When",

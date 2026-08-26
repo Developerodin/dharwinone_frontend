@@ -22,7 +22,14 @@ import { hasPermission } from "@/shared/lib/permissions";
 import { useChatSocket, type CallUpdateData } from "@/shared/contexts/ChatSocketContext";
 import { normalizeCallTs } from "@/shared/lib/call-record-order";
 
-type SourceFilter = "all" | "telephony" | "in_app";
+/**
+ * Which call category the chip row is filtering on. ai_agent and telephony are
+ * both CallRecord rows told apart by the backend's `callSource` — never by
+ * provider or phone number here. in_app rows come from the chat-calls API.
+ */
+type SourceFilter = "all" | "ai_agent" | "telephony" | "in_app";
+/** Categories served by GET /bolna/call-records (as opposed to the chat-calls API). */
+const CALL_RECORD_SOURCES: SourceFilter[] = ["ai_agent", "telephony"];
 type PurposeFilter = "all" | "job_recruiter" | "student_candidate";
 
 type UnifiedCall =
@@ -46,6 +53,7 @@ const STATUS_OPTIONS = [
 
 const SOURCE_OPTIONS: { value: SourceFilter; label: string }[] = [
   { value: "all", label: "All Calls" },
+  { value: "ai_agent", label: "AI Agent" },
   { value: "telephony", label: "Telephony" },
   { value: "in_app", label: "In-App" },
 ];
@@ -65,6 +73,8 @@ function apiErrMsg(e: unknown, fallback: string): string {
   return msg || (e instanceof Error ? e.message : fallback);
 }
 
+type CallCategoryLabel = "Work Call" | "Job/Recruiter" | "Student/Candidate" | "Other";
+
 function purposeToCategory(purpose?: string | null, displayCategory?: string | null): "Job/Recruiter" | "Student/Candidate" | "Other" {
   if (displayCategory === "Job/Recruiter" || displayCategory === "Student/Candidate") return displayCategory;
   if (!purpose || !purpose.trim()) return "Other";
@@ -80,6 +90,19 @@ function purposeToCategory(purpose?: string | null, displayCategory?: string | n
   return "Other";
 }
 
+/** Human dialer / PSTN rows — not Bolna AI verification (those use callSource ai_agent). */
+function isHumanDialerCall(record: CallRecord): boolean {
+  if (record.callSource === "telephony") return true;
+  const provider = (record.telephonyData?.provider || "").toLowerCase();
+  if (provider === "twilio" || provider === "plivo") return true;
+  return /^CA[a-f0-9]{32}$/i.test(String(record.executionId || ""));
+}
+
+function getTelephonyCategoryLabel(record: CallRecord): CallCategoryLabel {
+  if (isHumanDialerCall(record)) return "Work Call";
+  return purposeToCategory(record.purpose, record.displayCategory);
+}
+
 function shouldShowVerificationPanel(record: CallRecord): boolean {
   if (record.verification) return true;
   if (readBolnaCallSummary(record.extractedData)) return true;
@@ -89,10 +112,7 @@ function shouldShowVerificationPanel(record: CallRecord): boolean {
   return purposeToCategory(record.purpose, record.displayCategory) === "Student/Candidate";
 }
 
-function categoryMatchesPurposeFilter(
-  category: "Job/Recruiter" | "Student/Candidate" | "Other",
-  filter: PurposeFilter
-): boolean {
+function categoryMatchesPurposeFilter(category: CallCategoryLabel, filter: PurposeFilter): boolean {
   if (filter === "all") return true;
   if (filter === "job_recruiter") return category === "Job/Recruiter";
   if (filter === "student_candidate") return category === "Student/Candidate";
@@ -329,7 +349,9 @@ const Calling = () => {
     setLoading(true);
     setError(null);
     try {
-      const fetchTelephonyNeeded = sourceFilter === "all" || sourceFilter === "telephony";
+      // AI Agent and Telephony are the same endpoint — split client-side by
+      // callSource, so one fetch serves both and their counts stay consistent.
+      const fetchTelephonyNeeded = sourceFilter !== "in_app";
       const fetchChatNeeded = sourceFilter === "all" || sourceFilter === "in_app";
 
       const [telephonyRes, chatRes] = await Promise.all([
@@ -398,10 +420,14 @@ const Calling = () => {
 
   const mergedCalls = useMemo((): UnifiedCall[] => {
     const list: UnifiedCall[] = [];
-    if (sourceFilter === "telephony" || sourceFilter === "all") {
-      telephonyRecords.forEach((r) =>
-        list.push({ source: "telephony", data: r, ts: normalizeCallTs("telephony", r) })
-      );
+    if (sourceFilter === "all" || CALL_RECORD_SOURCES.includes(sourceFilter)) {
+      telephonyRecords
+        // "telephony" is the transport for a CallRecord row; the category is
+        // the backend's callSource. Unclassified legacy rows show under All only.
+        .filter((r) => sourceFilter === "all" || r.callSource === sourceFilter)
+        .forEach((r) =>
+          list.push({ source: "telephony", data: r, ts: normalizeCallTs("telephony", r) })
+        );
     }
     if (sourceFilter === "in_app" || sourceFilter === "all") {
       chatCalls.forEach((c) =>
@@ -415,11 +441,11 @@ const Calling = () => {
         return s === statusFilter.toLowerCase().replace(/-/g, "_");
       });
     }
-    if (isAdministrator && purposeFilter !== "all" && (sourceFilter === "telephony" || sourceFilter === "all")) {
+    if (isAdministrator && purposeFilter !== "all" && (sourceFilter === "all" || CALL_RECORD_SOURCES.includes(sourceFilter))) {
       filtered = filtered.filter((u) => {
         if (u.source === "in_app") return true;
         const r = u.data as CallRecord;
-        const cat = purposeToCategory(r.purpose, r.displayCategory);
+        const cat = getTelephonyCategoryLabel(r);
         return categoryMatchesPurposeFilter(cat, purposeFilter);
       });
     }
@@ -516,22 +542,29 @@ const Calling = () => {
   };
 
   const sourceCounts = useMemo(() => {
+    let aiAgent = 0;
     let telephony = 0;
-    let inApp = 0;
+    let unclassified = 0;
     for (const r of telephonyRecords) {
       if (
         purposeFilter === "all" ||
         !isAdministrator ||
-        categoryMatchesPurposeFilter(
-          purposeToCategory(r.purpose, r.displayCategory),
-          purposeFilter
-        )
+        categoryMatchesPurposeFilter(getTelephonyCategoryLabel(r), purposeFilter)
       ) {
-        telephony += 1;
+        if (r.callSource === "ai_agent") aiAgent += 1;
+        else if (r.callSource === "telephony") telephony += 1;
+        // Legacy rows the backend could not classify: counted in All Calls only,
+        // matching the row filter above, so every chip count equals its own list.
+        else unclassified += 1;
       }
     }
-    inApp = chatCalls.length;
-    return { all: telephony + inApp, telephony, in_app: inApp };
+    const inApp = chatCalls.length;
+    return {
+      all: aiAgent + telephony + unclassified + inApp,
+      ai_agent: aiAgent,
+      telephony,
+      in_app: inApp,
+    };
   }, [telephonyRecords, chatCalls, purposeFilter, isAdministrator]);
 
   return (
@@ -669,11 +702,13 @@ const Calling = () => {
               {SOURCE_OPTIONS.map((o) => {
                 const active = sourceFilter === o.value;
                 const tone =
-                  o.value === "telephony"
-                    ? "bg-indigo-500/10 text-indigo-600 border-indigo-500/30"
-                    : o.value === "in_app"
-                      ? "bg-sky-500/10 text-sky-600 border-sky-500/30"
-                      : "bg-primary/10 text-primary border-primary/30";
+                  o.value === "ai_agent"
+                    ? "bg-violet-500/10 text-violet-600 border-violet-500/30"
+                    : o.value === "telephony"
+                      ? "bg-indigo-500/10 text-indigo-600 border-indigo-500/30"
+                      : o.value === "in_app"
+                        ? "bg-sky-500/10 text-sky-600 border-sky-500/30"
+                        : "bg-primary/10 text-primary border-primary/30";
                 const count = sourceCounts[o.value] ?? 0;
                 return (
                   <button
@@ -816,7 +851,7 @@ const Calling = () => {
                             const isDialer =
                               isTelephony && (r as CallRecord).telephonyData?.provider === "twilio";
                             const telephonyCategory = isTelephony
-                              ? purposeToCategory((r as CallRecord).purpose, (r as CallRecord).displayCategory)
+                              ? getTelephonyCategoryLabel(r as CallRecord)
                               : "–";
                             const telephonyPhone = isTelephony
                               ? ((r as CallRecord).toPhoneNumber ||
