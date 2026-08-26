@@ -12,6 +12,16 @@ export function conversationPreviewText(lastMessage?: Conversation["lastMessage"
   return content || "No messages yet";
 }
 
+/** Case-insensitive query matcher used by chat sidebar filters. */
+export function matchesSearchQuery(
+  query: string | null | undefined,
+  fields: Array<string | null | undefined>
+): boolean {
+  const normalizedQuery = (query || "").trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  return fields.some((field) => (field || "").toLowerCase().includes(normalizedQuery));
+}
+
 /** Sidebar preview after a delete-for-everyone: placeholder or previous visible message. */
 export function conversationPreviewAfterDelete(
   messages: Message[],
@@ -99,6 +109,42 @@ export function timelineCallPillText(call: {
   }
   if (status) chunks.push(status);
   return chunks.join(" · ");
+}
+
+export type MentionToken = { start: number; end: number; query: string };
+
+/** Finds an active @mention token around the current caret position. */
+export function findMentionToken(text: string, caret: number): MentionToken | null {
+  const safeCaret = Math.max(0, Math.min(caret, text.length));
+  const beforeCaret = text.slice(0, safeCaret);
+  const match = /(?:^|\s)@([^\s@]{0,32})$/.exec(beforeCaret);
+  if (!match) return null;
+  const query = match[1] || "";
+  const end = safeCaret;
+  const start = end - query.length - 1;
+  if (start < 0 || text[start] !== "@") return null;
+  return { start, end, query };
+}
+
+/** Replaces the mention token range with a selected mention label. */
+export function insertMentionText(
+  text: string,
+  range: { start: number; end: number },
+  mentionLabel: string
+): { value: string; caret: number } {
+  const safeStart = Math.max(0, Math.min(range.start, text.length));
+  const safeEnd = Math.max(safeStart, Math.min(range.end, text.length));
+  const cleanLabel = mentionLabel.trim();
+  if (!cleanLabel) return { value: text, caret: safeEnd };
+
+  const before = text.slice(0, safeStart);
+  const after = text.slice(safeEnd);
+  const spacerBefore = before && !/\s$/.test(before) ? " " : "";
+  const spacerAfter = after && !/^\s/.test(after) ? " " : "";
+  const mention = `@${cleanLabel}`;
+  const value = `${before}${spacerBefore}${mention}${spacerAfter}${after}`;
+  const caret = (before + spacerBefore + mention + spacerAfter).length;
+  return { value, caret };
 }
 
 export type TextSegment = { text: string; href?: string };

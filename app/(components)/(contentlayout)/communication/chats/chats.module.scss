@@ -133,13 +133,11 @@
 }
 
 .railFab {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  z-index: 2;
+  position: static;
   display: flex;
   height: 2.75rem;
   width: 2.75rem;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
@@ -157,8 +155,11 @@
 }
 
 .railHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 1.25rem 1.25rem 0.75rem;
-  padding-right: 3.5rem;
   border-bottom: 1px solid var(--chat-border);
 }
 

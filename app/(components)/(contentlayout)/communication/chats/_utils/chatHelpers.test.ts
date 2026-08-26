@@ -6,6 +6,9 @@ import {
   conversationPreviewText,
   conversationPreviewAfterDelete,
   lastMessageFromMsg,
+  matchesSearchQuery,
+  findMentionToken,
+  insertMentionText,
 } from "./chatHelpers";
 
 describe("myReactionEmoji", () => {
@@ -103,6 +106,21 @@ describe("conversationPreviewText", () => {
   });
 });
 
+describe("matchesSearchQuery", () => {
+  it("returns true for empty query", () => {
+    expect(matchesSearchQuery("", ["Alice", "Hello"])).toBe(true);
+    expect(matchesSearchQuery("   ", ["Alice", "Hello"])).toBe(true);
+  });
+
+  it("matches any field case-insensitively", () => {
+    expect(matchesSearchQuery("alice", ["Bob", "ALICE JOHNSON"])).toBe(true);
+  });
+
+  it("returns false when no field includes query", () => {
+    expect(matchesSearchQuery("zoom", ["Alice", "Voice call"])).toBe(false);
+  });
+});
+
 describe("lastMessageFromMsg", () => {
   it("maps deleted-for-everyone to sidebar placeholder", () => {
     expect(
@@ -141,5 +159,41 @@ describe("conversationPreviewAfterDelete", () => {
     );
     expect(preview.content).toBe("Earlier note");
     expect(preview.sender).toBe("Alex");
+  });
+});
+
+describe("findMentionToken", () => {
+  it("detects active token after @ in message text", () => {
+    expect(findMentionToken("hello @har", "hello @har".length)).toEqual({
+      start: 6,
+      end: 10,
+      query: "har",
+    });
+  });
+
+  it("returns empty query for bare @ trigger", () => {
+    expect(findMentionToken("ping @", "ping @".length)).toEqual({
+      start: 5,
+      end: 6,
+      query: "",
+    });
+  });
+
+  it("ignores @ when not starting a mention token", () => {
+    expect(findMentionToken("mail me at test@example.com", "mail me at test@example.com".length)).toBeNull();
+  });
+});
+
+describe("insertMentionText", () => {
+  it("replaces mention token and keeps trailing words spaced", () => {
+    const out = insertMentionText("hello @ha there", { start: 6, end: 9 }, "Harvinder Singh");
+    expect(out.value).toBe("hello @Harvinder Singh there");
+    expect(out.caret).toBe("hello @Harvinder Singh".length);
+  });
+
+  it("adds spacing when mention is glued to previous text", () => {
+    const out = insertMentionText("hello@ha", { start: 5, end: 8 }, "Admin");
+    expect(out.value).toBe("hello @Admin");
+    expect(out.caret).toBe("hello @Admin".length);
   });
 });

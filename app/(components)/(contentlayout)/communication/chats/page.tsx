@@ -35,7 +35,16 @@ import { useChatSocket } from "@/shared/contexts/ChatSocketContext";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { format, formatDistanceToNow } from "date-fns";
 import chatStyles from "./chats.module.scss";
-import { myReactionEmoji, reactionToggleEmoji, splitTextLinks, conversationPreviewText, conversationPreviewAfterDelete } from "./_utils/chatHelpers";
+import {
+  myReactionEmoji,
+  reactionToggleEmoji,
+  splitTextLinks,
+  conversationPreviewText,
+  conversationPreviewAfterDelete,
+  matchesSearchQuery,
+  findMentionToken,
+  insertMentionText,
+} from "./_utils/chatHelpers";
 import { ChatToast, useChatToast } from "./_components/ChatToast";
 import EmailLookupPanel from "./_components/EmailLookupPanel";
 import {
@@ -686,6 +695,8 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [convCalls, setConvCalls] = useState<any[]>([]);
   const [messageInput, setMessageInput] = useState("");
+  const [mentionToken, setMentionToken] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
@@ -693,6 +704,7 @@ const Chat = () => {
   const [error, setError] = useState<string | null>(null);
   const [calls, setCalls] = useState<ChatCall[]>([]);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [conversationSearch, setConversationSearch] = useState("");
   const [newChatMode, setNewChatMode] = useState<"direct" | "group">("direct");
   const [userSearch, setUserSearch] = useState("");
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; email: string }[]>([]);
@@ -812,6 +824,46 @@ const Chat = () => {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`; // ~5 rows, then internal scroll
   };
+  const clearMentionState = useCallback(() => {
+    setMentionToken(null);
+    setMentionActiveIndex(0);
+  }, []);
+  const refreshMentionState = useCallback(
+    (value: string, caret: number | null | undefined) => {
+      if (!selectedConversation || selectedConversation.type !== "group") {
+        clearMentionState();
+        return;
+      }
+      const next = findMentionToken(value, typeof caret === "number" ? caret : value.length);
+      if (!next) {
+        clearMentionState();
+        return;
+      }
+      setMentionToken(next);
+      setMentionActiveIndex(0);
+    },
+    [selectedConversation, clearMentionState]
+  );
+  const applyMention = useCallback(
+    (name: string) => {
+      if (!mentionToken) return;
+      const { value, caret } = insertMentionText(
+        messageInput,
+        { start: mentionToken.start, end: mentionToken.end },
+        name
+      );
+      setMessageInput(value);
+      clearMentionState();
+      requestAnimationFrame(() => {
+        const el = composerRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(caret, caret);
+        autoResizeComposer(el);
+      });
+    },
+    [mentionToken, messageInput, clearMentionState]
+  );
   const typingDisplayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingEmitRef = useRef<number>(0);
   const chatContainerRef = useRef<HTMLElement | null>(null);
@@ -821,6 +873,36 @@ const Chat = () => {
   const conversationListScrollRef = useRef<HTMLDivElement | null>(null);
 
   const myId = (user as any)?.id || (user as any)?._id?.toString?.();
+  const mentionSuggestions = useMemo(() => {
+    if (!mentionToken || !selectedConversation || selectedConversation.type !== "group") return [];
+    const query = mentionToken.query.trim().toLowerCase();
+    const seen = new Set<string>();
+    const members = ((selectedConversation.participants || []) as any[])
+      .map((p) => {
+        const raw = (p.user as any) || {};
+        const id = raw.id || raw._id?.toString?.();
+        const name = (raw.name || "").trim();
+        const email = (raw.email || "").trim();
+        if (!id || !name) return null;
+        if (myId && String(id) === String(myId)) return null;
+        const key = String(id);
+        if (seen.has(key)) return null;
+        seen.add(key);
+        return { id: key, name, email };
+      })
+      .filter(Boolean) as Array<{ id: string; name: string; email: string }>;
+
+    if (!query) return members.slice(0, 8);
+    return members
+      .filter((member) =>
+        member.name.toLowerCase().includes(query) || member.email.toLowerCase().includes(query)
+      )
+      .slice(0, 8);
+  }, [mentionToken, selectedConversation, myId]);
+
+  useEffect(() => {
+    clearMentionState();
+  }, [selectedConversation, clearMentionState]);
 
   const fetchConversations = useCallback(async () => {
     await Promise.all([
@@ -1269,6 +1351,7 @@ const Chat = () => {
       });
       setMessages((prev) => addMessageIfNew(prev, msg));
       setMessageInput("");
+      clearMentionState();
       if (composerRef.current) composerRef.current.style.height = "auto";
       setReplyingTo(null);
       fetchConversations();
@@ -1522,6 +1605,22 @@ const Chat = () => {
 
   const recentConvs = conversations;
   const groupConvs = groupConversations;
+  const filteredRecentConvs = recentConvs.filter((c) =>
+    matchesSearchQuery(conversationSearch, [displayName(c), conversationPreviewText(c.lastMessage)])
+  );
+  const filteredGroupConvs = groupConvs.filter((c) =>
+    matchesSearchQuery(conversationSearch, [displayName(c), c.name, conversationPreviewText(c.lastMessage)])
+  );
+  const filteredCalls = calls.filter((call) =>
+    matchesSearchQuery(conversationSearch, [
+      callsTabHeadline(call),
+      call.peer?.name,
+      (call.caller as { name?: string } | undefined)?.name,
+      call.callType === "video" ? "Video call" : "Voice call",
+      callLogStatusLabel(call.status),
+      callJoinedParticipantsLine(call, myId) || "",
+    ])
+  );
 
   const toggleForwardTarget = (conversationId: string) => {
     setForwardTargets((prev) => {
@@ -1577,7 +1676,7 @@ const Chat = () => {
   const recentConvsByDate = React.useMemo(() => {
     const map = new Map<string, Conversation[]>();
     const order: string[] = [];
-    for (const c of recentConvs) {
+    for (const c of filteredRecentConvs) {
       const d = (c as any).lastMessageAt ? new Date((c as any).lastMessageAt) : new Date();
       const label = formatDateSeparatorForList(d);
       if (!map.has(label)) {
@@ -1587,7 +1686,7 @@ const Chat = () => {
       map.get(label)!.push(c);
     }
     return order.map((label) => ({ label, convs: map.get(label)! }));
-  }, [recentConvs]);
+  }, [filteredRecentConvs]);
 
   const getReplyPreviewText = (r: { content?: string; type?: string }) => {
     if (!r) return "";
@@ -1829,16 +1928,16 @@ const Chat = () => {
       >
         {/* ── Left sidebar ── */}
         <div className={`chat-info ${chatStyles.rail} border-0 dark:border-0`}>
-          <button
-            type="button"
-            aria-label="New chat or group"
-            onClick={() => openNewChatModal(activeTab === "groups" ? "group" : "direct")}
-            className={chatStyles.railFab}
-          >
-            <i className="ri-add-line" />
-          </button>
           <div className={chatStyles.railHeader}>
             <h5 className={chatStyles.railTitle}>Messages</h5>
+            <button
+              type="button"
+              aria-label="New chat or group"
+              onClick={() => openNewChatModal(activeTab === "groups" ? "group" : "direct")}
+              className={chatStyles.railFab}
+            >
+              <i className="ri-add-line" />
+            </button>
           </div>
           <div className={chatStyles.railSearch}>
             <div className={chatStyles.searchField}>
@@ -1846,10 +1945,18 @@ const Chat = () => {
                 type="text"
                 className={`form-control ${chatStyles.searchInput}`}
                 placeholder="Search conversations…"
-                onChange={(e) => setUserSearch(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearchUsers()}
+                value={conversationSearch}
+                onChange={(e) => setConversationSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setConversationSearch("");
+                }}
               />
-              <button type="button" className={chatStyles.searchBtn} onClick={handleSearchUsers} aria-label="Search">
+              <button
+                type="button"
+                className={chatStyles.searchBtn}
+                onClick={() => setConversationSearch((prev) => prev.trim())}
+                aria-label="Search conversations"
+              >
                 <i className="ri-search-line text-lg" />
               </button>
             </div>
@@ -1884,6 +1991,8 @@ const Chat = () => {
                   <p className="text-danger px-1">{error}</p>
                 ) : recentConvs.length === 0 ? (
                   <p className={chatStyles.emptyList}>No conversations yet. Use + to start a chat.</p>
+                ) : recentConvsByDate.length === 0 ? (
+                  <p className={chatStyles.emptyList}>No conversations match your search.</p>
                 ) : (
                   <>
                   <ul className="list-none mb-0">
@@ -1949,10 +2058,12 @@ const Chat = () => {
                   <p className={chatStyles.emptyList}>Loading…</p>
                 ) : groupConvs.length === 0 ? (
                   <p className={chatStyles.emptyList}>No groups yet. Create one with +</p>
+                ) : filteredGroupConvs.length === 0 ? (
+                  <p className={chatStyles.emptyList}>No groups match your search.</p>
                 ) : (
                   <>
                   <ul className="list-none mb-0">
-                    {groupConvs.map((c) => (
+                    {filteredGroupConvs.map((c) => (
                       <li
                         key={getId(c) || ""}
                         className={`${chatStyles.convItem} ${getId(selectedConversation) === getId(c) ? chatStyles.convItemActive : ""}`}
@@ -1982,9 +2093,11 @@ const Chat = () => {
                 <div className={chatStyles.listPane}>
                 {calls.length === 0 ? (
                   <p className={chatStyles.emptyList}>No call history yet.</p>
+                ) : filteredCalls.length === 0 ? (
+                  <p className={chatStyles.emptyList}>No calls match your search.</p>
                 ) : (
                   <ul className="list-none mb-0" role="list">
-                    {calls.map((call) => {
+                    {filteredCalls.map((call) => {
                       const peer = call.peer;
                       const peerAvatarName = peer?.name || (call.caller as { name?: string })?.name || "Unknown";
                       const title = callsTabHeadline(call);
@@ -2295,7 +2408,11 @@ const Chat = () => {
                                         <i className="ri-more-2-fill text-sm" />
                                       </button>
                                       {messageMenuFor === String((m as any).id || (m as any)._id) && (
-                                        <div className={`absolute top-full right-0 mt-1 min-w-[11rem] rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-black/5 dark:border-white/10 py-1 text-start ${chatStyles.messageActionMenu}`}>
+                                        <div
+                                          className={`absolute top-full mt-1 min-w-[11rem] rounded-lg bg-white dark:bg-gray-800 shadow-lg border border-black/5 dark:border-white/10 py-1 text-start ${chatStyles.messageActionMenu} ${
+                                            isMe ? "right-0 origin-top-right" : "left-0 origin-top-left"
+                                          }`}
+                                        >
                                           <button
                                             type="button"
                                             className="w-full text-start px-3 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10"
@@ -2510,25 +2627,83 @@ const Chat = () => {
                     </button>
                   )
                 ) : null}
-                <textarea
-                  ref={composerRef}
-                  rows={1}
-                  className={`form-control flex-1 ${chatStyles.composerInput}`}
-                  placeholder="Message…"
-                  value={messageInput}
-                  onChange={(e) => {
-                    setMessageInput(e.target.value);
-                    autoResizeComposer(e.target);
-                    handleTyping();
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  aria-label="Message text"
-                />
+                <div className="relative flex-1">
+                  <textarea
+                    ref={composerRef}
+                    rows={1}
+                    className={`form-control w-full ${chatStyles.composerInput}`}
+                    placeholder="Message…"
+                    value={messageInput}
+                    onChange={(e) => {
+                      setMessageInput(e.target.value);
+                      autoResizeComposer(e.target);
+                      handleTyping();
+                      refreshMentionState(e.target.value, e.target.selectionStart);
+                    }}
+                    onSelect={(e) => {
+                      const el = e.target as HTMLTextAreaElement;
+                      refreshMentionState(el.value, el.selectionStart);
+                    }}
+                    onKeyDown={(e) => {
+                      if (mentionToken && mentionSuggestions.length > 0) {
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setMentionActiveIndex((prev) => (prev + 1) % mentionSuggestions.length);
+                          return;
+                        }
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setMentionActiveIndex(
+                            (prev) => (prev - 1 + mentionSuggestions.length) % mentionSuggestions.length
+                          );
+                          return;
+                        }
+                        if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+                          e.preventDefault();
+                          const active = mentionSuggestions[mentionActiveIndex] || mentionSuggestions[0];
+                          if (active) applyMention(active.name);
+                          return;
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          clearMentionState();
+                          return;
+                        }
+                      }
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSend();
+                      }
+                    }}
+                    aria-label="Message text"
+                  />
+                  {mentionToken && mentionSuggestions.length > 0 && (
+                    <div
+                      className="absolute bottom-full left-0 z-30 mb-2 w-[min(20rem,90vw)] rounded-lg border border-black/5 dark:border-white/10 bg-white dark:bg-gray-800 shadow-lg py-1"
+                      role="listbox"
+                      aria-label="Mention suggestions"
+                    >
+                      {mentionSuggestions.map((member, idx) => (
+                        <button
+                          key={member.id}
+                          type="button"
+                          className={`w-full text-start px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10 ${
+                            idx === mentionActiveIndex ? "bg-black/5 dark:bg-white/10" : ""
+                          }`}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            applyMention(member.name);
+                          }}
+                        >
+                          <span className="block text-sm font-medium">@{member.name}</span>
+                          {member.email ? (
+                            <span className="block text-[0.7rem] text-[#8c9097]">{member.email}</span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   className={`ti-btn ti-btn-icon ti-btn-send ${chatStyles.sendBtn}`}
