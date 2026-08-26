@@ -139,18 +139,16 @@ export default function CompanyWorkNumberAssignmentPanel({ reloadToken = 0 }: { 
     [users],
   );
 
-  const isRowDirty = useCallback(
-    (row: CompanyPhoneUserAssignmentRow) => {
-      const draft = draftByUserId[row.userId] || "";
-      const saved = row.companyPhoneNumberId || "";
-      return draft !== saved;
-    },
-    [draftByUserId],
-  );
-
-  const saveRow = async (userId: string) => {
-    if (!canManage) return;
-    const draft = draftByUserId[userId] || "";
+  /**
+   * Assignment saves on change — there is no confirm step. `savingId` drives the spinner
+   * AND blocks a second request for the same row, and the draft only ever moves to the
+   * server's answer: on failure it snaps back to the last confirmed value, so the roster
+   * never shows an assignment the backend rejected.
+   */
+  const saveRow = async (userId: string, draft: string) => {
+    if (!canManage || savingId === userId) return;
+    const confirmed = users.find((u) => u.userId === userId)?.companyPhoneNumberId || "";
+    setDraftByUserId((prev) => ({ ...prev, [userId]: draft }));
     setSavingId(userId);
     setError("");
     try {
@@ -184,6 +182,8 @@ export default function CompanyWorkNumberAssignmentPanel({ reloadToken = 0 }: { 
       );
       flashSaved(userId);
     } catch (e) {
+      // Backend refused (e.g. "already assigned to another user") — restore the confirmed value.
+      setDraftByUserId((prev) => ({ ...prev, [userId]: confirmed }));
       setError(axiosMessage(e, "Save failed"));
     } finally {
       setSavingId(null);
@@ -314,23 +314,17 @@ export default function CompanyWorkNumberAssignmentPanel({ reloadToken = 0 }: { 
 
               {!loading &&
                 filtered.map((row) => {
-                  const dirty = isRowDirty(row);
                   const flash = rowFlash[row.userId] === "saved";
                   const draft = draftByUserId[row.userId] || "";
                   return (
                     <tr
                       key={row.userId}
-                      className={`${dirty ? "bg-amber-500/[0.04]" : ""} ${flash ? "ring-1 ring-emerald-500/25" : ""}`}
+                      className={flash ? "ring-1 ring-emerald-500/25" : ""}
                     >
                       <td className="px-3 py-2.5 align-middle">
                         <span className="font-medium text-defaulttextcolor dark:text-white">
                           {formatDisplayName(row.fullName)}
                         </span>
-                        {dirty ? (
-                          <span className="mt-0.5 block text-[0.625rem] font-semibold uppercase text-amber-700 dark:text-amber-300">
-                            Unsaved
-                          </span>
-                        ) : null}
                       </td>
                       <td className="max-w-[14rem] truncate px-3 py-2.5 text-defaulttextcolor/70 dark:text-white/60">
                         {row.email}
@@ -341,14 +335,10 @@ export default function CompanyWorkNumberAssignmentPanel({ reloadToken = 0 }: { 
                       <td className="px-3 py-2.5 align-middle">
                         {canManage ? (
                           <select
-                            className={`form-select form-select-sm !rounded-lg ${
-                              dirty ? "border-amber-500/40 ring-1 ring-amber-500/15" : ""
-                            }`}
+                            className="form-select form-select-sm !rounded-lg"
                             value={draft}
                             disabled={savingId === row.userId || activeNumbers.length === 0}
-                            onChange={(e) =>
-                              setDraftByUserId((prev) => ({ ...prev, [row.userId]: e.target.value }))
-                            }
+                            onChange={(e) => void saveRow(row.userId, e.target.value)}
                           >
                             <option value="">— None —</option>
                             {activeNumbers.map((n) => {
@@ -371,20 +361,16 @@ export default function CompanyWorkNumberAssignmentPanel({ reloadToken = 0 }: { 
                         )}
                       </td>
                       {canManage ? (
+                        // Status only — the dropdown saves itself, so there is nothing to confirm.
                         <td className="px-3 py-2.5 text-center align-middle">
-                          <button
-                            type="button"
-                            className="ti-btn ti-btn-sm ti-btn-primary-full disabled:opacity-50"
-                            disabled={!dirty || savingId === row.userId}
-                            onClick={() => void saveRow(row.userId)}
-                            aria-label="Save number assignment"
-                          >
-                            {savingId === row.userId ? (
-                              <i className="ri-loader-4-line animate-spin" aria-hidden />
-                            ) : (
-                              <i className="ri-check-line" aria-hidden />
-                            )}
-                          </button>
+                          {savingId === row.userId ? (
+                            <i
+                              className="ri-loader-4-line animate-spin text-defaulttextcolor/60"
+                              aria-label="Saving"
+                            />
+                          ) : flash ? (
+                            <i className="ri-check-line text-emerald-600" aria-label="Saved" />
+                          ) : null}
                         </td>
                       ) : null}
                     </tr>

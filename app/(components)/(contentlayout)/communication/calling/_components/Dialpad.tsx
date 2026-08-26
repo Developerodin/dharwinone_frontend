@@ -4,16 +4,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
-  listOwnedTelephonyNumbers,
   placeTelephonyCall,
   getTelephonySdkToken,
   registerTelephonyBrowserCallIntent,
   reportDialerInitiate,
   reportDialerOutcome,
   setTelephonyRecording,
-  type OwnedTelephonyNumber,
   type TelephonyProvider,
 } from "@/shared/lib/api/telephony";
+import { listMyAssignedCompanyPhoneNumbers } from "@/shared/lib/api/companyPhoneNumbers";
 import { COUNTRY_PHONE_RULES } from "@/shared/lib/country-phone";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { hasPermission } from "@/shared/lib/permissions";
@@ -45,6 +44,9 @@ type IncomingCallInfo = {
 function isE164(v: string): boolean {
   return /^\+[1-9]\d{7,14}$/.test(v.trim());
 }
+
+/** Only what the caller-ID picker needs, from the user's assigned company numbers. */
+type CallerIdOption = { number: string; alias: string; type: string; voiceEnabled: boolean };
 
 // Plivo returns owned numbers without a leading "+"; E.164 needs it.
 function toE164(v: string): string {
@@ -114,7 +116,7 @@ export default function Dialpad({
   const [mode, setMode] = useState<Mode>("browser");
   const [provider, setProvider] = useState<TelephonyProvider>("plivo");
 
-  const [owned, setOwned] = useState<OwnedTelephonyNumber[]>([]);
+  const [owned, setOwned] = useState<CallerIdOption[]>([]);
   const [ownedLoading, setOwnedLoading] = useState(true);
   const [callerId, setCallerId] = useState("");
   const [agentPhone, setAgentPhone] = useState("");
@@ -158,8 +160,16 @@ export default function Dialpad({
     setAgentPhone(localStorage.getItem(AGENT_PHONE_KEY) || localStorage.getItem(LEGACY_AGENT_PHONE_KEY) || "");
     (async () => {
       try {
-        const res = await listOwnedTelephonyNumbers();
-        const nums = res.numbers || [];
+        // Only the caller's ASSIGNED company numbers. listOwnedTelephonyNumbers() returns
+        // every number on the provider account, so the dialer used to default to — and
+        // offer — whichever voice number came back first, including other users' numbers.
+        const res = await listMyAssignedCompanyPhoneNumbers();
+        const nums: CallerIdOption[] = (res.numbers || []).map((n) => ({
+          number: n.phoneNumber,
+          alias: n.friendlyName || "",
+          type: String((n as { numberType?: string }).numberType || "local"),
+          voiceEnabled: n.capabilities?.voice !== false,
+        }));
         setOwned(nums);
         const firstVoice = nums.find((n) => n.voiceEnabled && n.type !== "tollfree");
         if (firstVoice) setCallerId(toE164(firstVoice.number));
@@ -939,11 +949,11 @@ export default function Dialpad({
                 <div className="text-sm text-defaulttextcolor/50">Loading your numbers…</div>
               ) : voiceNumbers.length === 0 ? (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-                  No voice-enabled numbers yet.{" "}
+                  No company number assigned to you.{" "}
                   <Link href="/settings/company-email" className="font-semibold underline">
-                    Buy a work number
+                    Ask an admin to assign one
                   </Link>{" "}
-                  to call.
+                  before calling.
                 </div>
               ) : (
                 <select
