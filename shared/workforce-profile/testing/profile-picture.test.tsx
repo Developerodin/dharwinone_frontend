@@ -13,6 +13,31 @@ vi.mock("@/shared/lib/api/employees", () => ({
   uploadDocument: (...args: unknown[]) => uploadDocument(...args),
 }));
 
+const renderCropMock = vi.fn();
+vi.mock("@/shared/lib/image/cropImage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/lib/image/cropImage")>();
+  return {
+    ...actual,
+    renderCrop: (...args: unknown[]) => renderCropMock(...args),
+  };
+});
+
+vi.mock("react-easy-crop", () => ({
+  default: function MockCropper({
+    onCropComplete,
+  }: {
+    onCropComplete?: (area: unknown, pixels: { x: number; y: number; width: number; height: number }) => void;
+  }) {
+    React.useEffect(() => {
+      onCropComplete?.(
+        { x: 0, y: 0, width: 50, height: 50 },
+        { x: 0, y: 0, width: 100, height: 100 },
+      );
+    }, [onCropComplete]);
+    return <div data-testid="mock-cropper" />;
+  },
+}));
+
 import { WizardProvider, type WizardContextValue } from "../engine/WizardContext";
 import { PersonalInfoStep } from "../steps/PersonalInfoStep";
 import { useWorkforceStore } from "../state/workforce.store";
@@ -62,46 +87,91 @@ const renderStep = () =>
     </WizardProvider>,
   );
 
-const pickFile = () => {
+const pickFile = (name = "me.png", type = "image/png", size = 10) => {
   const input = screen.getByLabelText("Upload profile picture") as HTMLInputElement;
-  const file = new File(["x"], "me.png", { type: "image/png" });
+  const file = new File(["x"], name, { type });
+  Object.defineProperty(file, "size", { value: size });
   fireEvent.change(input, { target: { files: [file] } });
   return file;
 };
 
 beforeEach(() => {
   uploadDocument.mockReset();
+  renderCropMock.mockReset();
+  renderCropMock.mockResolvedValue(new Blob(["jpeg"], { type: "image/jpeg" }));
   useWorkforceStore.getState().hydrate(makeFormState());
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:preview");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
 });
 afterEach(cleanup);
 
 describe("profile picture — wizard save path", () => {
-  // The picked File used to sit in state forever: no upload, no payload field.
-  // Save answered 200 and the photo never changed.
-  it("uploads the picked file and stores the returned metadata", async () => {
+  it("opens the crop editor on file pick without uploading", () => {
+    renderStep();
+    pickFile();
+    expect(screen.getByRole("dialog", { name: "Edit profile photo" })).toBeInTheDocument();
+    expect(uploadDocument).not.toHaveBeenCalled();
+  });
+
+  it("uploads the cropped file after Apply and stores returned metadata", async () => {
     uploadDocument.mockResolvedValue({
-      url: "https://cdn.example.com/me.png",
-      key: "uploads/me.png",
-      originalName: "me.png",
+      url: "https://cdn.example.com/me.jpg",
+      key: "uploads/me.jpg",
+      originalName: "me.jpg",
       size: 10,
-      mimeType: "image/png",
+      mimeType: "image/jpeg",
     });
     renderStep();
     pickFile();
 
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(renderCropMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(uploadDocument).toHaveBeenCalledTimes(1));
     await waitFor(() => {
       const pi = useWorkforceStore.getState().personalInfo;
-      expect(pi.profilePicture?.url).toBe("https://cdn.example.com/me.png");
-      expect(pi.profilePicture?.key).toBe("uploads/me.png");
+      expect(pi.profilePicture?.url).toBe("https://cdn.example.com/me.jpg");
+      expect(pi.profilePicture?.key).toBe("uploads/me.jpg");
       expect(pi.profilePictureFile).toBeFalsy();
     });
+    const uploaded = uploadDocument.mock.calls[0][0] as File;
+    expect(uploaded.name).toBe("me.jpg");
+    expect(uploaded.type).toBe("image/jpeg");
+  });
+
+  it("does not upload when crop is cancelled", async () => {
+    renderStep();
+    pickFile();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Edit profile photo" })).not.toBeInTheDocument(),
+    );
+    expect(uploadDocument).not.toHaveBeenCalled();
+    expect(useWorkforceStore.getState().personalInfo.profilePicture).toBeUndefined();
+  });
+
+  it("rejects unsupported file types before opening the cropper", () => {
+    renderStep();
+    pickFile("doc.pdf", "application/pdf");
+    expect(screen.queryByRole("dialog", { name: "Edit profile photo" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert").textContent).toMatch(/isn't supported/i);
+    expect(uploadDocument).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized files before opening the cropper", () => {
+    renderStep();
+    pickFile("big.png", "image/png", 6 * 1024 * 1024);
+    expect(screen.queryByRole("dialog", { name: "Edit profile photo" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert").textContent).toMatch(/under 5 mb/i);
+    expect(uploadDocument).not.toHaveBeenCalled();
   });
 
   it("surfaces an upload failure instead of pretending the photo was set", async () => {
     uploadDocument.mockRejectedValue(new Error("nope"));
     renderStep();
     pickFile();
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toMatch(/couldn't upload/i),
@@ -109,8 +179,6 @@ describe("profile picture — wizard save path", () => {
     expect(useWorkforceStore.getState().personalInfo.profilePicture).toBeUndefined();
   });
 
-  // Removal emitted `undefined`, which the include-guard drops, so the server
-  // never cleared the stored picture.
   it("sends profilePicture: null when the photo was removed", () => {
     const state = makeFormState({
       personalInfo: {
@@ -130,8 +198,6 @@ describe("profile picture — wizard save path", () => {
 });
 
 describe("self-service read-only fields", () => {
-  // These have no self-service save path (absent from the PATCH schema), so an
-  // editable input silently discarded whatever the user typed.
   it.each(["designation", "companyAssignedEmail"])("renders %s read-only", (id) => {
     renderStep();
     const el = document.getElementById(id) as HTMLInputElement;

@@ -31,3 +31,12 @@ export function resolveEmployeeJobTitle(source: EmployeeJobTitleSource | null | 
 export function resolveEmployeeJobTitleLabel(source: EmployeeJobTitleSource | null | undefined): string {
   return resolveEmployeeJobTitle(source) || "Not assigned";
 }
+
+/** Profile UI fallback when an Employee has no HRMS job title on file. */
+export const EMPLOYEE_DESIGNATION_FALLBACK = "Designation not assigned";
+
+export function resolveEmployeeDesignationForProfile(
+  source: EmployeeJobTitleSource | null | undefined
+): string {
+  return resolveEmployeeJobTitle(source) || EMPLOYEE_DESIGNATION_FALLBACK;
+}

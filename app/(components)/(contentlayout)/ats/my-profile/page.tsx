@@ -14,6 +14,10 @@ import { getDocumentDownloadUrl } from "@/shared/lib/api/candidates";
 import { getMyMatchingJobs } from "@/shared/lib/api/employees";
 import type { JobMatch } from "@/shared/lib/api/employees";
 import { formatPhoneForDisplay } from "@/shared/lib/phoneCountries";
+import {
+  getEmployeeProfileDesignationDisplay,
+  shouldShowEmployeeDesignation,
+} from "@/shared/lib/employee-profile-display";
 import { formatUserRoleDisplayName } from "@/shared/lib/user-role-display";
 import Swal from "sweetalert2";
 
@@ -300,6 +304,21 @@ function DynamicProfileView({
     [u, roleNames, permissionsLoaded]
   );
 
+  const showEmployeeDesignation = useMemo(
+    () =>
+      shouldShowEmployeeDesignation({
+        roleNames,
+        permissionsLoaded,
+        roleDisplayName,
+      }),
+    [permissionsLoaded, roleNames, roleDisplayName]
+  );
+
+  const designationDisplay = useMemo(
+    () => getEmployeeProfileDesignationDisplay(candidate),
+    [candidate]
+  );
+
   useEffect(() => {
     if (!u) return;
     listActivityLogs({ actor: u.id, limit: 20, sortBy: "createdAt:desc" })
@@ -359,6 +378,7 @@ function DynamicProfileView({
       ? [{ label: "Employee ID", value: displayEmployeeId, mono: true }]
       : []),
     { label: roleDisplayName.includes(",") ? "Roles" : "Role", value: roleDisplayName },
+    ...(showEmployeeDesignation ? [{ label: "Designation", value: designationDisplay }] : []),
     ...(displayAddress ? [{ label: "Address", value: displayAddress }] : []),
     ...(u.education ? [{ label: "Education", value: u.education }] : []),
     ...(u.domain && u.domain.length > 0 ? [{ label: "Domain", value: u.domain.join(", ") }] : []),
@@ -506,6 +526,14 @@ function DynamicProfileView({
             <h1 className="m-0 truncate text-2xl font-bold tracking-tight text-white md:text-[1.6rem]" title={displayName}>
               {displayName}
             </h1>
+            {showEmployeeDesignation && (
+              <p
+                className="m-0 mt-0.5 max-w-full truncate text-[0.85rem] font-medium text-white/80"
+                title={designationDisplay}
+              >
+                {designationDisplay}
+              </p>
+            )}
             <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.78rem] text-white/75">
               <a
                 href={`mailto:${u.email}`}

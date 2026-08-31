@@ -134,6 +134,9 @@ export interface CandidateWithProfile {
   supervisorCountryCode?: string;
   salaryRange?: string;
   employeeId?: string;
+  designation?: string | null;
+  position?: string | { id?: string; _id?: string; name?: string } | null;
+  referralJobTitle?: string | null;
   profilePicture?: { url?: string; key?: string; originalName?: string; size?: number; mimeType?: string };
   qualifications?: Array<{ degree: string; institute: string; location?: string; startYear?: number; endYear?: number; description?: string }>;
   experiences?: Array<{ company: string; role: string; startDate?: string; endDate?: string; currentlyWorking?: boolean; description?: string }>;

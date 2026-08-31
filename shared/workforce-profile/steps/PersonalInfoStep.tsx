@@ -13,6 +13,7 @@ import {
   getSocialLinkUrlError,
   SOCIAL_PLATFORMS,
 } from "@/shared/lib/socialLinks";
+import { AvatarCropOverlay } from "../components/AvatarCropOverlay";
 import styles from "./personal-info-step.module.css";
 
 const VISA_TYPES = [
@@ -169,6 +170,8 @@ export function PersonalInfoStep() {
   const [touched, setTouched] = React.useState<Record<string, boolean>>({});
   const [pictureError, setPictureError] = React.useState<string | null>(null);
   const [pictureUploading, setPictureUploading] = React.useState(false);
+  const [cropFile, setCropFile] = React.useState<File | null>(null);
+  const [cropOpen, setCropOpen] = React.useState(false);
   const [showPassword, setShowPassword] = React.useState(false);
 
   const showCompanyEmail =
@@ -202,15 +205,11 @@ export function PersonalInfoStep() {
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setPersonalInfo({ address: { ...pi.address, [key]: e.target.value } });
 
-  const onProfilePictureChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     setPictureError(null);
-    if (!file) {
-      setPersonalInfo({ profilePictureFile: null });
-      return;
-    }
-    // Both rejections used to clear the input and return in silence — the user
-    // picked a file and simply saw nothing happen.
+    if (!file) return;
+
     const allowed = ["image/jpeg", "image/jpg", "image/png"];
     if (!allowed.includes(file.type)) {
       e.target.value = "";
@@ -223,12 +222,23 @@ export function PersonalInfoStep() {
       setPictureError(`That image is ${mb} MB. Choose one under 5 MB.`);
       return;
     }
-    // Hold the File only for the local preview; the save payload needs uploaded
-    // metadata, so upload now (same endpoint the legacy avatar picker uses).
-    setPersonalInfo({ profilePictureFile: file, profilePictureRemoved: false });
+
+    setCropFile(file);
+    setCropOpen(true);
+  };
+
+  const closeCropEditor = () => {
+    setCropOpen(false);
+    setCropFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const onCropApply = async (croppedFile: File) => {
+    setCropOpen(false);
+    setCropFile(null);
     setPictureUploading(true);
     try {
-      const meta = await uploadDocument(file, file.name);
+      const meta = await uploadDocument(croppedFile, croppedFile.name);
       setPersonalInfo({
         profilePicture: {
           url: meta.url,
@@ -238,9 +248,9 @@ export function PersonalInfoStep() {
           mimeType: meta.mimeType,
         },
         profilePictureFile: null,
+        profilePictureRemoved: false,
       });
     } catch {
-      setPersonalInfo({ profilePictureFile: null });
       setPictureError("Couldn't upload that photo. Check your connection and try again.");
       if (fileInputRef.current) fileInputRef.current.value = "";
     } finally {
@@ -296,6 +306,12 @@ export function PersonalInfoStep() {
 
   return (
     <div className={styles.step}>
+      <AvatarCropOverlay
+        open={cropOpen}
+        imageFile={cropFile}
+        onClose={closeCropEditor}
+        onApply={onCropApply}
+      />
       <header className={styles.stepHeader}>
         {/* Step count comes from the wizard — candidate mode has no Salary step. */}
         <p className={styles.stepEyebrow}>
