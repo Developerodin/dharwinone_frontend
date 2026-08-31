@@ -124,7 +124,7 @@
 
 /* Meeting scheduler popup only — floating chrome + time column */
 .react-datepicker.schedule-interview-dp-cal {
-  @apply rounded-2xl overflow-hidden shadow-2xl #{!important};
+  @apply rounded-xl overflow-hidden shadow-2xl #{!important};
 
   /* time column: align "Start" header height with the calendar header so rows line up */
   .react-datepicker__time-container {

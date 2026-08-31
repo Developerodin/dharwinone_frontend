@@ -286,6 +286,9 @@ label {
 .swal2-container .swal2-popup {
   @apply bg-white dark:bg-bodybg pt-0 pb-8 px-0;
 }
+.swal2-container .swal2-popup.swal2-toast {
+  @apply bg-white dark:bg-bodybg2 text-defaulttextcolor dark:text-white border border-defaultborder/60 dark:border-white/10 shadow-lg;
+}
 .swal2-container .swal2-icon {
   @apply w-[5rem] h-[5rem];
 }
@@ -293,10 +296,10 @@ label {
   @apply border-warning text-warning;
 }
 .swal2-container .swal2-title {
-  @apply text-[1.15rem] pt-8 pb-2 px-8;
+  @apply text-[1.15rem] pt-8 pb-2 px-8 text-defaulttextcolor dark:text-white;
 }
 .swal2-container .swal2-html-container {
-  @apply text-[0.8rem] text-textmuted mt-0 mb-[0.3rem] mx-[1.6rem];
+  @apply text-[0.8rem] text-textmuted dark:text-white/60 mt-0 mb-[0.3rem] mx-[1.6rem];
 }
 .swal2-container .swal2-styled.swal2-confirm {
   @apply bg-primary text-white py-[0.375rem] px-3 text-[0.8125rem] #{!important};

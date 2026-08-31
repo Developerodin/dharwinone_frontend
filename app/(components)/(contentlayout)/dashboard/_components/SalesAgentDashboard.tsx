@@ -19,6 +19,7 @@ import {
   LINK_TYPE,
   type ReferralPipelineStatusKey,
 } from "@/shared/lib/ats/referral-leads-constants";
+import { InlineStatusToast } from "@/shared/components/InlineStatusToast";
 
 const SHARE_CANDIDATE_FORM_PATH = "/ats/share-candidate-form";
 const REFERRAL_LEADS_PATH = "/ats/referral-leads";
@@ -720,16 +721,11 @@ export default function SalesAgentDashboard(): JSX.Element {
 
         {/* ============================ TOAST ============================ */}
         {toast && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="fixed bottom-6 left-1/2 z-[80] -translate-x-1/2"
-          >
-            <div className="inline-flex items-center gap-2 rounded-xl bg-defaulttextcolor px-4 py-2.5 text-sm font-medium text-white shadow-lg dark:bg-white dark:text-bodybg ring-1 ring-black/10 dark:ring-white/10">
-              <i className="ri-check-line text-base" />
-              {toast}
-            </div>
-          </div>
+          <InlineStatusToast
+            message={toast}
+            position="bottom-center"
+            iconClassName="ri-check-line text-base"
+          />
         )}
 
         {/* ============================ DETAIL DRAWER ============================ */}

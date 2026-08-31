@@ -634,14 +634,14 @@ export default function CandidateDashboard(): JSX.Element {
                                 if (joinable && joinHref) router.push(joinHref);
                               }}
                               disabled={!joinable || !joinHref}
-                              className={`flex w-full min-h-11 items-center gap-3 rounded-xl border border-defaultborder/60 bg-slate-50/50 dark:bg-white/[0.02] px-3 py-3 text-start transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 ${
+                              className={`flex w-full min-h-11 flex-col items-stretch gap-2 rounded-xl border border-defaultborder/60 bg-slate-50/50 dark:bg-white/[0.02] px-3 py-3 text-start transition-colors sm:flex-row sm:items-center sm:gap-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 ${
                                 joinable && joinHref
                                   ? "cursor-pointer hover:border-teal-500/30 hover:bg-teal-500/[0.04] dark:hover:bg-white/[0.03]"
                                   : "cursor-default opacity-100"
                               }`}
                               aria-label={`${interview.title}, ${resolveInterviewJobLine(interview)}, ${formatInterviewTime(interview.scheduledAt, interview.timezone)}`}
                             >
-                              <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-lg border border-defaultborder/50 bg-white dark:bg-bodybg px-2 py-2 text-center">
+                              <div className="flex w-full shrink-0 flex-row items-center justify-center gap-2 rounded-lg border border-defaultborder/50 bg-white dark:bg-bodybg px-2 py-2 text-center sm:w-14 sm:flex-col sm:gap-0">
                                 <span className="text-[0.65rem] font-semibold uppercase tracking-wide text-teal-600 dark:text-teal-400">
                                   {dateBlock.month}
                                 </span>
@@ -657,8 +657,8 @@ export default function CandidateDashboard(): JSX.Element {
                                   {resolveInterviewJobLine(interview)}
                                 </p>
                               </div>
-                              <div className="shrink-0 text-end max-w-[40%]">
-                                <p className="text-sm font-medium tabular-nums text-defaulttextcolor dark:text-white whitespace-nowrap">
+                              <div className="min-w-0 shrink-0 w-full text-start sm:w-auto sm:max-w-[40%] sm:text-end">
+                                <p className="text-sm font-medium tabular-nums text-defaulttextcolor dark:text-white break-words">
                                   {formatInterviewTime(interview.scheduledAt, interview.timezone)}
                                 </p>
                                 <p className="text-[0.6875rem] text-defaulttextcolor/55 dark:text-white/45 mt-0.5 truncate">

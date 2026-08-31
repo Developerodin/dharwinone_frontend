@@ -14,7 +14,7 @@ import HolidayPunchBlockNotice from "./_components/HolidayPunchBlockNotice";
 import BackdatedAttendanceRequestModal from "./_components/BackdatedAttendanceRequestModal";
 import LeaveRequestModal from "./_components/LeaveRequestModal";
 import { capDayTotalMs, countsTowardWorkedMs, sessionDurationMsForDisplay } from "@/shared/lib/attendance-display";
-import Swal from "sweetalert2";
+import { InlineStatusToast } from "@/shared/components/InlineStatusToast";
 
 const POLL_INTERVAL_MS = 30000;
 const TRACK_POLL_MS = 10000;
@@ -705,12 +705,7 @@ export default function AttendanceTracking() {
       )}
 
       {/* Toast */}
-      {toastMessage && (
-        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-md bg-defaulttextcolor text-white px-4 py-3 shadow-lg text-[0.8125rem]">
-          <i className="ri-information-line" />
-          {toastMessage}
-        </div>
-      )}
+      {toastMessage && <InlineStatusToast message={toastMessage} />}
 
       <div className="container mx-auto mt-5 w-full max-w-full sm:mt-6">
         {/* Loading / Error */}

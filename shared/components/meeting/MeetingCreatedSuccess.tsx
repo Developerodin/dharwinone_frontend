@@ -126,19 +126,19 @@ function CopyField({
           <span className="hidden sm:block text-[0.65rem] text-textmuted/80 dark:text-white/40 truncate">{hint}</span>
         ) : null}
       </div>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-stretch">
         <input
           type="text"
           readOnly
           value={value}
           onFocus={(e) => e.currentTarget.select()}
-          className="form-control !py-2 !text-sm flex-1 border-defaultborder dark:border-defaultborder/10 rounded-lg bg-white dark:bg-black/20 font-mono text-[0.78rem] tracking-tight"
+          className="form-control !py-2 !text-sm min-w-0 flex-1 border-defaultborder dark:border-defaultborder/10 rounded-lg bg-white dark:bg-black/20 font-mono text-[0.78rem] tracking-tight [overflow-wrap:anywhere]"
           aria-label={label}
         />
         <button
           type="button"
           onClick={onCopy}
-          className={`ti-btn !py-2 !px-3 !text-sm font-medium min-w-[5.25rem] transition-colors duration-200 ${
+          className={`ti-btn shrink-0 !py-2 !px-3 !text-sm font-medium min-w-[5.25rem] transition-colors duration-200 ${
             copied
               ? "ti-btn-success !text-white"
               : "ti-btn-outline-primary"
@@ -260,7 +260,7 @@ export default function MeetingCreatedSuccess({
   const joinHrefFinal = joinHref || personalUrl || shareUrl || "#"
 
   return (
-    <div className="ti-modal-body flex min-h-0 max-h-[min(96vh,52rem)] flex-col overflow-hidden p-0">
+    <div className="ti-modal-body flex min-h-0 flex-1 flex-col overflow-hidden p-0">
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain scroll-smooth motion-reduce:scroll-auto">
         <div className="relative overflow-hidden border-b border-defaultborder/60 dark:border-defaultborder/15">
           <div
@@ -294,7 +294,7 @@ export default function MeetingCreatedSuccess({
               {title}
             </p>
             {(dateText || timeText || (typeof durationMinutes === "number" && durationMinutes > 0)) && (
-              <div className="mt-3 inline-flex flex-wrap items-center justify-center gap-1.5">
+              <div className="mt-3 flex w-full flex-wrap items-center justify-center gap-1.5">
                 {dateText && (
                   <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/[0.06] px-2.5 py-1 text-[0.7rem] font-medium text-primary shadow-sm dark:border-primary/30 dark:bg-primary/10">
                     <i className="ri-calendar-2-line text-[0.85rem]" />
@@ -371,13 +371,13 @@ export default function MeetingCreatedSuccess({
       </div>
 
       <div className="shrink-0 border-t border-defaultborder/70 bg-gradient-to-b from-gray-50/95 to-gray-50/80 px-4 py-3 backdrop-blur-sm dark:from-black/35 dark:to-black/25 dark:border-defaultborder/15 sm:px-6 sm:py-3.5">
-        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="flex flex-col items-stretch gap-2 md:flex-row md:flex-wrap md:items-center md:justify-between">
           <div className="flex items-center gap-2">
             {canAddToCalendar && (
               <button
                 type="button"
                 onClick={handleAddToCalendar}
-                className="ti-btn ti-btn-light !h-9 !py-0 !px-3.5 !text-sm font-medium inline-flex w-full items-center justify-center transition-transform duration-150 motion-reduce:transition-none active:scale-[0.98] motion-reduce:active:scale-100 sm:w-auto"
+                className="ti-btn ti-btn-light !h-9 !py-0 !px-3.5 !text-sm font-medium inline-flex w-full items-center justify-center transition-transform duration-150 motion-reduce:transition-none active:scale-[0.98] motion-reduce:active:scale-100 md:w-auto"
                 title="Download .ics calendar invite"
               >
                 <i className="ri-calendar-event-line me-1.5" />
@@ -385,32 +385,13 @@ export default function MeetingCreatedSuccess({
               </button>
             )}
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-            <button
-              ref={isImminent ? undefined : primaryRef}
-              type="button"
-              className={`ti-btn !h-9 !py-0 !px-4 !text-sm font-medium inline-flex w-full sm:w-auto items-center justify-center transition-transform duration-150 motion-reduce:transition-none active:scale-[0.98] motion-reduce:active:scale-100 ${
-                isImminent ? "ti-btn-light" : "ti-btn-primary"
-              }`}
-              onClick={onClose}
-              aria-label={isImminent ? "Close" : "Done — close dialog"}
-            >
-              {isImminent ? "Close" : "Done"}
-            </button>
-            <button
-              type="button"
-              className="ti-btn ti-btn-outline-primary !h-9 !py-0 !px-4 !text-sm font-medium inline-flex w-full sm:w-auto items-center justify-center transition-transform duration-150 motion-reduce:transition-none active:scale-[0.98] motion-reduce:active:scale-100"
-              onClick={onAnother}
-            >
-              <i className="ri-add-line me-1.5" />
-              {anotherLabel}
-            </button>
+          <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:justify-end">
             <a
               ref={isImminent ? joinRef : undefined}
               href={joinHrefFinal}
               target="_blank"
               rel="noopener noreferrer"
-              className={`ti-btn !h-9 !py-0 !px-4 !text-sm font-medium inline-flex w-full sm:w-auto items-center justify-center transition-transform duration-150 motion-reduce:transition-none active:scale-[0.98] motion-reduce:active:scale-100 ${
+              className={`ti-btn !h-9 !py-0 !px-4 !text-sm font-medium inline-flex w-full md:w-auto items-center justify-center transition-transform duration-150 motion-reduce:transition-none active:scale-[0.98] motion-reduce:active:scale-100 ${
                 isImminent ? "ti-btn-primary" : "ti-btn-outline-primary"
               }`}
               aria-label={`${ctaLabel} (opens in new tab)`}
@@ -422,8 +403,28 @@ export default function MeetingCreatedSuccess({
                 </span>
               )}
               <i className="ri-vidicon-line me-1.5" />
-              {isImminent ? `${ctaLabel} now` : ctaLabel}
+              <span className="sm:hidden">{isImminent ? "Join now" : "Join"}</span>
+              <span className="hidden sm:inline">{isImminent ? `${ctaLabel} now` : ctaLabel}</span>
             </a>
+            <button
+              ref={isImminent ? undefined : primaryRef}
+              type="button"
+              className={`ti-btn !h-9 !py-0 !px-4 !text-sm font-medium inline-flex w-full md:w-auto items-center justify-center transition-transform duration-150 motion-reduce:transition-none active:scale-[0.98] motion-reduce:active:scale-100 ${
+                isImminent ? "ti-btn-light" : "ti-btn-primary"
+              }`}
+              onClick={onClose}
+              aria-label={isImminent ? "Close" : "Done — close dialog"}
+            >
+              {isImminent ? "Close" : "Done"}
+            </button>
+            <button
+              type="button"
+              className="ti-btn ti-btn-outline-primary !h-9 !py-0 !px-4 !text-sm font-medium inline-flex w-full md:w-auto items-center justify-center transition-transform duration-150 motion-reduce:transition-none active:scale-[0.98] motion-reduce:active:scale-100"
+              onClick={onAnother}
+            >
+              <i className="ri-add-line me-1.5" />
+              {anotherLabel}
+            </button>
           </div>
         </div>
       </div>

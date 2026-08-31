@@ -508,8 +508,8 @@ export default function CreateInterviewModal({
 
   return (
     <div id="create-interview-modal" className="hs-overlay hidden ti-modal size-lg !z-[105]" tabIndex={-1} aria-labelledby="create-interview-modal-label" aria-hidden="true">
-      <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out transition-all sm:max-w-2xl">
-        <div className="ti-modal-content flex min-h-0 flex-col overflow-hidden border border-defaultborder dark:border-defaultborder/10 rounded-xl shadow-xl">
+      <div className="ti-modal-box mx-auto mt-0 w-full max-w-2xl px-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-[max(0.5rem,env(safe-area-inset-top,0px))] ease-out transition-all hs-overlay-open:mt-0 sm:m-3 sm:px-0 sm:pb-0 sm:pt-0 sm:hs-overlay-open:mt-7">
+        <div className="ti-modal-content flex min-h-0 max-h-[calc(100dvh-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px)-1rem)] w-full flex-col overflow-hidden border border-defaultborder dark:border-defaultborder/10 rounded-xl shadow-xl sm:max-h-[min(calc(100dvh-2rem),46rem)]">
           <div className="ti-modal-header shrink-0 bg-gradient-to-b from-gray-50 to-gray-50/80 dark:from-black/25 dark:to-black/15 border-b border-defaultborder dark:border-defaultborder/10 px-6 py-4">
             <h3 id="create-interview-modal-label" className="ti-modal-title text-lg font-semibold text-defaulttextcolor dark:text-white flex items-center gap-2">
               <i className="ri-calendar-schedule-line text-primary text-xl transition-transform duration-200 motion-safe:hover:scale-105 motion-reduce:transition-none"></i>
