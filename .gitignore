@@ -8,6 +8,11 @@
 
 # testing
 /coverage
+
+# Test run output (local/CI scratch — do not commit)
+test-full*.log
+.test-full-output.txt
+*.test-output.log
 /e2e/
 /tests/e2e/
 playwright.config.ts

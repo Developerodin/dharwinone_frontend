@@ -18,3 +18,14 @@ Stats: 5 obs (2,171t read) | 46,955t work | 95% savings
 
 Access 47k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
+
+## Agent rules
+
+### Test run output (do not commit)
+
+Do not commit local or CI scratch files from test runs. Redirect verbose test output to gitignored paths or delete after use.
+
+Examples (see `.gitignore`):
+- `test-full-output.log`, `test-full-final.log` (`test-full*.log`)
+- `.test-full-output.txt`
+- `*.test-output.log`
