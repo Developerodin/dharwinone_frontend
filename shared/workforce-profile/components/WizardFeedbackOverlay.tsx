@@ -36,6 +36,7 @@ export function WizardFeedbackOverlay({
     <WizardOverlayShell
       open
       role="alertdialog"
+      aria-modal
       aria-labelledby={titleId}
       aria-describedby={description ? descId : undefined}
       aria-busy={isLoading}
