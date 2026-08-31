@@ -1,25 +1,8 @@
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 140;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: rgb(0 0 0 / 0.5);
-}
-
 .dialog {
   display: flex;
   flex-direction: column;
-  width: 100%;
-  max-width: 28rem;
   max-height: 90dvh;
   overflow: hidden;
-  border-radius: 0.75rem;
-  border: 1px solid rgb(var(--default-border) / 0.85);
-  background: rgb(var(--body-bg));
-  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
 }
 
 .header {
@@ -33,7 +16,7 @@
 
 .title {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   line-height: 1.35;
   color: rgb(var(--default-text-color));
@@ -41,9 +24,13 @@
 
 .subtitle {
   margin: 0.25rem 0 0;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   line-height: 1.45;
-  color: #5c6470;
+  color: #8c9097;
+}
+
+:global(.dark) .subtitle {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .closeBtn {
@@ -55,7 +42,7 @@
   border: none;
   border-radius: 0.5rem;
   background: transparent;
-  color: #5c6470;
+  color: #8c9097;
   cursor: pointer;
 }
 
@@ -124,8 +111,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.85rem 1.25rem;
-  border-top: 1px solid rgb(var(--default-border) / 0.55);
+  padding: 0.75rem 1rem;
+  border-top: 1px dashed rgb(var(--default-border) / 0.85);
+  background: rgb(var(--body-bg));
 }
 
 .resetBtn {
@@ -148,38 +136,9 @@
   margin-left: auto;
 }
 
-.cancelBtn,
-.applyBtn {
-  min-height: 2.5rem;
-  padding: 0.45rem 1rem;
-  border-radius: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.cancelBtn {
-  border: 1px solid rgb(var(--default-border) / 0.85);
-  background: rgb(var(--body-bg));
-  color: rgb(var(--default-text-color));
-}
-
-.applyBtn {
-  border: 1px solid rgb(var(--primary) / 0.3);
-  background: rgb(var(--primary));
-  color: #fff;
-}
-
-.applyBtn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .closeBtn,
   .zoomBtn,
-  .cancelBtn,
-  .applyBtn,
   .resetBtn {
     transition: none;
   }
