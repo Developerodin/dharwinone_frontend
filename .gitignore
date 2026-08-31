@@ -56,6 +56,7 @@ next-env.d.ts
 # Local AI tool config (do not commit)
 .claude/
 .codex/
+CLAUDE.md
 .superpowers/
 
 # Editor-local
