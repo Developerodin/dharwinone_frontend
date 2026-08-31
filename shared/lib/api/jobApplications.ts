@@ -41,6 +41,31 @@ export interface JobApplication {
   updatedAt?: string;
   /** Virtual mirror of createdAt (toJSON strips raw createdAt); use this for the application date. */
   appliedAt?: string;
+  /**
+   * Candidate-visible badge label (e.g. "Pre-boarding", "Rejected · Offer").
+   * From GET /job-applications/my-applications.
+   */
+  candidateVisibleStatus?: string;
+  /** Candidate-facing lifecycle stage. Canonical: prefer this over deriving from `status`. */
+  candidateLifecycleStage?:
+    | "interview"
+    | "offer"
+    | "preboarding"
+    | "onboarding"
+    | "hired"
+    | "deferred"
+    | "rejected";
+  /** Stage at which the selection closed; null while the candidate is still on the selected path. */
+  rejectionStage?: "interview" | "offer" | "preboarding" | "onboarding" | null;
+  /** A durable selection (offer or placement) exists for this application. */
+  selectionPersisted?: boolean;
+  /** Drives the congratulations banner — selection persisted AND not closed. */
+  showCongratulations?: boolean;
+  /**
+   * Interview outcome for this application (Meeting.interviewResult). Populated on my-applications
+   * when the backend joins the latest interview for the job application.
+   */
+  interviewResult?: "pending" | "selected" | "rejected";
 }
 
 export interface JobApplicationsListParams {

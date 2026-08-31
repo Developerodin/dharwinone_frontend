@@ -2,16 +2,36 @@
 
 import Seo from "@/shared/layout-components/seo/seo";
 import Link from "next/link";
-import React, { Fragment, useState, useEffect } from "react";
+import React, { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import { getMyApplications, withdrawMyApplication, type JobApplication, type JobApplicationStatus } from "@/shared/lib/api/jobApplications";
 import { useAuth } from "@/shared/contexts/auth-context";
+import { useNotificationContext } from "@/shared/contexts/NotificationContext";
 import { ROUTES } from "@/shared/lib/constants";
+import {
+  candidateBadgeTone,
+  formatDisplayDate,
+  getSelectedApplications,
+  resolveCandidateLifecycle,
+  type CandidateBadgeTone,
+  type CandidateJobApplication,
+} from "@/shared/lib/ats/candidateSelection";
 import DocumentsActionCard from "./_components/DocumentsActionCard";
+import CongratulationsBanner from "./_components/CongratulationsBanner";
 import { useConfirm } from "@/shared/components/ui/useConfirm";
+import { usePmRefetchOnFocus } from "@/shared/hooks/usePmRefetchOnFocus";
 
 const WITHDRAWABLE_STATUSES: JobApplicationStatus[] = ["Applied", "Screening"];
 
-const STATUS_STYLE: Record<string, { bg: string; text: string; border: string }> = {
+type BadgeStyle = { bg: string; text: string; border: string };
+
+/** Tone fallback for lifecycle labels that are not raw application statuses. */
+const TONE_STYLE: Record<CandidateBadgeTone, BadgeStyle> = {
+  success: { bg: "bg-emerald-500/10", text: "text-emerald-700 dark:text-emerald-400", border: "border-emerald-500/20" },
+  neutral: { bg: "bg-slate-500/10", text: "text-slate-700 dark:text-slate-300", border: "border-slate-500/20" },
+  negative: { bg: "bg-rose-500/10", text: "text-rose-700 dark:text-rose-400", border: "border-rose-500/20" },
+};
+
+const STATUS_STYLE: Record<string, BadgeStyle> = {
   Applied: { bg: "bg-amber-500/10", text: "text-amber-700 dark:text-amber-400", border: "border-amber-500/20" },
   Screening: { bg: "bg-sky-500/10", text: "text-sky-700 dark:text-sky-400", border: "border-sky-500/20" },
   Interview: { bg: "bg-violet-500/10", text: "text-violet-700 dark:text-violet-400", border: "border-violet-500/20" },
@@ -23,25 +43,28 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; border: string }>
 
 export default function MyApplicationsPage() {
   const { user } = useAuth();
+  const { latestNotification } = useNotificationContext();
   const { confirm, confirmDialog } = useConfirm();
-  const [applications, setApplications] = useState<JobApplication[]>([]);
+  const [applications, setApplications] = useState<CandidateJobApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<JobApplicationStatus | "">("");
   const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const pageSize = 10;
 
-  const load = () => {
-    setLoading(true);
-    getMyApplications({
+  const load = useCallback((opts?: { background?: boolean }) => {
+    if (!opts?.background) setLoading(true);
+    return getMyApplications({
       limit: 100,
       page: 1,
       status: statusFilter || undefined,
     })
-      .then((res) => setApplications(res.results ?? []))
+      .then((res) => setApplications((res.results ?? []) as CandidateJobApplication[]))
       .catch(() => setApplications([]))
-      .finally(() => setLoading(false));
-  };
+      .finally(() => {
+        if (!opts?.background) setLoading(false);
+      });
+  }, [statusFilter]);
 
   useEffect(() => {
     if (!user) {
@@ -49,7 +72,26 @@ export default function MyApplicationsPage() {
       return;
     }
     void load();
-  }, [user, statusFilter]);
+  }, [user, load]);
+
+  const refetchApplications = useCallback(() => {
+    if (!user) return;
+    void load({ background: true });
+  }, [user, load]);
+
+  // SSE: selected/rejected transitions emit job_application notifications.
+  useEffect(() => {
+    if (!user || latestNotification?.type !== "job_application") return;
+    void load({ background: true });
+  }, [user, latestNotification?._id, latestNotification?.type, load]);
+
+  // selected→pending does not emit a notification — refetch when the tab regains focus.
+  usePmRefetchOnFocus(refetchApplications);
+
+  const selectedApplications = useMemo(
+    () => getSelectedApplications(applications),
+    [applications],
+  );
 
   const handleWithdraw = async (app: JobApplication) => {
     const id = app._id ?? app.id;
@@ -138,6 +180,10 @@ export default function MyApplicationsPage() {
           </div>
         </div>
 
+        {!loading && selectedApplications.length > 0 && (
+          <CongratulationsBanner items={selectedApplications} />
+        )}
+
         {/* Content */}
         {loading ? (
           <div className="flex justify-center py-16">
@@ -176,67 +222,76 @@ export default function MyApplicationsPage() {
                 const company = job?.organisation?.name ?? "—";
                 const canWithdraw = WITHDRAWABLE_STATUSES.includes(app.status);
                 const isWithdrawing = withdrawingId === id;
-                const visibleStatus =
-                  (app as JobApplication & { candidateVisibleStatus?: string }).candidateVisibleStatus ?? app.status;
+                const lifecycle = resolveCandidateLifecycle(app);
+                const visibleStatus = lifecycle.badge;
                 const statusStyle =
-                  STATUS_STYLE[visibleStatus] ??
-                  STATUS_STYLE[app.status] ?? {
-                    bg: "bg-defaultborder/20",
-                    text: "text-defaulttextcolor dark:text-white/70",
-                    border: "border-defaultborder/30",
-                  };
+                  STATUS_STYLE[visibleStatus] ?? TONE_STYLE[candidateBadgeTone(lifecycle.stage)];
+                const appliedLabel = formatDisplayDate(app.appliedAt ?? app.createdAt);
 
                 return (
                   <article
                     key={id}
                     className="group relative rounded-xl border border-defaultborder/50 dark:border-white/10 bg-white dark:bg-bodybg shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden"
                   >
-                    <div className="flex flex-wrap sm:flex-nowrap items-stretch sm:items-center gap-4 p-5">
+                    <div className="flex flex-wrap sm:flex-nowrap items-start gap-4 p-5">
                       <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-3 mb-1">
-                          <h2 className="text-base font-semibold text-defaulttextcolor dark:text-white">
-                            {jobId ? (
-                              <Link
-                                href={`/ats/browse-jobs/${jobId}`}
-                                className="hover:text-primary transition-colors"
-                              >
-                                {jobTitle}
-                              </Link>
-                            ) : (
-                              jobTitle
-                            )}
-                          </h2>
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusStyle.bg} ${statusStyle.text} ${statusStyle.border}`}>
-                            {visibleStatus}
-                          </span>
-                        </div>
+                        <h2 className="text-base font-semibold text-defaulttextcolor dark:text-white mb-1">
+                          {jobId ? (
+                            <Link
+                              href={`/ats/browse-jobs/${jobId}`}
+                              className="hover:text-primary transition-colors"
+                            >
+                              {jobTitle}
+                            </Link>
+                          ) : (
+                            jobTitle
+                          )}
+                        </h2>
                         <p className="text-sm text-defaulttextcolor/70 dark:text-white/60">{company}</p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {jobId && (
-                          <Link
-                            href={`/ats/browse-jobs/${jobId}`}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-defaultborder/50 dark:border-white/10 bg-white dark:bg-white/5 text-defaulttextcolor dark:text-white hover:bg-defaultborder/10 dark:hover:bg-white/10 transition-colors"
+                      {/* Status/date metadata group: sizes to its content and wraps below the
+                          job info on narrow screens instead of squeezing the card. */}
+                      <div className="flex flex-col items-start sm:items-end gap-2 min-w-0 sm:shrink-0">
+                        <div className="flex flex-wrap items-center sm:justify-end gap-x-3 gap-y-1 min-w-0">
+                          <span
+                            data-testid="application-status-badge"
+                            title={visibleStatus}
+                            className={`inline-flex w-fit max-w-full items-center whitespace-nowrap px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusStyle.bg} ${statusStyle.text} ${statusStyle.border}`}
                           >
-                            <i className="ri-eye-line text-[1rem]" />
-                            View
-                          </Link>
-                        )}
-                        {canWithdraw && (
-                          <button
-                            type="button"
-                            disabled={isWithdrawing}
-                            onClick={() => handleWithdraw(app)}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          >
-                            {isWithdrawing ? (
-                              <i className="ri-loader-4-line animate-spin text-[1rem]" />
-                            ) : (
-                              <i className="ri-delete-bin-line text-[1rem]" />
-                            )}
-                            {isWithdrawing ? "Withdrawing..." : "Withdraw"}
-                          </button>
-                        )}
+                            {visibleStatus}
+                          </span>
+                          {appliedLabel && (
+                            <span className="text-xs text-defaulttextcolor/50 dark:text-white/45 whitespace-nowrap">
+                              {appliedLabel}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {jobId && (
+                            <Link
+                              href={`/ats/browse-jobs/${jobId}`}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-defaultborder/50 dark:border-white/10 bg-white dark:bg-white/5 text-defaulttextcolor dark:text-white hover:bg-defaultborder/10 dark:hover:bg-white/10 transition-colors"
+                            >
+                              <i className="ri-eye-line text-[1rem]" />
+                              View
+                            </Link>
+                          )}
+                          {canWithdraw && (
+                            <button
+                              type="button"
+                              disabled={isWithdrawing}
+                              onClick={() => handleWithdraw(app)}
+                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {isWithdrawing ? (
+                                <i className="ri-loader-4-line animate-spin text-[1rem]" />
+                              ) : (
+                                <i className="ri-delete-bin-line text-[1rem]" />
+                              )}
+                              {isWithdrawing ? "Withdrawing..." : "Withdraw"}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <DocumentsActionCard inline />
