@@ -88,7 +88,8 @@ describe("TASK_STATUS_META", () => {
     expect(TASK_STATUS_META.map((s) => s.key)).toEqual([
       "new", "todo", "on_going", "in_review", "completed",
     ]);
-    // Byte-identical to TASK_STATUS_COLORS in dashboard/page.tsx, including case.
+    // Task board palette. Mirrored by TASK_STATUS_COLORS in dashboard/page.tsx until
+    // that status chart was dropped; TASK_STATUS_META is now the only copy.
     expect(TASK_STATUS_META.map((s) => s.color)).toEqual([
       "#f5b849", "#f97316", "#845ADF", "#49B6F5", "#26BF94",
     ]);

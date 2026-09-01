@@ -1,7 +1,8 @@
 "use client"
 
 import Seo from '@/shared/layout-components/seo/seo'
-import React, { Fragment, useMemo, useState, useEffect, useCallback } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import React, { Fragment, useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { AxiosError } from 'axios'
 import Swal from 'sweetalert2'
 import { useTable, useSortBy, usePagination } from 'react-table'
@@ -13,6 +14,9 @@ import {
   type EvaluationRow,
   type EvaluationSummary,
   type EvaluationDisplayStatus,
+  type EvaluationStudentRow,
+  type EvaluationCourseRow,
+  type EvaluationMeta,
 } from '@/shared/lib/api/evaluation'
 import { listTrainingModules } from '@/shared/lib/api/training-modules'
 import AtRiskOverlayPanel, { type AtRiskContext } from './_components/AtRiskOverlayPanel'
@@ -27,6 +31,7 @@ import {
   EVAL_BTN_TAB_INACTIVE,
   EVAL_PAGE_LINK,
   EVAL_TH_SORTABLE,
+  evalPageLinkClass,
 } from './_components/evaluation-buttons'
 import {
   AtRiskCountButton,
@@ -40,12 +45,15 @@ import {
   evalRowClass,
 } from './_components/evaluation-table-parts'
 import {
-  deriveOverallStatus,
-  getCourseDisplayStatus,
   statusBadgeClass,
-  atRiskLabel,
 } from './_components/evaluation-utils'
 import { closeHsOverlay, openHsOverlay } from './_components/evaluation-overlay'
+import { buildPaginationItems, getPaginationRange } from './_components/evaluation-pagination'
+import {
+  areEvaluationListQueryStringsEquivalent,
+  buildEvaluationListQueryString,
+  parseEvaluationListState,
+} from './_components/evaluation-list-query'
 import pipelineStyles from '../../ats/ats-pipeline-list.module.css'
 
 const STATUS_OPTIONS: { value: '' | EvaluationDisplayStatus; label: string }[] = [
@@ -55,27 +63,8 @@ const STATUS_OPTIONS: { value: '' | EvaluationDisplayStatus; label: string }[] =
   { value: 'Not Started', label: 'Not Started' },
 ]
 
-interface StudentSummaryRow {
-  studentId: string
-  studentName: string
-  positionName: string | null
-  coursesAssigned: number
-  avgCompletion: number
-  overallStatus: EvaluationDisplayStatus
-  completedCount: number
-  avgQuizScore: number | null
-  atRiskCount: number
-}
-
-interface CourseSummaryRow {
-  courseId: string
-  courseName: string
-  categoryNames: string[]
-  studentsAssigned: number
-  avgCompletion: number
-  completedCount: number
-  atRiskCount: number
-}
+interface StudentSummaryRow extends EvaluationStudentRow {}
+interface CourseSummaryRow extends EvaluationCourseRow {}
 
 const EMPTY_SUMMARY: EvaluationSummary = {
   totalCourses: 0,
@@ -101,18 +90,37 @@ function TableSkeleton({ cols = 6, rows = 8 }: { cols?: number; rows?: number })
 }
 
 const Evaluation = () => {
-  const [viewMode, setViewMode] = useState<'student' | 'course'>('student')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const initial = parseEvaluationListState(searchParams)
+
+  const skipFetchForClampRef = useRef(false)
+  const syncingFromUrlRef = useRef(false)
+  const prevDebouncedSearchRef = useRef(initial.q)
+  const prevSortRef = useRef({ sortBy: initial.sortBy, sortOrder: initial.sortOrder })
+
+  const [viewMode, setViewMode] = useState<'student' | 'course'>(initial.view)
+  const [page, setPage] = useState(initial.page)
+  const [listPageSize, setListPageSize] = useState(initial.pageSize)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [summary, setSummary] = useState<EvaluationSummary>(EMPTY_SUMMARY)
   const [evaluations, setEvaluations] = useState<EvaluationRow[]>([])
+  const [tableRows, setTableRows] = useState<Array<StudentSummaryRow | CourseSummaryRow>>([])
+  const [meta, setMeta] = useState<EvaluationMeta>({
+    total: 0,
+    page: initial.page,
+    limit: initial.pageSize,
+    totalPages: 0,
+  })
   const [error, setError] = useState<string | null>(null)
 
-  const [filterStatus, setFilterStatus] = useState<'' | EvaluationDisplayStatus>('')
-  const [filterStudent, setFilterStudent] = useState('')
-  const [debouncedQ, setDebouncedQ] = useState('')
-  const [filterCourseId, setFilterCourseId] = useState('')
-  const [filterAtRiskOnly, setFilterAtRiskOnly] = useState(false)
+  const [filterStatus, setFilterStatus] = useState<'' | EvaluationDisplayStatus>(initial.status)
+  const [filterStudent, setFilterStudent] = useState(initial.q)
+  const [debouncedQ, setDebouncedQ] = useState(initial.q)
+  const [filterCourseId, setFilterCourseId] = useState(initial.course)
+  const [filterAtRiskOnly, setFilterAtRiskOnly] = useState(initial.atRisk)
 
   const [courseOptions, setCourseOptions] = useState<{ id: string; name: string }[]>([])
 
@@ -122,7 +130,15 @@ const Evaluation = () => {
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null)
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(filterStudent.trim()), 300)
+    const t = setTimeout(() => {
+      const trimmedPrev = prevDebouncedSearchRef.current.trim()
+      const trimmedNext = filterStudent.trim()
+      if (trimmedPrev !== trimmedNext) {
+        setPage(1)
+      }
+      prevDebouncedSearchRef.current = filterStudent
+      setDebouncedQ(trimmedNext)
+    }, 300)
     return () => clearTimeout(t)
   }, [filterStudent])
 
@@ -140,18 +156,38 @@ const Evaluation = () => {
     return () => { cancelled = true }
   }, [])
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (requestedPage: number, limit: number, sortBy?: string, sortDesc?: boolean) => {
     setLoading(true)
     setError(null)
     try {
       const res = await getEvaluation({
+        view: viewMode,
         status: filterStatus || undefined,
         q: debouncedQ || undefined,
         courseId: filterCourseId || undefined,
         atRisk: filterAtRiskOnly || undefined,
+        page: requestedPage,
+        limit,
+        sortBy: sortBy || undefined,
+        sortOrder: sortDesc ? 'desc' : 'asc',
       })
       setSummary(res.summary)
-      setEvaluations(res.evaluations)
+      setEvaluations(res.evaluations ?? [])
+      setTableRows(res.rows ?? [])
+      if (res.meta) {
+        setMeta(res.meta)
+        if (res.meta.page !== requestedPage) {
+          skipFetchForClampRef.current = true
+          setPage(res.meta.page)
+        }
+      } else {
+        setMeta({
+          total: res.rows?.length ?? 0,
+          page: 1,
+          limit,
+          totalPages: res.rows?.length ? 1 : 0,
+        })
+      }
     } catch (e: unknown) {
       const message = e && typeof e === 'object' && 'response' in e
         ? (e as { response?: { data?: { message?: string } } }).response?.data?.message
@@ -160,68 +196,7 @@ const Evaluation = () => {
     } finally {
       setLoading(false)
     }
-  }, [filterStatus, debouncedQ, filterCourseId, filterAtRiskOnly])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
-
-  const studentRows = useMemo(() => {
-    const map = new Map<string, EvaluationRow[]>()
-    for (const e of evaluations) {
-      if (!e.studentId) continue
-      const existing = map.get(e.studentId) || []
-      existing.push(e)
-      map.set(e.studentId, existing)
-    }
-    const rows: StudentSummaryRow[] = []
-    for (const [studentId, courses] of map.entries()) {
-      const avgCompletion = courses.reduce((s, c) => s + (c.completionRate ?? 0), 0) / courses.length
-      const scores = courses.map((c) => c.quizScore).filter((v): v is number => v != null)
-      const avgQuiz = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null
-      rows.push({
-        studentId,
-        studentName: courses[0].studentName,
-        positionName: courses[0].positionName ?? null,
-        coursesAssigned: courses.length,
-        avgCompletion: Math.round(avgCompletion),
-        overallStatus: deriveOverallStatus(courses),
-        completedCount: courses.filter((c) => getCourseDisplayStatus(c) === 'Completed').length,
-        avgQuizScore: avgQuiz,
-        atRiskCount: courses.filter((c) => c.atRisk).length,
-      })
-    }
-    return rows.sort((a, b) => a.studentName.localeCompare(b.studentName))
-  }, [evaluations])
-
-  const courseRows = useMemo(() => {
-    const map = new Map<string, EvaluationRow[]>()
-    for (const e of evaluations) {
-      if (!e.courseId) continue
-      const existing = map.get(e.courseId) || []
-      existing.push(e)
-      map.set(e.courseId, existing)
-    }
-    const rows: CourseSummaryRow[] = []
-    for (const [courseId, rowsForCourse] of map.entries()) {
-      const avgCompletion =
-        rowsForCourse.reduce((s, c) => s + (c.completionRate ?? 0), 0) / rowsForCourse.length
-      const categories = new Set<string>()
-      for (const r of rowsForCourse) for (const n of r.categoryNames || []) categories.add(n)
-      rows.push({
-        courseId,
-        courseName: rowsForCourse[0].courseName,
-        categoryNames: [...categories],
-        studentsAssigned: rowsForCourse.length,
-        avgCompletion: Math.round(avgCompletion),
-        completedCount: rowsForCourse.filter((c) => getCourseDisplayStatus(c) === 'Completed').length,
-        atRiskCount: rowsForCourse.filter((c) => c.atRisk).length,
-      })
-    }
-    return rows.sort((a, b) => a.courseName.localeCompare(b.courseName))
-  }, [evaluations])
-
-  const tableData = viewMode === 'student' ? studentRows : courseRows
+  }, [viewMode, filterStatus, debouncedQ, filterCourseId, filterAtRiskOnly])
 
   const hasActiveFilters =
     filterStatus || filterStudent.trim() || filterCourseId || filterAtRiskOnly
@@ -231,6 +206,7 @@ const Evaluation = () => {
     setFilterStudent('')
     setFilterCourseId('')
     setFilterAtRiskOnly(false)
+    setPage(1)
   }
 
   const closeAtRiskOverlay = useCallback(() => {
@@ -480,12 +456,27 @@ const Evaluation = () => {
     [viewMode, studentColumns, courseColumns]
   )
 
+  const initialSortBy = initial.sortBy
+    ? [{ id: initial.sortBy, desc: initial.sortOrder === 'desc' }]
+    : []
+
   const tableInstance = useTable(
     {
       columns: columns as never,
-      data: tableData as never,
-      initialState: { pageIndex: 0, pageSize: 50 },
-      autoResetPage: true,
+      data: tableRows as never,
+      manualPagination: true,
+      manualSortBy: true,
+      pageCount: meta.totalPages,
+      initialState: {
+        pageIndex: initial.page - 1,
+        pageSize: initial.pageSize,
+        sortBy: initialSortBy,
+      },
+      state: {
+        pageIndex: page - 1,
+        pageSize: listPageSize,
+      },
+      autoResetPage: false,
       autoResetSortBy: false,
     },
     useSortBy,
@@ -498,53 +489,107 @@ const Evaluation = () => {
     headerGroups,
     prepareRow,
     state,
-    page,
-    nextPage,
-    previousPage,
-    canNextPage,
-    canPreviousPage,
-    pageOptions,
-    gotoPage,
-    setPageSize,
+    page: tablePage,
+    setSortBy,
   } = tableInstance
 
   const { key: _evaluationTableKey, ...evaluationTableProps } = getTableProps()
   const tableBodyProps = getTableBodyProps()
 
-  const { pageIndex, pageSize } = state
-  const total = tableData.length
-  const pageCount = pageOptions.length
+  const { sortBy: tableSortBy, sortDesc: tableSortDesc } = state
+  const total = meta.total
+  const pageCount = meta.totalPages
+  const currentPage = meta.page
+  const pageIndex = page - 1
+  const canPreviousPage = page > 1
+  const canNextPage = pageCount > 0 && page < pageCount
+  const paginationItems = useMemo(
+    () => buildPaginationItems(pageIndex, pageCount),
+    [pageCount, pageIndex]
+  )
+  const { start: rangeStart, end: rangeEnd } = getPaginationRange(total, currentPage, listPageSize)
 
-  const paginationItems = useMemo(() => {
-    if (pageCount <= 7) {
-      return pageOptions.map((p: number) => ({ type: 'page' as const, page: p }))
-    }
-    const items: { type: 'page' | 'ellipsis'; page?: number }[] = []
-    const windowRadius = 2
-    const start = Math.max(0, pageIndex - windowRadius)
-    const end = Math.min(pageCount - 1, pageIndex + windowRadius)
-    if (start > 0) {
-      items.push({ type: 'page', page: 0 })
-      if (start > 1) items.push({ type: 'ellipsis' })
-    }
-    for (let p = start; p <= end; p += 1) items.push({ type: 'page', page: p })
-    if (end < pageCount - 1) {
-      if (end < pageCount - 2) items.push({ type: 'ellipsis' })
-      items.push({ type: 'page', page: pageCount - 1 })
-    }
-    return items
-  }, [pageCount, pageIndex, pageOptions])
+  const syncUrl = useCallback(() => {
+    const qs = buildEvaluationListQueryString({
+      page,
+      pageSize: listPageSize,
+      status: filterStatus,
+      q: debouncedQ,
+      course: filterCourseId,
+      atRisk: filterAtRiskOnly,
+      view: viewMode,
+      sortBy: tableSortBy?.[0] ?? '',
+      sortOrder: tableSortDesc?.[0] ? 'desc' : 'asc',
+    })
+    const nextSearch = qs ? qs.slice(1) : ''
+    const currentSearch = searchParams.toString()
+    if (areEvaluationListQueryStringsEquivalent(nextSearch, currentSearch)) return
+    router.replace(qs ? `${pathname}${qs}` : pathname, { scroll: false })
+  }, [
+    page,
+    listPageSize,
+    filterStatus,
+    debouncedQ,
+    filterCourseId,
+    filterAtRiskOnly,
+    viewMode,
+    tableSortBy,
+    tableSortDesc,
+    pathname,
+    router,
+    searchParams,
+  ])
 
   useEffect(() => {
-    gotoPage(0)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, filterStatus, debouncedQ, filterCourseId, filterAtRiskOnly])
+    syncUrl()
+  }, [syncUrl])
 
   useEffect(() => {
-    if (total === 0) return
-    const maxIndex = Math.max(0, Math.ceil(total / pageSize) - 1)
-    if (pageIndex > maxIndex) gotoPage(maxIndex)
-  }, [total, pageSize, pageIndex, gotoPage])
+    const fromUrl = parseEvaluationListState(searchParams)
+    syncingFromUrlRef.current = true
+    setPage((prev) => (prev === fromUrl.page ? prev : fromUrl.page))
+    setListPageSize((prev) => (prev === fromUrl.pageSize ? prev : fromUrl.pageSize))
+    setViewMode((prev) => (prev === fromUrl.view ? prev : fromUrl.view))
+    setFilterStatus((prev) => (prev === fromUrl.status ? prev : fromUrl.status))
+    setFilterStudent((prev) => (prev === fromUrl.q ? prev : fromUrl.q))
+    setDebouncedQ((prev) => {
+      if (prev === fromUrl.q) return prev
+      prevDebouncedSearchRef.current = fromUrl.q
+      return fromUrl.q
+    })
+    setFilterCourseId((prev) => (prev === fromUrl.course ? prev : fromUrl.course))
+    setFilterAtRiskOnly((prev) => (prev === fromUrl.atRisk ? prev : fromUrl.atRisk))
+    const nextSortBy = fromUrl.sortBy
+      ? [{ id: fromUrl.sortBy, desc: fromUrl.sortOrder === 'desc' }]
+      : []
+    setSortBy(nextSortBy)
+    prevSortRef.current = { sortBy: fromUrl.sortBy, sortOrder: fromUrl.sortOrder }
+    queueMicrotask(() => {
+      syncingFromUrlRef.current = false
+    })
+  }, [searchParams, setSortBy])
+
+  useEffect(() => {
+    if (syncingFromUrlRef.current) return
+    const currentSortBy = tableSortBy?.[0] ?? ''
+    const currentSortOrder = tableSortDesc?.[0] ? 'desc' : 'asc'
+    if (
+      prevSortRef.current.sortBy === currentSortBy &&
+      prevSortRef.current.sortOrder === currentSortOrder
+    ) {
+      return
+    }
+    prevSortRef.current = { sortBy: currentSortBy, sortOrder: currentSortOrder }
+    setPage(1)
+  }, [tableSortBy, tableSortDesc])
+
+  useEffect(() => {
+    if (skipFetchForClampRef.current) {
+      skipFetchForClampRef.current = false
+      return
+    }
+    fetchData(page, listPageSize, tableSortBy?.[0], tableSortDesc?.[0])
+  }, [fetchData, page, listPageSize, tableSortBy, tableSortDesc])
 
   return (
     <Fragment>
@@ -597,7 +642,11 @@ const Evaluation = () => {
                       role="tab"
                       aria-selected={viewMode === mode}
                       className={`${viewMode === mode ? EVAL_BTN_TAB_ACTIVE : EVAL_BTN_TAB_INACTIVE} min-w-0 flex-1 sm:flex-none`}
-                      onClick={() => setViewMode(mode)}
+                      onClick={() => {
+                        if (viewMode === mode) return
+                        setViewMode(mode)
+                        setPage(1)
+                      }}
                     >
                       {mode === 'student' ? 'By student' : 'By course'}
                     </button>
@@ -609,7 +658,7 @@ const Evaluation = () => {
                   type="button"
                   className={EVAL_BTN_OUTLINE_PRIMARY}
                   onClick={handleExport}
-                  disabled={loading || exporting || evaluations.length === 0}
+                  disabled={loading || exporting || meta.total === 0}
                   aria-label="Export evaluation data as Excel"
                   aria-busy={exporting}
                 >
@@ -622,8 +671,11 @@ const Evaluation = () => {
                 </button>
                 <select
                   className="form-control select-show-page-size min-h-[44px] w-full min-w-0 max-w-full !py-1 !px-4 !text-[0.75rem] sm:w-auto"
-                  value={pageSize}
-                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  value={listPageSize}
+                  onChange={(e) => {
+                    setListPageSize(Number(e.target.value))
+                    setPage(1)
+                  }}
                   aria-label="Rows per page"
                 >
                   {[10, 25, 50, 100].map((size) => (
@@ -642,7 +694,10 @@ const Evaluation = () => {
                   id="eval-filter-status"
                   className="form-control select-show-page-size min-h-[44px] w-full min-w-0 max-w-full !py-1.5 !px-3 !text-[0.8125rem] sm:min-w-[140px] sm:w-auto"
                   value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value as '' | EvaluationDisplayStatus)}
+                  onChange={(e) => {
+                    setFilterStatus(e.target.value as '' | EvaluationDisplayStatus)
+                    setPage(1)
+                  }}
                 >
                   {STATUS_OPTIONS.map((opt) => (
                     <option key={opt.value || 'all'} value={opt.value}>
@@ -668,7 +723,10 @@ const Evaluation = () => {
                   id="eval-filter-course"
                   className="form-control select-show-page-size min-h-[44px] w-full min-w-0 max-w-full truncate !py-1.5 !px-3 !text-[0.8125rem] sm:min-w-[160px] sm:w-auto"
                   value={filterCourseId}
-                  onChange={(e) => setFilterCourseId(e.target.value)}
+                  onChange={(e) => {
+                    setFilterCourseId(e.target.value)
+                    setPage(1)
+                  }}
                 >
                   <option value="">All courses</option>
                   {courseOptions.map((c) => (
@@ -681,7 +739,10 @@ const Evaluation = () => {
                   type="checkbox"
                   className="form-check-input"
                   checked={filterAtRiskOnly}
-                  onChange={(e) => setFilterAtRiskOnly(e.target.checked)}
+                  onChange={(e) => {
+                    setFilterAtRiskOnly(e.target.checked)
+                    setPage(1)
+                  }}
                 />
                 <span className="text-[0.8125rem] font-medium text-defaulttextcolor/85">At-risk only</span>
               </label>
@@ -701,7 +762,7 @@ const Evaluation = () => {
             {error && (
               <div className="mx-4 mb-4 p-3 rounded-lg bg-danger/10 text-danger text-sm flex flex-wrap items-center justify-between gap-2" role="alert">
                 <span>{error}</span>
-                <button type="button" className={EVAL_BTN_DANGER} onClick={fetchData} aria-label="Retry loading evaluation data">
+                <button type="button" className={EVAL_BTN_DANGER} onClick={() => fetchData(page, listPageSize, tableSortBy?.[0], tableSortDesc?.[0])} aria-label="Retry loading evaluation data">
                   <i className="ri-refresh-line" aria-hidden />
                   Retry
                 </button>
@@ -777,7 +838,7 @@ const Evaluation = () => {
                         })}
                       </thead>
                       <tbody {...tableBodyProps}>
-                        {page.map((row, rowIndex) => {
+                        {tablePage.map((row, rowIndex) => {
                           prepareRow(row)
                           const { key: _rowKey, ...rowProps } = row.getRowProps()
                           const rowKey =
@@ -813,8 +874,7 @@ const Evaluation = () => {
                 <div className="box-footer !border-t-0 px-4 pb-4 pt-2">
                   <div className="flex flex-wrap items-center gap-4">
                     <div className="text-[0.8125rem] text-defaulttextcolor/65 tabular-nums">
-                      Showing {total === 0 ? 0 : pageIndex * pageSize + 1} to{' '}
-                      {Math.min((pageIndex + 1) * pageSize, total)} of {total} entries
+                      Showing {rangeStart} to {rangeEnd} of {total} entries
                     </div>
                     <div className="ms-auto">
                       <nav aria-label="Page navigation" className="pagination-style-4">
@@ -823,40 +883,45 @@ const Evaluation = () => {
                             <button
                               type="button"
                               className={EVAL_PAGE_LINK}
-                              onClick={() => previousPage()}
+                              onClick={() => setPage((current) => Math.max(1, current - 1))}
                               disabled={!canPreviousPage}
                               aria-label="Previous page"
                             >
                               Prev
                             </button>
                           </li>
-                          {paginationItems.map((item, idx) =>
-                            item.type === 'ellipsis' ? (
-                              <li key={`ellipsis-${idx}`} className="page-item disabled">
-                                <span className="page-link px-2 py-[0.375rem] min-h-[44px]">…</span>
-                              </li>
-                            ) : (
+                          {paginationItems.map((item, idx) => {
+                            if (item.type === 'ellipsis') {
+                              return (
+                                <li key={`ellipsis-${idx}`} className="page-item disabled">
+                                  <span className="page-link px-2 py-[0.375rem] min-h-[44px]">…</span>
+                                </li>
+                              )
+                            }
+
+                            const isCurrentPage = pageIndex === item.page
+                            return (
                               <li
                                 key={`page-${item.page}-${idx}`}
-                                className={`page-item ${pageIndex === item.page ? 'active' : ''}`}
+                                className={`page-item ${isCurrentPage ? 'active' : ''}`}
                               >
                                 <button
                                   type="button"
-                                  className={EVAL_PAGE_LINK}
-                                  onClick={() => gotoPage(item.page!)}
-                                  aria-current={pageIndex === item.page ? 'page' : undefined}
+                                  className={evalPageLinkClass(isCurrentPage)}
+                                  onClick={() => setPage((item.page ?? 0) + 1)}
+                                  aria-current={isCurrentPage ? 'page' : undefined}
                                   aria-label={`Page ${(item.page ?? 0) + 1}`}
                                 >
                                   {(item.page ?? 0) + 1}
                                 </button>
                               </li>
                             )
-                          )}
+                          })}
                           <li className={`page-item ${!canNextPage ? 'disabled' : ''}`}>
                             <button
                               type="button"
                               className={`${EVAL_PAGE_LINK} text-primary`}
-                              onClick={() => nextPage()}
+                              onClick={() => setPage((current) => Math.min(pageCount || 1, current + 1))}
                               disabled={!canNextPage}
                               aria-label="Next page"
                             >

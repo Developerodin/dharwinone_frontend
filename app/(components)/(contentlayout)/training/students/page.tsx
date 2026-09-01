@@ -1,192 +1,33 @@
 "use client"
 import Seo from '@/shared/layout-components/seo/seo'
 import React, { Fragment, useMemo, useState, useEffect, useCallback, useRef } from 'react'
-import { useTable, useSortBy, useGlobalFilter, usePagination } from 'react-table'
+import { useTable, useSortBy } from 'react-table'
 import Link from 'next/link'
 import Swal from 'sweetalert2'
 import { AxiosError } from 'axios'
 import * as studentsApi from '@/shared/lib/api/students'
 import type {
   Student,
-  UserWithoutStudentProfile,
-} from '@/shared/lib/api/students'
-import {
-  createStudentFromUser,
-  getUsersWithoutStudentProfile,
+  StudentNote,
 } from '@/shared/lib/api/students'
 import StudentViewModal from './_components/StudentViewModal'
 import StudentProfileImageModal from './_components/StudentProfileImageModal'
 import StudentFilters from './_components/StudentFilters'
-
-// Mock data for students
-const STUDENTS_DATA = [
-  {
-    id: '1',
-    name: 'Alex Thompson',
-    displayPicture: '/assets/images/faces/1.jpg',
-    phone: '+1 (555) 123-4567',
-    email: 'alex.thompson@example.com',
-    skills: ['React', 'Node.js', 'TypeScript', 'AWS', 'MongoDB'],
-    education: 'BS Computer Science - Stanford University (2018)',
-    experience: 6,
-    bio: 'Experienced full-stack developer with 6+ years in building scalable web applications. Passionate about clean code and modern technologies.',
-  },
-  {
-    id: '2',
-    name: 'Maria Garcia',
-    displayPicture: '/assets/images/faces/2.jpg',
-    phone: '+1 (555) 234-5678',
-    email: 'maria.garcia@example.com',
-    skills: ['Product Management', 'Agile', 'Scrum', 'JIRA', 'Analytics'],
-    education: 'MBA - Harvard Business School (2019)',
-    experience: 4,
-    bio: 'Strategic product manager with 4+ years of experience in building and launching successful products. Strong background in user research and data-driven decision making.',
-  },
-  {
-    id: '3',
-    name: 'James Wilson',
-    displayPicture: '/assets/images/faces/3.jpg',
-    phone: '+1 (555) 345-6789',
-    email: 'james.wilson@example.com',
-    skills: ['Vue.js', 'JavaScript', 'CSS', 'HTML', 'Responsive Design'],
-    education: 'BS Web Development - UC Berkeley (2020)',
-    experience: 3,
-    bio: 'Creative frontend developer specializing in creating beautiful and intuitive user interfaces. Expert in modern CSS frameworks and responsive design.',
-  },
-  {
-    id: '4',
-    name: 'Emma Brown',
-    displayPicture: '/assets/images/faces/4.jpg',
-    phone: '+1 (555) 456-7890',
-    email: 'emma.brown@example.com',
-    skills: ['Python', 'Machine Learning', 'TensorFlow', 'SQL', 'Data Visualization'],
-    education: 'MS Data Science - MIT (2021)',
-    experience: 3,
-    bio: 'Data scientist passionate about extracting insights from complex datasets. Experienced in building predictive models and creating data-driven solutions.',
-  },
-  {
-    id: '5',
-    name: 'David Lee',
-    displayPicture: '/assets/images/faces/5.jpg',
-    phone: '+1 (555) 567-8901',
-    email: 'david.lee@example.com',
-    skills: ['Docker', 'Kubernetes', 'CI/CD', 'AWS', 'Linux'],
-    education: 'BS Computer Engineering - Carnegie Mellon (2018)',
-    experience: 5,
-    bio: 'DevOps engineer with expertise in cloud infrastructure and automation. Passionate about improving deployment pipelines and system reliability.',
-  },
-  {
-    id: '6',
-    name: 'Sophia Martinez',
-    displayPicture: '/assets/images/faces/6.jpg',
-    phone: '+1 (555) 678-9012',
-    email: 'sophia.martinez@example.com',
-    skills: ['Figma', 'Adobe XD', 'User Research', 'Prototyping', 'UI/UX Design'],
-    education: 'BFA Graphic Design - Art Center College (2019)',
-    experience: 4,
-    bio: 'UX designer focused on creating meaningful user experiences. Strong background in user research, wireframing, and visual design.',
-  },
-  {
-    id: '7',
-    name: 'Robert Taylor',
-    displayPicture: '/assets/images/faces/7.jpg',
-    phone: '+1 (555) 789-0123',
-    email: 'robert.taylor@example.com',
-    skills: ['Java', 'Spring Boot', 'MySQL', 'Redis', 'Microservices'],
-    education: 'BS Software Engineering - Georgia Tech (2017)',
-    experience: 6,
-    bio: 'Backend developer specializing in building scalable and efficient server-side applications. Expert in RESTful APIs and microservices architecture.',
-  },
-  {
-    id: '8',
-    name: 'Jessica White',
-    displayPicture: '/assets/images/faces/8.jpg',
-    phone: '+1 (555) 890-1234',
-    email: 'jessica.white@example.com',
-    skills: ['Digital Marketing', 'SEO', 'Content Strategy', 'Analytics', 'Social Media'],
-    education: 'BA Marketing - UCLA (2018)',
-    experience: 5,
-    bio: 'Marketing professional with expertise in digital marketing strategies and brand development. Proven track record of driving growth and engagement.',
-  },
-  {
-    id: '9',
-    name: 'Thomas Anderson',
-    displayPicture: '/assets/images/faces/9.jpg',
-    phone: '+1 (555) 901-2345',
-    email: 'thomas.anderson@example.com',
-    skills: ['Sales', 'CRM', 'Negotiation', 'Account Management', 'Business Development'],
-    education: 'BA Business Administration - USC (2020)',
-    experience: 3,
-    bio: 'Results-driven sales executive with strong relationship-building skills. Experienced in B2B sales and enterprise account management.',
-  },
-  {
-    id: '10',
-    name: 'Jennifer Davis',
-    displayPicture: '/assets/images/faces/10.jpg',
-    phone: '+1 (555) 012-3456',
-    email: 'jennifer.davis@example.com',
-    skills: ['Selenium', 'Test Automation', 'QA Testing', 'JIRA', 'API Testing'],
-    education: 'BS Computer Science - UC San Diego (2019)',
-    experience: 4,
-    bio: 'QA engineer dedicated to ensuring software quality through comprehensive testing strategies. Expert in test automation and bug tracking.',
-  },
-  {
-    id: '11',
-    name: 'Christopher Moore',
-    displayPicture: '/assets/images/faces/11.jpg',
-    phone: '+1 (555) 123-4568',
-    email: 'christopher.moore@example.com',
-    skills: ['React', 'Node.js', 'PostgreSQL', 'GraphQL', 'TypeScript'],
-    education: 'BS Computer Science - University of Washington (2018)',
-    experience: 5,
-    bio: 'Full-stack developer with expertise in modern JavaScript frameworks. Passionate about building complete web applications from frontend to backend.',
-  },
-  {
-    id: '12',
-    name: 'Amanda Johnson',
-    displayPicture: '/assets/images/faces/12.jpg',
-    phone: '+1 (555) 234-5679',
-    email: 'amanda.johnson@example.com',
-    skills: ['Business Analysis', 'SQL', 'Excel', 'Project Management', 'Process Improvement'],
-    education: 'MBA - Northwestern University (2020)',
-    experience: 3,
-    bio: 'Business analyst with strong analytical skills and experience in process optimization. Focused on driving business value through data insights.',
-  },
-  {
-    id: '13',
-    name: 'Daniel Rodriguez',
-    displayPicture: '/assets/images/faces/13.jpg',
-    phone: '+1 (555) 345-6790',
-    email: 'daniel.rodriguez@example.com',
-    skills: ['AWS', 'Azure', 'Terraform', 'Cloud Architecture', 'Serverless'],
-    education: 'MS Cloud Computing - Arizona State (2019)',
-    experience: 4,
-    bio: 'Cloud architect specializing in designing and implementing scalable cloud infrastructure solutions. Expert in multi-cloud strategies.',
-  },
-  {
-    id: '14',
-    name: 'Rachel Kim',
-    displayPicture: '/assets/images/faces/14.jpg',
-    phone: '+1 (555) 456-7901',
-    email: 'rachel.kim@example.com',
-    skills: ['Swift', 'Kotlin', 'React Native', 'iOS Development', 'Android Development'],
-    education: 'BS Mobile App Development - San Diego State (2021)',
-    experience: 2,
-    bio: 'Mobile app developer with expertise in both native and cross-platform development. Passionate about creating smooth mobile experiences.',
-  },
-  {
-    id: '15',
-    name: 'Kevin Harris',
-    displayPicture: '/assets/images/faces/15.jpg',
-    phone: '+1 (555) 567-9012',
-    email: 'kevin.harris@example.com',
-    skills: ['Network Administration', 'Cisco', 'Firewall', 'VPN', 'System Security'],
-    education: 'BS Network Engineering - Tennessee Tech (2018)',
-    experience: 5,
-    bio: 'Network administrator with extensive experience in managing enterprise network infrastructure and ensuring optimal performance and security.',
-  }
-]
-
+import { downloadStudentProfileXlsx } from '@/shared/lib/student-profile-export'
+import {
+  DEFAULT_STUDENT_SORT_API,
+  isStudentSortOption,
+  sortOptionToApiSortBy,
+  type StudentSortOption,
+} from '@/shared/lib/training/student-list-sort'
+import {
+  buildStudentExportParams,
+  buildStudentListParams,
+  isExperienceFilterActive,
+  type StudentStatusFilter,
+} from '@/shared/lib/training/student-list-filters'
+import { useAuth } from '@/shared/contexts/auth-context'
+import { hasPermission } from '@/shared/lib/permissions'
 
 interface FilterState {
   name: string[]
@@ -204,6 +45,7 @@ interface StudentRow {
   id: string
   name: string
   displayPicture: string
+  hasProfileImage: boolean
   phone: string
   email: string
   skills: string[]
@@ -212,17 +54,9 @@ interface StudentRow {
   bio: string
 }
 
-// Note type for student notes
-interface StudentNote {
-  id: string
-  studentId: string
-  note: string
-  visibility: 'public' | 'private'
-  postedBy: string
-  postedDate: string
-}
-
 const Students = () => {
+  const auth = useAuth()
+  const canManageStudents = hasPermission(auth, 'manage_training_students')
   const [students, setStudents] = useState<StudentRow[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
@@ -230,22 +64,17 @@ const Students = () => {
   const [previewStudent, setPreviewStudent] = useState<any>(null)
   const [viewStudent, setViewStudent] = useState<studentsApi.Student | null>(null)
   const [viewStudentLoading, setViewStudentLoading] = useState(false)
-  const [usersWithoutProfile, setUsersWithoutProfile] = useState<UserWithoutStudentProfile[]>([])
-  const [loadingUsersWithoutProfile, setLoadingUsersWithoutProfile] = useState(false)
-  const [creatingProfileForUserId, setCreatingProfileForUserId] = useState<string | null>(null)
   const [notesStudentId, setNotesStudentId] = useState<string | null>(null)
   const [newNote, setNewNote] = useState({ text: '', visibility: 'public' as 'public' | 'private' })
-  const [shareStudent, setShareStudent] = useState<any>(null)
-  const [copied, setCopied] = useState(false)
-  const [shareEmail, setShareEmail] = useState('')
-  const [showEmailInput, setShowEmailInput] = useState(false)
-  const [selectedSort, setSelectedSort] = useState<string>('')
+  const [selectedSort, setSelectedSort] = useState<StudentSortOption>('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StudentStatusFilter>('active')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [totalResults, setTotalResults] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
-  const [sortBy, setSortBy] = useState<string>('createdAt:desc')
+  const [sortBy, setSortBy] = useState<string>(DEFAULT_STUDENT_SORT_API)
   // Excel menu: fully React-controlled — Preline hs-dropdown hooks were unreliable here (button never opened).
   const [excelMenuOpen, setExcelMenuOpen] = useState(false)
   const [excelExporting, setExcelExporting] = useState(false)
@@ -265,14 +94,33 @@ const Students = () => {
     email: '',
     experience: [DEFAULT_EXPERIENCE_RANGE[0], DEFAULT_EXPERIENCE_RANGE[1]]
   })
+  const [filterOptions, setFilterOptions] = useState<studentsApi.StudentFilterOptions>({
+    names: [],
+    skills: [],
+    education: [],
+    experience: { min: DEFAULT_EXPERIENCE_RANGE[0], max: DEFAULT_EXPERIENCE_RANGE[1] },
+  })
 
-  // Experience range from currently loaded data (students or STUDENTS_DATA fallback)
-  const experienceRanges = useMemo(() => {
-    const source = students.length > 0 ? students : STUDENTS_DATA
-    const experiences = source.map((s) => s.experience ?? 0)
-    if (!experiences.length) return { min: DEFAULT_EXPERIENCE_RANGE[0], max: DEFAULT_EXPERIENCE_RANGE[1] }
-    return { min: Math.min(DEFAULT_EXPERIENCE_RANGE[0], ...experiences), max: Math.max(DEFAULT_EXPERIENCE_RANGE[1], ...experiences) }
-  }, [students])
+  const experienceRanges = useMemo(
+    () => ({
+      min: filterOptions.experience.min ?? DEFAULT_EXPERIENCE_RANGE[0],
+      max: filterOptions.experience.max ?? DEFAULT_EXPERIENCE_RANGE[1],
+    }),
+    [filterOptions.experience.min, filterOptions.experience.max]
+  )
+
+  const listQueryInput = useMemo(
+    () => ({
+      page: currentPage,
+      limit: pageSize,
+      sortBy,
+      search: debouncedSearchQuery,
+      statusFilter,
+      filters,
+      experienceBounds: experienceRanges,
+    }),
+    [currentPage, pageSize, sortBy, debouncedSearchQuery, statusFilter, filters, experienceRanges]
+  )
 
   // Search states for filter dropdowns
   const [searchName, setSearchName] = useState('')
@@ -320,10 +168,15 @@ const Students = () => {
   }
 
   // Handle add note - open notes sidebar
-  const handleAddNote = (id: string, student?: any) => {
-    // Open the notes sidebar
+  const handleAddNote = async (id: string) => {
     setNotesStudentId(id)
-    
+    try {
+      const response = await studentsApi.listStudentNotes(id)
+      setStudentNotes(response.results ?? [])
+    } catch {
+      setStudentNotes([])
+    }
+
     setTimeout(() => {
       ;(window as any).HSOverlay?.open(document.querySelector('#student-notes-panel'))
     }, 100)
@@ -331,31 +184,44 @@ const Students = () => {
 
   // Get notes for a specific student
   const getStudentNotes = (studentId: string) => {
-    return studentNotes.filter(note => note.studentId === studentId).sort((a, b) => 
-      new Date(b.postedDate).getTime() - new Date(a.postedDate).getTime()
-    )
+    return studentNotes
+      .filter((note) => note.student === studentId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   }
 
   // Add a new note
-  const handleAddNoteSubmit = () => {
-    if (!notesStudentId || !newNote.text.trim()) return
-    
-    const note: StudentNote = {
-      id: `note-${Date.now()}`,
-      studentId: notesStudentId,
-      note: newNote.text,
-      visibility: newNote.visibility,
-      postedBy: 'John Doe', // This would come from user context in real app
-      postedDate: new Date().toISOString()
+  const handleAddNoteSubmit = async () => {
+    if (!notesStudentId || !newNote.text.trim() || !canManageStudents) return
+
+    try {
+      const created = await studentsApi.createStudentNote(notesStudentId, {
+        note: newNote.text.trim(),
+        visibility: newNote.visibility,
+      })
+      setStudentNotes((prev) => [created, ...prev])
+      setNewNote({ text: '', visibility: 'public' })
+    } catch (err) {
+      const msg =
+        err instanceof AxiosError && err.response?.data?.message
+          ? String(err.response.data.message)
+          : 'Failed to add note.'
+      await Swal.fire({ icon: 'error', title: 'Failed to add note', text: msg, toast: true, position: 'top-end', timer: 3000, showConfirmButton: false })
     }
-    
-    setStudentNotes([...studentNotes, note])
-    setNewNote({ text: '', visibility: 'public' })
   }
 
   // Delete a note
-  const handleDeleteNote = (noteId: string) => {
-    setStudentNotes(studentNotes.filter(note => note.id !== noteId))
+  const handleDeleteNote = async (noteId: string) => {
+    if (!canManageStudents) return
+    try {
+      await studentsApi.deleteStudentNote(noteId)
+      setStudentNotes((prev) => prev.filter((note) => note.id !== noteId))
+    } catch (err) {
+      const msg =
+        err instanceof AxiosError && err.response?.data?.message
+          ? String(err.response.data.message)
+          : 'Failed to delete note.'
+      await Swal.fire({ icon: 'error', title: 'Failed to delete note', text: msg, toast: true, position: 'top-end', timer: 3000, showConfirmButton: false })
+    }
   }
 
   // Helper function to map Student API response to StudentRow format
@@ -403,6 +269,7 @@ const Students = () => {
       id: student.id,
       name: student.user?.name || 'Unknown',
       displayPicture: student.profileImageUrl || '/assets/images/faces/1.jpg',
+      hasProfileImage: Boolean(student.profileImageUrl),
       phone: student.phone || '',
       email: student.user?.email || '',
       skills: student.skills || [],
@@ -420,11 +287,14 @@ const Students = () => {
       setProfileImageLoading(true)
 
       try {
-        const info = await studentsApi.getStudentProfileImage(student.id)
-        setProfileImageUrl(info?.url ?? null)
+        if (!student.hasProfileImage) {
+          setProfileImageUrl(null)
+        } else {
+          const info = await studentsApi.getStudentProfileImage(student.id)
+          setProfileImageUrl(info?.url ?? student.displayPicture)
+        }
       } catch (err) {
-        // 404 or other errors – just log and keep placeholder
-        console.error('Failed to fetch profile image URL', err)
+        setProfileImageError('Unable to load profile image. You can still upload a new one.')
       } finally {
         setProfileImageLoading(false)
       }
@@ -448,14 +318,24 @@ const Students = () => {
     try {
       await studentsApi.uploadStudentProfileImage(profileImageStudent.id, file)
 
-      // Refresh image URL
       const info = await studentsApi.getStudentProfileImage(profileImageStudent.id)
-      setProfileImageUrl(info?.url ?? null)
+      const nextUrl = info?.url ?? null
+      setProfileImageUrl(nextUrl)
 
-      // Optionally refresh students list to reflect any backend changes
-      if (fetchStudentsRef.current) {
-        await fetchStudentsRef.current()
-      }
+      setStudents((prev) =>
+        prev.map((row) =>
+          row.id === profileImageStudent.id
+            ? {
+                ...row,
+                hasProfileImage: true,
+                displayPicture: nextUrl || row.displayPicture,
+              }
+            : row
+        )
+      )
+      setProfileImageStudent((prev) =>
+        prev ? { ...prev, hasProfileImage: true } : prev
+      )
 
       await Swal.fire({
         icon: 'success',
@@ -497,15 +377,9 @@ const Students = () => {
   const fetchStudents = useCallback(async () => {
     setLoading(true)
     try {
-      const params: studentsApi.ListStudentsParams = {
-        page: currentPage,
-        limit: pageSize,
-        sortBy,
-        ...(searchQuery.trim() && { search: searchQuery.trim() }),
-      }
-      
+      const params = buildStudentListParams(listQueryInput)
       const response = await studentsApi.listStudents(params)
-      
+
       const mappedStudents = response.results.map(mapStudentToRow)
       setStudents(mappedStudents)
       setTotalResults(response.totalResults)
@@ -534,7 +408,24 @@ const Students = () => {
     } finally {
       setLoading(false)
     }
-  }, [currentPage, pageSize, sortBy, searchQuery, mapStudentToRow])
+  }, [listQueryInput, mapStudentToRow])
+
+  const fetchFilterOptions = useCallback(async () => {
+    try {
+      const options = await studentsApi.getStudentFilterOptions({
+        status: statusFilter,
+        ...(debouncedSearchQuery.trim() && { search: debouncedSearchQuery.trim() }),
+      })
+      setFilterOptions(options)
+    } catch {
+      setFilterOptions({
+        names: [],
+        skills: [],
+        education: [],
+        experience: { min: DEFAULT_EXPERIENCE_RANGE[0], max: DEFAULT_EXPERIENCE_RANGE[1] },
+      })
+    }
+  }, [statusFilter, debouncedSearchQuery])
 
   // Close the Excel menu on outside click.
   useEffect(() => {
@@ -551,9 +442,9 @@ const Students = () => {
     setExcelMenuOpen(false)
     setExcelExporting(true)
     try {
-      const blob = await studentsApi.exportStudentsExcel({
-        ...(searchQuery.trim() && { search: searchQuery.trim() }),
-      })
+      const { blob, capped, totalResults: exportTotal, exportMax } = await studentsApi.exportStudentsExcel(
+        buildStudentExportParams(listQueryInput)
+      )
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       const date = new Date().toISOString().slice(0, 10)
@@ -561,13 +452,17 @@ const Students = () => {
       a.download = `students-export-${date}.xlsx`
       a.click()
       URL.revokeObjectURL(url)
+      const cappedMessage =
+        capped && exportTotal != null && exportMax != null
+          ? `Export capped at ${exportMax.toLocaleString()} of ${exportTotal.toLocaleString()} matching students.`
+          : 'Your students spreadsheet download has started.'
       await Swal.fire({
-        icon: 'success',
-        title: 'Export ready',
-        text: 'Your students spreadsheet download has started.',
+        icon: capped ? 'warning' : 'success',
+        title: capped ? 'Export capped' : 'Export ready',
+        text: cappedMessage,
         toast: true,
         position: 'top-end',
-        timer: 2500,
+        timer: capped ? 4500 : 2500,
         showConfirmButton: false,
         timerProgressBar: true,
       })
@@ -582,7 +477,20 @@ const Students = () => {
     } finally {
       setExcelExporting(false)
     }
+  }, [listQueryInput])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 300)
+    return () => window.clearTimeout(timer)
   }, [searchQuery])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [debouncedSearchQuery, statusFilter, filters])
+
+  useEffect(() => {
+    fetchFilterOptions()
+  }, [fetchFilterOptions])
 
   // Update ref when fetchStudents changes
   useEffect(() => {
@@ -608,68 +516,17 @@ const Students = () => {
     })
   }, [experienceRanges.min, experienceRanges.max])
 
-  const fetchUsersWithoutProfile = useCallback(async () => {
-    setLoadingUsersWithoutProfile(true)
-    try {
-      const res = await getUsersWithoutStudentProfile()
-      setUsersWithoutProfile(res.results ?? [])
-    } catch {
-      setUsersWithoutProfile([])
-    } finally {
-      setLoadingUsersWithoutProfile(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchUsersWithoutProfile()
-  }, [fetchUsersWithoutProfile])
-
-  const handleCreateStudentFromUser = useCallback(async (userId: string) => {
-    setCreatingProfileForUserId(userId)
-    try {
-      await createStudentFromUser(userId)
-      await Swal.fire({
-        icon: 'success',
-        title: 'Profile created',
-        text: 'This user will now appear in course assignment.',
-        toast: true,
-        position: 'top-end',
-        timer: 3000,
-        showConfirmButton: false,
-        timerProgressBar: true,
-      })
-      await fetchUsersWithoutProfile()
-      if (fetchStudentsRef.current) await fetchStudentsRef.current()
-    } catch (err) {
-      const msg =
-        err instanceof AxiosError && err.response?.data?.message
-          ? String(err.response.data.message)
-          : 'Failed to create student profile.'
-      await Swal.fire({
-        icon: 'error',
-        title: 'Failed to create profile',
-        text: msg,
-        toast: true,
-        position: 'top-end',
-        timer: 4000,
-        showConfirmButton: false,
-        timerProgressBar: true,
-      })
-    } finally {
-      setCreatingProfileForUserId(null)
-    }
-  }, [fetchUsersWithoutProfile])
-
   // Delete a single student
   const handleDelete = useCallback(async (id: string) => {
+    if (!canManageStudents) return
     const result = await Swal.fire({
-      title: 'Are you sure?',
-      text: "You won't be able to revert this!",
+      title: 'Deactivate student?',
+      text: 'This will deactivate the student profile and disable their user account.',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#d33',
       cancelButtonColor: '#3085d6',
-      confirmButtonText: 'Yes, delete it!',
+      confirmButtonText: 'Yes, deactivate',
     })
 
     if (!result.isConfirmed) return
@@ -678,8 +535,8 @@ const Students = () => {
       await studentsApi.deleteStudent(id)
       await Swal.fire({
         icon: 'success',
-        title: 'Deleted!',
-        text: 'Student has been deleted.',
+        title: 'Deactivated',
+        text: 'Student has been deactivated.',
         toast: true,
         position: 'top-end',
         timer: 3000,
@@ -702,7 +559,7 @@ const Students = () => {
           : 'Failed to delete student.'
       await Swal.fire({
         icon: 'error',
-        title: 'Failed to delete student',
+        title: 'Failed to deactivate student',
         text: msg,
         toast: true,
         position: 'top-end',
@@ -711,15 +568,15 @@ const Students = () => {
         timerProgressBar: true,
       })
     }
-  }, [])
+  }, [canManageStudents])
 
-  // Delete selected students
   const handleDeleteSelected = useCallback(async () => {
+    if (!canManageStudents) return
     if (selectedRows.size === 0) {
       await Swal.fire({
         icon: 'warning',
         title: 'No selection',
-        text: 'Please select at least one student to delete.',
+        text: 'Please select at least one student to deactivate.',
         toast: true,
         position: 'top-end',
         timer: 3000,
@@ -730,23 +587,27 @@ const Students = () => {
     }
 
     const result = await Swal.fire({
-      title: 'Are you sure?',
-      text: `You are about to delete ${selectedRows.size} student(s). This action cannot be undone!`,
+      title: 'Deactivate selected students?',
+      text: `You are about to deactivate ${selectedRows.size} student(s).`,
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#d33',
       cancelButtonColor: '#3085d6',
-      confirmButtonText: `Yes, delete ${selectedRows.size} student(s)!`,
+      confirmButtonText: `Yes, deactivate ${selectedRows.size} student(s)`,
     })
 
     if (!result.isConfirmed) return
 
-    try {
-      await Promise.all(Array.from(selectedRows).map((id) => studentsApi.deleteStudent(id)))
+    const ids = Array.from(selectedRows)
+    const results = await Promise.allSettled(ids.map((id) => studentsApi.deleteStudent(id)))
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length
+    const failed = results.length - succeeded
+
+    if (failed === 0) {
       await Swal.fire({
         icon: 'success',
-        title: 'Deleted!',
-        text: `${selectedRows.size} student(s) have been deleted.`,
+        title: 'Deactivated',
+        text: `${succeeded} student(s) have been deactivated.`,
         toast: true,
         position: 'top-end',
         timer: 3000,
@@ -754,27 +615,28 @@ const Students = () => {
         timerProgressBar: true,
       })
       setSelectedRows(new Set())
-      // Trigger refetch using ref to avoid circular dependency
       if (fetchStudentsRef.current) {
         await fetchStudentsRef.current()
       }
-    } catch (err) {
-      const msg =
-        err instanceof AxiosError && err.response?.data?.message
-          ? String(err.response.data.message)
-          : 'Failed to delete students.'
+    } else {
       await Swal.fire({
-        icon: 'error',
-        title: 'Failed to delete students',
-        text: msg,
+        icon: failed === results.length ? 'error' : 'warning',
+        title: failed === results.length ? 'Deactivation failed' : 'Partially deactivated',
+        text:
+          failed === results.length
+            ? 'Failed to deactivate the selected students.'
+            : `${succeeded} deactivated, ${failed} failed.`,
         toast: true,
         position: 'top-end',
         timer: 4000,
         showConfirmButton: false,
         timerProgressBar: true,
       })
+      if (succeeded > 0 && fetchStudentsRef.current) {
+        await fetchStudentsRef.current()
+      }
     }
-  }, [selectedRows])
+  }, [selectedRows, canManageStudents])
 
   // Get student details for the notes sidebar
   const getStudentDetails = () => {
@@ -782,77 +644,33 @@ const Students = () => {
     return students.find(student => student.id === notesStudentId)
   }
 
-  // Generate public URL for student (edit page with query param for static export)
-  const getStudentPublicUrl = (studentId: string) => {
-    if (typeof window !== 'undefined') {
-      return `${window.location.origin}/training/students/edit/?id=${encodeURIComponent(studentId)}`
-    }
-    return `https://example.com/training/students/edit/?id=${encodeURIComponent(studentId)}`
-  }
-
-  // Export student documents
-  const handleExportDocs = (student: any, type: 'all' | 'resume' | 'cover-letter' = 'all') => {
-    // TODO: Implement document export functionality
-    console.log(`Exporting ${type} for student:`, student.id)
-    // Here you would implement the actual export logic based on type
-    switch (type) {
-      case 'all':
-        // Export both resume and cover letter
-        console.log('Exporting all documents')
-        break
-      case 'resume':
-        // Export only resume
-        console.log('Exporting resume')
-        break
-      case 'cover-letter':
-        // Export only cover letter
-        console.log('Exporting cover letter')
-        break
-    }
-  }
-
-  // Copy URL to clipboard
-  const handleCopyUrl = async (url: string) => {
+  const handleDownloadStudentProfile = async (studentRow: StudentRow) => {
     try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      const student = await studentsApi.getStudent(studentRow.id)
+      downloadStudentProfileXlsx(student, studentRow.name)
+      await Swal.fire({
+        icon: 'success',
+        title: 'Download started',
+        text: `Student data for "${studentRow.name}" is downloading.`,
+        toast: true,
+        position: 'top-end',
+        timer: 2500,
+        showConfirmButton: false,
+        timerProgressBar: true,
+      })
     } catch (err) {
-      console.error('Failed to copy:', err)
+      const msg =
+        err instanceof AxiosError && err.response?.data?.message
+          ? String(err.response.data.message)
+          : err instanceof Error
+          ? err.message
+          : 'Failed to download student data.'
+      await Swal.fire({ icon: 'error', title: 'Download failed', text: msg })
     }
   }
 
-  // Share on WhatsApp
-  const handleShareWhatsApp = (student: any) => {
-    const url = getStudentPublicUrl(student.id)
-    const text = `Check out this student: ${student.name} - ${url}`
-    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text)}`
-    window.open(whatsappUrl, '_blank')
-  }
-
-  // Handle email share - show input field
-  const handleEmailShareClick = () => {
-    setShowEmailInput(true)
-  }
-
-  // Handle send email (UI only for now)
-  const handleSendEmail = () => {
-    if (!shareEmail.trim()) return
-    // TODO: Add email sending logic here
-    console.log('Sending email to:', shareEmail, 'for student:', shareStudent?.id)
-    // Reset after sending
-    setShareEmail('')
-    setShowEmailInput(false)
-  }
-
-  // Handle share button click
   const handleShareClick = (student: any) => {
-    setShareStudent(student)
-    setShowEmailInput(false)
-    setShareEmail('')
-    setTimeout(() => {
-      ;(window as any).HSOverlay?.open(document.querySelector('#share-student-modal'))
-    }, 100)
+    void handleViewStudent(student.id)
   }
 
   // Define columns
@@ -860,7 +678,8 @@ const Students = () => {
     () => [
       {
         Header: 'All',
-        accessor: 'checkbox',
+        id: 'select',
+        accessor: 'id',
         disableSortBy: true,
         Cell: ({ row }: any) => (
           <input
@@ -884,6 +703,14 @@ const Students = () => {
                   src={student.displayPicture || '/assets/images/faces/1.jpg'}
                   alt={student.name}
                   className="w-10 h-10 rounded-full object-cover cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      openProfileImageModal(student)
+                    }
+                  }}
                   onError={(e) => {
                     (e.target as HTMLImageElement).src = '/assets/images/faces/1.jpg'
                   }}
@@ -1024,6 +851,7 @@ const Students = () => {
                 </span>
               </button>
             </div>
+            {canManageStudents && (
             <div className="hs-tooltip ti-main-tooltip">
               <Link
                 href={`/training/students/edit/?id=${encodeURIComponent(row.original.id)}`}
@@ -1038,10 +866,12 @@ const Students = () => {
                 </span>
               </Link>
             </div>
+            )}
+            {canManageStudents && (
             <div className="hs-tooltip ti-main-tooltip">
               <button
                 type="button"
-                onClick={() => handleAddNote(row.original.id, row.original)}
+                onClick={() => { void handleAddNote(row.original.id) }}
                 className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-warning"
                 title="Add Note"
               >
@@ -1053,145 +883,65 @@ const Students = () => {
                 </span>
               </button>
             </div>
+            )}
             <div className="hs-tooltip ti-main-tooltip">
               <button
                 type="button"
                 onClick={() => handleShareClick(row.original)}
                 className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-success"
-                title="Share Public URL"
+                title="View Student Profile"
               >
                 <i className="ri-share-line"></i>
                 <span
                   className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
                   role="tooltip">
-                  Share Public URL
+                  View Student Profile
                 </span>
               </button>
             </div>
-            <div className="hs-dropdown ti-dropdown">
+            <div className="hs-tooltip ti-main-tooltip">
               <button
                 type="button"
-                className="hs-dropdown-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-primary"
-                id={`export-dropdown-${row.original.id}`}
-                aria-expanded="false"
+                onClick={() => { void handleDownloadStudentProfile(row.original) }}
+                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-primary"
+                title="Download Student Data"
               >
                 <i className="ri-download-line"></i>
+                <span
+                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
+                  role="tooltip">
+                  Download Student Data
+                </span>
               </button>
-              <ul
-                className="hs-dropdown-menu ti-dropdown-menu hidden"
-                aria-labelledby={`export-dropdown-${row.original.id}`}
-              >
-                <li>
-                  <button
-                    type="button"
-                    className="ti-dropdown-item"
-                    onClick={() => handleExportDocs(row.original, 'all')}
-                  >
-                    <i className="ri-file-download-line me-2"></i>All
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    className="ti-dropdown-item"
-                    onClick={() => handleExportDocs(row.original, 'resume')}
-                  >
-                    <i className="ri-file-text-line me-2"></i>Resume
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    className="ti-dropdown-item"
-                    onClick={() => handleExportDocs(row.original, 'cover-letter')}
-                  >
-                    <i className="ri-mail-line me-2"></i>Cover Letter
-                  </button>
-                </li>
-              </ul>
             </div>
+            {canManageStudents && (
             <div className="hs-tooltip ti-main-tooltip">
               <button
                 type="button"
                 onClick={() => handleDelete(row.original.id)}
                 className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-danger"
               >
-                <i className="ri-delete-bin-line"></i>
+                <i className="ri-user-unfollow-line"></i>
                 <span
                   className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
                   role="tooltip">
-                  Delete
+                  Deactivate
                 </span>
               </button>
             </div>
+            )}
           </div>
         ),
       },
     ],
-    [selectedRows, handleDelete]
+    [selectedRows, handleDelete, canManageStudents, viewStudentLoading, openProfileImageModal]
   )
 
-  // Filter data based on filter state (client-side filtering on current page)
-  const filteredData = useMemo(() => {
-    return students.filter((student) => {
-      // Name filter (array)
-      if (filters.name.length > 0 && !filters.name.some(name => 
-        student.name.toLowerCase().includes(name.toLowerCase())
-      )) {
-        return false
-      }
-      
-      // Skills filter (array)
-      if (filters.skills.length > 0 && !filters.skills.some(skill => 
-        student.skills?.some(studentSkill => 
-          studentSkill.toLowerCase().includes(skill.toLowerCase())
-        )
-      )) {
-        return false
-      }
-      
-      // Education filter (array)
-      if (filters.education.length > 0 && !filters.education.some(edu => 
-        student.education.toLowerCase().includes(edu.toLowerCase())
-      )) {
-        return false
-      }
-      
-      // Email filter (string)
-      if (filters.email && !student.email.toLowerCase().includes(filters.email.toLowerCase())) {
-        return false
-      }
-      
-      // Experience filter (range)
-      if (filters.experience[0] !== experienceRanges.min || filters.experience[1] !== experienceRanges.max) {
-        const studentExperience = student.experience || 0
-        if (studentExperience < filters.experience[0] || studentExperience > filters.experience[1]) {
-          return false
-        }
-      }
-      
-      return true
-    })
-  }, [students, filters, experienceRanges.min, experienceRanges.max])
+  const displayData = students
 
-  const data = useMemo(() => filteredData, [filteredData])
-
-  // Get unique values for dropdown filters (from current page data)
-  const allSkills = useMemo(() => {
-    const skillSet = new Set<string>()
-    students.forEach(student => {
-      student.skills?.forEach(skill => skillSet.add(skill))
-    })
-    return Array.from(skillSet).sort()
-  }, [students])
-
-  const allEducation = useMemo(() => {
-    return [...new Set(students.map(student => student.education).filter(Boolean))].sort()
-  }, [students])
-
-  const allNames = useMemo(() => {
-    return [...new Set(students.map(student => student.name))].sort()
-  }, [students])
+  const allSkills = filterOptions.skills
+  const allEducation = filterOptions.education
+  const allNames = filterOptions.names
 
   // Filter options based on search terms
   const filteredNames = useMemo(() => {
@@ -1216,6 +966,7 @@ const Students = () => {
   }, [allEducation, searchEducation])
 
   const handleMultiSelectChange = (key: 'name' | 'skills' | 'education', value: string) => {
+    setCurrentPage(1)
     setFilters(prev => {
       const currentArray = prev[key]
       const newArray = currentArray.includes(value)
@@ -1226,6 +977,7 @@ const Students = () => {
   }
 
   const handleRemoveFilter = (key: 'name' | 'skills' | 'education', value: string) => {
+    setCurrentPage(1)
     setFilters(prev => ({
       ...prev,
       [key]: prev[key].filter(item => item !== value)
@@ -1233,10 +985,12 @@ const Students = () => {
   }
 
   const handleExperienceRangeChange = (values: number[]) => {
+    setCurrentPage(1)
     setFilters(prev => ({ ...prev, experience: [values[0], values[1]] as [number, number] }))
   }
 
   const handleResetFilters = () => {
+    setCurrentPage(1)
     setFilters({
       name: [],
       skills: [],
@@ -1254,15 +1008,18 @@ const Students = () => {
     filters.skills.length > 0 ||
     filters.education.length > 0 ||
     filters.email !== '' ||
-    filters.experience[0] !== experienceRanges.min ||
-    filters.experience[1] !== experienceRanges.max
+    isExperienceFilterActive(filters, experienceRanges) ||
+    statusFilter !== 'active'
 
   const activeFilterCount = 
     filters.name.length +
     filters.skills.length +
     filters.education.length +
     (filters.email !== '' ? 1 : 0) +
-    (filters.experience[0] !== experienceRanges.min || filters.experience[1] !== experienceRanges.max ? 1 : 0)
+    (isExperienceFilterActive(filters, experienceRanges) ? 1 : 0) +
+    (statusFilter !== 'active' ? 1 : 0)
+
+  const data = useMemo(() => displayData, [displayData])
 
   const tableInstance: any = useTable(
     {
@@ -1282,33 +1039,15 @@ const Students = () => {
 
   // Handle sort selection
   const handleSortChange = (sortOption: string) => {
-    setSelectedSort(sortOption)
-    
-    switch(sortOption) {
-      case 'name-asc':
-        setSortBy('createdAt:asc') // API format: field:direction
-        break
-      case 'name-desc':
-        setSortBy('createdAt:desc')
-        break
-      case 'skills-asc':
-        setSortBy('createdAt:asc')
-        break
-      case 'skills-desc':
-        setSortBy('createdAt:desc')
-        break
-      case 'education-asc':
-        setSortBy('createdAt:asc')
-        break
-      case 'education-desc':
-        setSortBy('createdAt:desc')
-        break
-      case 'clear-sort':
-        setSortBy('createdAt:desc')
-        setSelectedSort('')
-        break
-      default:
-        setSortBy('createdAt:desc')
+    if (sortOption === 'clear-sort') {
+      setSelectedSort('')
+      setSortBy(DEFAULT_STUDENT_SORT_API)
+    } else if (isStudentSortOption(sortOption)) {
+      setSelectedSort(sortOption)
+      setSortBy(sortOptionToApiSortBy(sortOption))
+    } else {
+      setSelectedSort('')
+      setSortBy(DEFAULT_STUDENT_SORT_API)
     }
     setCurrentPage(1) // Reset to first page when sorting changes
   }
@@ -1316,7 +1055,7 @@ const Students = () => {
   // Handle select all checkbox - select ALL rows in filtered dataset
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      const allIds = new Set(filteredData.map((student) => student.id))
+      const allIds = new Set(displayData.map((student) => student.id))
       setSelectedRows(allIds)
     } else {
       setSelectedRows(new Set())
@@ -1324,37 +1063,12 @@ const Students = () => {
   }
 
   // Check if all rows in filtered dataset are selected
-  const isAllSelected = selectedRows.size === filteredData.length && filteredData.length > 0
-  const isIndeterminate = selectedRows.size > 0 && selectedRows.size < filteredData.length
+  const isAllSelected = selectedRows.size === displayData.length && displayData.length > 0
+  const isIndeterminate = selectedRows.size > 0 && selectedRows.size < displayData.length
 
   return (
     <Fragment>
       <Seo title="Students" />
-
-      {/* {!loadingUsersWithoutProfile && usersWithoutProfile.length > 0 && (
-        <div className="mb-4 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3">
-          <p className="text-[0.875rem] font-medium text-defaulttextcolor dark:text-white mb-2">
-            The following users have the <strong>Student</strong> role but no Training student profile. They will not appear in course assignment until you create a profile.
-          </p>
-          <ul className="list-none p-0 m-0 flex flex-wrap gap-2">
-            {usersWithoutProfile.map((u) => (
-              <li key={u.id} className="inline-flex items-center gap-2 rounded-md bg-bodybg dark:bg-white/10 border border-defaultborder px-3 py-2">
-                <span className="text-[0.8125rem] text-defaulttextcolor dark:text-white">
-                  {u.name} ({u.email})
-                </span>
-                <button
-                  type="button"
-                  className="ti-btn ti-btn-sm ti-btn-primary !py-1 !px-2 !text-[0.75rem]"
-                  onClick={() => handleCreateStudentFromUser(u.id)}
-                  disabled={creatingProfileForUserId === u.id}
-                >
-                  {creatingProfileForUserId === u.id ? 'Creating…' : 'Create student profile'}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )} */}
 
       <div className="mt-5 grid grid-cols-12 gap-6 h-[calc(100vh-8rem)] sm:mt-6">
         <div className="xl:col-span-12 col-span-12 h-full flex flex-col">
@@ -1363,10 +1077,31 @@ const Students = () => {
               <div className="box-title">
                 Students
                 <span className="badge bg-light text-default rounded-full ms-1 text-[0.75rem] align-middle">
-                  {filteredData.length}
+                  {totalResults}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 items-center">
+                <input
+                  type="search"
+                  className="form-control !w-auto !py-1 !px-3 !text-[0.75rem] min-w-[12rem]"
+                  placeholder="Search students..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  aria-label="Search students"
+                />
+                <select
+                  className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem]"
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value as StudentStatusFilter)
+                    setCurrentPage(1)
+                  }}
+                  aria-label="Filter by status"
+                >
+                  <option value="all">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
                 <select
                   className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem] me-2"
                   value={pageSize}
@@ -1386,12 +1121,13 @@ const Students = () => {
                     type="button"
                     className="ti-btn ti-btn-light !py-1 !px-2 !text-[0.75rem] ti-dropdown-toggle"
                     id="sort-dropdown-button"
+                    aria-haspopup="menu"
                     aria-expanded="false"
                   >
                     <i className="ri-arrow-up-down-line font-semibold align-middle me-1"></i>Sort
                     <i className="ri-arrow-down-s-line align-middle ms-1 inline-block"></i>
                   </button>
-                  <ul className="hs-dropdown-menu ti-dropdown-menu hidden" aria-labelledby="sort-dropdown-button">
+                  <ul className="hs-dropdown-menu ti-dropdown-menu hidden" role="menu" aria-labelledby="sort-dropdown-button">
                     <li>
                       <button
                         type="button"
@@ -1458,12 +1194,14 @@ const Students = () => {
                     </li>
                   </ul>
                 </div>
+                {canManageStudents && (
                 <Link
                   href="/training/students/add"
                   className="ti-btn ti-btn-primary-full !py-1 !px-2 !text-[0.75rem] me-2"
                 >
                   <i className="ri-add-line font-semibold align-middle"></i>Add Student
                 </Link>
+                )}
                 <div ref={excelDropdownRef} className="relative me-2">
                   <button
                     type="button"
@@ -1513,14 +1251,16 @@ const Students = () => {
                   )}
                 </button>
               
+                {canManageStudents && (
                 <button
                   type="button"
                   className="ti-btn ti-btn-danger !py-1 !px-2 !text-[0.75rem]"
                   onClick={handleDeleteSelected}
                   disabled={selectedRows.size === 0}
                 >
-                  <i className="ri-delete-bin-line font-semibold align-middle me-1"></i>Delete
+                  <i className="ri-user-unfollow-line font-semibold align-middle me-1"></i>Deactivate
                 </button>
+                )}
               </div>
             </div>
             <div className="box-body !p-0 flex-1 flex flex-col overflow-hidden">
@@ -1583,7 +1323,7 @@ const Students = () => {
                           </div>
                         </td>
                       </tr>
-                    ) : filteredData.length === 0 ? (
+                    ) : displayData.length === 0 ? (
                       <tr>
                         <td colSpan={columns.length} className="text-center py-8">
                           <div className="flex flex-col items-center justify-center">
@@ -1593,14 +1333,14 @@ const Students = () => {
                         </td>
                       </tr>
                     ) : (
-                      filteredData.map((student) => {
+                      displayData.map((student) => {
                         const row = {
                           original: student,
                           getRowProps: () => ({}),
                           cells: columns.map((col: any) => ({
                             render: (type: string) => {
                               if (type === 'Cell') {
-                                if (col.id === 'checkbox') {
+                                if (col.id === 'select') {
                                   return (
                                     <input
                                       className="form-check-input"
@@ -1664,6 +1404,7 @@ const Students = () => {
                             <button
                               className="page-link px-3 py-[0.375rem]"
                               onClick={() => setCurrentPage(page)}
+                              aria-current={currentPage === page ? 'page' : undefined}
                             >
                               {page}
                             </button>
@@ -1706,6 +1447,7 @@ const Students = () => {
                                 <button
                                   className="page-link px-3 py-[0.375rem]"
                                   onClick={() => setCurrentPage(pageNum)}
+                                  aria-current={currentPage === pageNum ? 'page' : undefined}
                                 >
                                   {pageNum}
                                 </button>
@@ -1880,7 +1622,15 @@ const Students = () => {
                 >
                   Close
                 </button>
-                <button type="button" className="ti-btn ti-btn-primary flex-1">
+                <button
+                  type="button"
+                  className="ti-btn ti-btn-primary flex-1"
+                  onClick={() => {
+                    if (previewStudent?.id) {
+                      void handleViewStudent(previewStudent.id)
+                    }
+                  }}
+                >
                   View Full Profile
                 </button>
               </div>
@@ -1938,6 +1688,7 @@ const Students = () => {
               })()}
 
               {/* Add New Note Form */}
+              {canManageStudents && (
               <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg bg-gray-50 dark:bg-black/20">
                 <h6 className="font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
                   <i className="ri-file-add-line text-primary"></i>
@@ -1993,6 +1744,7 @@ const Students = () => {
                   </button>
                 </div>
               </div>
+              )}
 
               {/* Existing Notes */}
               <div>
@@ -2016,17 +1768,19 @@ const Students = () => {
                           </div>
                           <div className="flex items-center gap-3">
                             <div className="text-xs text-gray-500 dark:text-gray-400 text-right">
-                              <div>{new Date(note.postedDate).toLocaleDateString()}</div>
-                              <div>{new Date(note.postedDate).toLocaleTimeString()}</div>
+                              <div>{new Date(note.createdAt).toLocaleDateString()}</div>
+                              <div>{new Date(note.createdAt).toLocaleTimeString()}</div>
                             </div>
+                            {canManageStudents && (
                             <button
                               type="button"
                               className="ti-btn ti-btn-icon ti-btn-sm ti-btn-danger"
-                              onClick={() => handleDeleteNote(note.id)}
+                              onClick={() => { void handleDeleteNote(note.id) }}
                               title="Delete note"
                             >
                               <i className="ri-delete-bin-line"></i>
                             </button>
+                            )}
                           </div>
                         </div>
                         <p className="text-sm text-gray-700 dark:text-gray-300 mb-2 whitespace-pre-wrap">
@@ -2034,7 +1788,7 @@ const Students = () => {
                         </p>
                         <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
                           <i className="ri-user-line"></i>
-                          Posted by: <span className="font-medium">{note.postedBy}</span>
+                          Posted by: <span className="font-medium">{note.postedByName || 'Unknown'}</span>
                         </div>
                       </div>
                     ))
@@ -2050,154 +1804,6 @@ const Students = () => {
           ) : (
             <div className="text-center py-8 text-gray-500">No student selected</div>
           )}
-        </div>
-      </div>
-
-      {/* Share Student Modal */}
-      <div 
-        id="share-student-modal" 
-        className="hs-overlay hidden ti-modal"
-      >
-        <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out lg:!max-w-lg lg:w-full m-3 lg:!mx-auto">
-          <div className="ti-modal-content">
-            <div className="ti-modal-header">
-              <h6 className="ti-modal-title flex items-center gap-2">
-                <i className="ri-share-line text-primary"></i>
-                Share Student
-              </h6>
-              <button 
-                type="button" 
-                className="hs-dropdown-toggle ti-modal-close-btn" 
-                data-hs-overlay="#share-student-modal"
-                onClick={() => {
-                  setShareStudent(null)
-                  setShowEmailInput(false)
-                  setShareEmail('')
-                }}
-              >
-                <span className="sr-only">Close</span>
-                <svg className="w-3.5 h-3.5" width="8" height="8" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M0.258206 1.00652C0.351976 0.912791 0.479126 0.860131 0.611706 0.860131C0.744296 0.860131 0.871447 0.912791 0.965207 1.00652L3.61171 3.65302L6.25822 1.00652C6.30432 0.958771 6.35952 0.920671 6.42052 0.894471C6.48152 0.868271 6.54712 0.854471 6.61352 0.853901C6.67992 0.853321 6.74572 0.865971 6.80722 0.891111C6.86862 0.916251 6.92442 0.953381 6.97142 1.00032C7.01832 1.04727 7.05552 1.1031 7.08062 1.16454C7.10572 1.22599 7.11842 1.29183 7.11782 1.35822C7.11722 1.42461 7.10342 1.49022 7.07722 1.55122C7.05102 1.61222 7.01292 1.6674 6.96522 1.71352L4.31871 4.36002L6.96522 7.00648C7.05632 7.10078 7.10672 7.22708 7.10552 7.35818C7.10442 7.48928 7.05182 7.61468 6.95912 7.70738C6.86642 7.80018 6.74102 7.85268 6.60992 7.85388C6.47882 7.85498 6.35252 7.80458 6.25822 7.71348L3.61171 5.06702L0.965207 7.71348C0.870907 7.80458 0.744606 7.85498 0.613506 7.85388C0.482406 7.85268 0.357007 7.80018 0.264297 7.70738C0.171597 7.61468 0.119017 7.48928 0.117877 7.35818C0.116737 7.22708 0.167126 7.10078 0.258206 7.00648L2.90471 4.36002L0.258206 1.71352C0.164476 1.61976 0.111816 1.4926 0.111816 1.36002C0.111816 1.22744 0.164476 1.10028 0.258206 1.00652Z" fill="currentColor"/>
-                </svg>
-              </button>
-            </div>
-            <div className="ti-modal-body">
-              {shareStudent ? (
-                <div className="space-y-4">
-                  {/* Student Info */}
-                  <div className="p-3 bg-gray-50 dark:bg-black/20 rounded-lg border border-gray-200 dark:border-defaultborder/10">
-                    <h6 className="font-semibold text-gray-800 dark:text-white mb-1">{shareStudent.name}</h6>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {shareStudent.email} • {shareStudent.phone}
-                    </p>
-                  </div>
-
-                  {/* Copy URL Section */}
-                  <div>
-                    <label className="form-label mb-2 font-semibold text-sm text-gray-800 dark:text-white">
-                      Public URL
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={getStudentPublicUrl(shareStudent.id)}
-                        readOnly
-                      />
-                      <button
-                        type="button"
-                        className={`ti-btn ${copied ? 'ti-btn-success' : 'ti-btn-primary'}`}
-                        onClick={() => handleCopyUrl(getStudentPublicUrl(shareStudent.id))}
-                      >
-                        <i className={`ri-${copied ? 'check' : 'file-copy'}-line me-1`}></i>
-                        {copied ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Share Options */}
-                  <div>
-                    <label className="form-label mb-3 font-semibold text-sm text-gray-800 dark:text-white">
-                      Share via
-                    </label>
-                    <div className="space-y-3">
-                      <button
-                        type="button"
-                        className="ti-btn ti-btn-success w-full flex items-center justify-center gap-2"
-                        onClick={() => handleShareWhatsApp(shareStudent)}
-                      >
-                        <i className="ri-whatsapp-line text-xl"></i>
-                        WhatsApp
-                      </button>
-                      
-                      {!showEmailInput ? (
-                        <button
-                          type="button"
-                          className="ti-btn ti-btn-primary w-full flex items-center justify-center gap-2"
-                          onClick={handleEmailShareClick}
-                        >
-                          <i className="ri-mail-line text-xl"></i>
-                          Email
-                        </button>
-                      ) : (
-                        <div className="space-y-2">
-                          <input
-                            type="email"
-                            className="form-control"
-                            placeholder="Enter email address"
-                            value={shareEmail}
-                            onChange={(e) => setShareEmail(e.target.value)}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter') {
-                                handleSendEmail()
-                              }
-                            }}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              className="ti-btn ti-btn-primary flex-1"
-                              onClick={handleSendEmail}
-                              disabled={!shareEmail.trim()}
-                            >
-                              <i className="ri-send-plane-line me-1"></i>
-                              Send
-                            </button>
-                            <button
-                              type="button"
-                              className="ti-btn ti-btn-light"
-                              onClick={() => {
-                                setShowEmailInput(false)
-                                setShareEmail('')
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-4 text-gray-500">No student selected</div>
-              )}
-            </div>
-            <div className="ti-modal-footer">
-              <button 
-                type="button" 
-                className="ti-btn ti-btn-light" 
-                data-hs-overlay="#share-student-modal"
-                onClick={() => {
-                  setShareStudent(null)
-                  setShowEmailInput(false)
-                  setShareEmail('')
-                }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 

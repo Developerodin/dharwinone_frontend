@@ -1,30 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  isPersonalInfoWizardEnabled,
-  resolveSelfServiceWizardTarget,
-} from "../personal-info-wizard";
-
-afterEach(() => {
-  delete process.env.NEXT_PUBLIC_ENABLE_PERSONAL_INFO_WIZARD;
-});
-
-describe("isPersonalInfoWizardEnabled", () => {
-  it('is true only for the exact string "true"', () => {
-    process.env.NEXT_PUBLIC_ENABLE_PERSONAL_INFO_WIZARD = "true";
-    expect(isPersonalInfoWizardEnabled()).toBe(true);
-  });
-
-  it("falls back to the existing implementation when unset", () => {
-    expect(isPersonalInfoWizardEnabled()).toBe(false);
-  });
-
-  it("falls back to the existing implementation for invalid values", () => {
-    for (const raw of ["false", "TRUE", "1", "yes", "", " true "]) {
-      process.env.NEXT_PUBLIC_ENABLE_PERSONAL_INFO_WIZARD = raw;
-      expect(isPersonalInfoWizardEnabled()).toBe(false);
-    }
-  });
-});
+import { describe, expect, it } from "vitest";
+import { resolveSelfServiceWizardTarget } from "../personal-info-wizard";
 
 describe("resolveSelfServiceWizardTarget", () => {
   it("keeps Employee and Candidate on separate flows", () => {

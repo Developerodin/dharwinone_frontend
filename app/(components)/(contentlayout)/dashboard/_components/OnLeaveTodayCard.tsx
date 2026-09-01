@@ -14,8 +14,8 @@ function formatRange(item: OnLeaveTodayItem): string {
   return start === end ? start : `${start} – ${end}`;
 }
 
-// Parent mounts this only when items.length > 0 (see dashboard/page.tsx), so no
-// loading/empty states here — the box appears only while someone is actively on leave.
+// Always mounted (see dashboard/page.tsx) so the row-2 stack keeps its shape on days
+// when nobody is away — an empty card reads better than a collapsing grid.
 // selfView: the viewer is a plain employee seeing only their own approved leave.
 export default function OnLeaveTodayCard({
   items,
@@ -24,7 +24,8 @@ export default function OnLeaveTodayCard({
   items: OnLeaveTodayItem[];
   selfView?: boolean;
 }) {
-  const self = selfView ? items[0] : null;
+  const self = selfView ? items[0] ?? null : null;
+  const isEmpty = items.length === 0;
   return (
     <div className="box overflow-hidden border-0 shadow-sm bg-gradient-to-br from-secondary/5 via-transparent to-primary/5 dark:from-secondary/10 dark:to-primary/10">
       <div className="box-header justify-between flex-shrink-0 border-b border-black/5 dark:border-white/10 !pb-3">
@@ -33,8 +34,8 @@ export default function OnLeaveTodayCard({
             <i className="ti ti-beach text-[1rem]" aria-hidden />
           </span>
           <div>
-            <div className="box-title mb-0">{self ? "Your Leave" : "On Leave Today"}</div>
-            {!self && (
+            <div className="box-title mb-0">{selfView ? "Your Leave" : "On Leave Today"}</div>
+            {!selfView && !isEmpty && (
               <p className="text-[0.7rem] text-[#8c9097] dark:text-white/50 mb-0">
                 {items.length} {items.length === 1 ? "employee" : "employees"}
               </p>
@@ -43,7 +44,19 @@ export default function OnLeaveTodayCard({
         </div>
       </div>
       <div className="box-body !pt-3">
-        {self ? (
+        {isEmpty ? (
+          <div className="flex h-full flex-col items-center justify-center py-6 text-center">
+            <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-secondary/10 text-secondary mb-3">
+              <i className="ti ti-users text-[1.25rem]" aria-hidden />
+            </span>
+            <p className="font-semibold text-sm mb-1">
+              {selfView ? "You are not on leave today" : "No one is on leave today"}
+            </p>
+            <p className="text-[0.75rem] text-[#8c9097] dark:text-white/50 mb-0">
+              {selfView ? "Approved leave will show up here." : "Everyone is scheduled to be in."}
+            </p>
+          </div>
+        ) : self ? (
           <p className="text-[0.875rem] mb-0">
             You have approved leave from{" "}
             <span className="font-semibold text-secondary">{formatDate(self.startDate)}</span> to{" "}

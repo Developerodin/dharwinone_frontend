@@ -14,7 +14,7 @@ import {
   INTERVIEW_SCHEDULE_REJECTED_MESSAGE,
   isInterviewSchedulingBlocked,
 } from '@/shared/lib/ats/applicationPipeline'
-import { utcInstantToWallClock } from '@/shared/lib/timezone'
+import { getViewerTimezone, getZoneAbbreviation, utcInstantToWallClock } from '@/shared/lib/timezone'
 import InterviewDateTimeOverlay from './InterviewDateTimeOverlay'
 import { to12Hour } from './interviewSlots'
 import AgentMultiSelect from './AgentMultiSelect'
@@ -166,7 +166,7 @@ export default function CreateInterviewModal({
   useEffect(() => {
     autoFilledAgentIdRef.current = autoFilledAgentId
   }, [autoFilledAgentId])
-  const [scheduleTimezone, setScheduleTimezone] = useState('UTC')
+  const [scheduleTimezone, setScheduleTimezone] = useState(() => getViewerTimezone())
   const [dateTimeOverlayOpen, setDateTimeOverlayOpen] = useState(false)
   const [selectedJobId, setSelectedJobId] = useState('')
   const [jobsForCandidate, setJobsForCandidate] = useState<Job[]>([])
@@ -270,7 +270,7 @@ export default function CreateInterviewModal({
     setJobsForCandidate([])
     setApplicationJobsError(null)
     appliedPrefillRef.current = null
-    setScheduleTimezone('UTC')
+    setScheduleTimezone(getViewerTimezone())
     setDateTimeOverlayOpen(false)
     setAutoFilledAgentId(null)
     setDraftPrompt(null)
@@ -365,7 +365,7 @@ export default function CreateInterviewModal({
   )
 
   const whenTriggerLabel = scheduledInterviewAt && scheduleDateStr && scheduleTimeStr
-    ? `${format(new Date(`${scheduleDateStr}T00:00:00`), 'EEE, d MMM yyyy')} · ${to12Hour(scheduleTimeStr)} (${scheduleTimezone})`
+    ? `${format(new Date(`${scheduleDateStr}T00:00:00`), 'EEE, d MMM yyyy')} · ${to12Hour(scheduleTimeStr)} (${getZoneAbbreviation(scheduleTimezone, scheduledInterviewAt)})`
     : ''
 
   /** Snapshot the whole create form — controlled state + uncontrolled DOM inputs. */
@@ -503,6 +503,7 @@ export default function CreateInterviewModal({
       setEmailInvites([''])
     }
 
+    setScheduleTimezone(getViewerTimezone())
     onScheduledInterviewAtChange(rounded)
   }, [emailInvites, hosts, onScheduledInterviewAtChange, setEmailInvites, setHosts, user?.email, user?.name])
 
@@ -682,10 +683,10 @@ export default function CreateInterviewModal({
                         Instant interview
                       </button>
                     </div>
-                    {scheduledInterviewAt ? (
+                    {scheduledInterviewAt && scheduleDateStr && scheduleTimeStr ? (
                       <div className="inline-flex w-full max-w-full" aria-live="polite">
                         <span className="inline-flex items-center rounded-lg border border-primary/20 bg-primary/[0.06] px-2.5 py-1.5 text-[0.6875rem] font-medium text-primary shadow-sm dark:border-primary/30 dark:bg-primary/10 dark:text-primary">
-                          {format(scheduledInterviewAt, 'MMM d')} · {format(scheduledInterviewAt, 'h:mm a')}
+                          {format(new Date(`${scheduleDateStr}T00:00:00`), 'MMM d')} · {to12Hour(scheduleTimeStr)}
                         </span>
                       </div>
                     ) : null}

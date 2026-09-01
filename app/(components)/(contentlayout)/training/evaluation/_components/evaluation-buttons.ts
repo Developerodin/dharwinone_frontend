@@ -26,5 +26,12 @@ export const EVAL_BTN_ICON_CLOSE =
 export const EVAL_PAGE_LINK =
   'page-link inline-flex items-center justify-center px-3 min-h-[44px] min-w-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed'
 
+/** pagination-style-4 expects `.page-link.active` on the control, not only `.page-item.active` on `<li>`. */
+export const EVAL_PAGE_LINK_ACTIVE = `${EVAL_PAGE_LINK} active font-semibold !bg-primary !text-white shadow-sm shadow-primary/30`
+
+export function evalPageLinkClass(isActive: boolean): string {
+  return isActive ? EVAL_PAGE_LINK_ACTIVE : EVAL_PAGE_LINK
+}
+
 export const EVAL_TH_SORTABLE =
   'cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40'

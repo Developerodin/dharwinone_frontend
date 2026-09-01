@@ -30,6 +30,28 @@ export interface EvaluationRow {
   atRiskReason: string | null;
 }
 
+export interface EvaluationStudentRow {
+  studentId: string;
+  studentName: string;
+  positionName: string | null;
+  coursesAssigned: number;
+  avgCompletion: number;
+  overallStatus: EvaluationDisplayStatus;
+  completedCount: number;
+  avgQuizScore: number | null;
+  atRiskCount: number;
+}
+
+export interface EvaluationCourseRow {
+  courseId: string;
+  courseName: string;
+  categoryNames: string[];
+  studentsAssigned: number;
+  avgCompletion: number;
+  completedCount: number;
+  atRiskCount: number;
+}
+
 export interface EvaluationSummary {
   totalCourses: number;
   totalStudentsEnrolled: number;
@@ -49,44 +71,55 @@ export interface EvaluationMeta {
 export interface EvaluationResponse {
   summary: EvaluationSummary;
   evaluations: EvaluationRow[];
+  rows: EvaluationStudentRow[] | EvaluationCourseRow[];
   meta?: EvaluationMeta;
 }
 
+export type EvaluationViewMode = "student" | "course";
+
 export interface GetEvaluationParams {
+  view?: EvaluationViewMode;
   courseId?: string;
+  studentId?: string;
   status?: EvaluationDisplayStatus | "";
   q?: string;
   atRisk?: boolean;
   page?: number;
   limit?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 /**
- * GET /v1/training/evaluation – summary + student-course evaluations (filterable).
+ * GET /v1/training/evaluation – summary + paginated student/course rows (filterable).
  */
 export async function getEvaluation(params?: GetEvaluationParams): Promise<EvaluationResponse> {
   const query: Record<string, string | number> = {};
+  if (params?.view) query.view = params.view;
   if (params?.courseId) query.courseId = params.courseId;
+  if (params?.studentId) query.studentId = params.studentId;
   if (params?.status) query.status = params.status;
   if (params?.q?.trim()) query.q = params.q.trim();
   if (params?.atRisk) query.atRisk = "true";
   if (params?.page) query.page = params.page;
   if (params?.limit) query.limit = params.limit;
+  if (params?.sortBy) query.sortBy = params.sortBy;
+  if (params?.sortOrder) query.sortOrder = params.sortOrder;
 
   const { data } = await apiClient.get<EvaluationResponse>("/training/evaluation", { params: query });
   return data;
 }
 
-export type EvaluationExportParams = Omit<GetEvaluationParams, "page" | "limit">;
+export type EvaluationExportParams = Omit<GetEvaluationParams, "page" | "limit" | "view" | "sortBy" | "sortOrder">;
 
 /** GET /training/evaluation/export — same filters as list (omit page/limit). */
 export async function downloadEvaluationExport(params: EvaluationExportParams = {}): Promise<void> {
-  const { page: _page, limit: _limit, ...filters } = params;
   const query: Record<string, string> = {};
-  if (filters.courseId) query.courseId = filters.courseId;
-  if (filters.status) query.status = filters.status;
-  if (filters.q?.trim()) query.q = filters.q.trim();
-  if (filters.atRisk) query.atRisk = "true";
+  if (params.courseId) query.courseId = params.courseId;
+  if (params.studentId) query.studentId = params.studentId;
+  if (params.status) query.status = params.status;
+  if (params.q?.trim()) query.q = params.q.trim();
+  if (params.atRisk) query.atRisk = "true";
 
   const { data } = await apiClient.get<Blob>("/training/evaluation/export", {
     params: query,

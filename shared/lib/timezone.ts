@@ -207,3 +207,17 @@ export function getZoneOffsetLabel(tz: string, at: Date = new Date()): string {
 export function formatZoneLabel(tz: string, at: Date = new Date()): string {
   return `${normalizeTimezone(tz)} · ${getZoneOffsetLabel(tz, at)}`;
 }
+
+/** Short zone name for schedule labels, e.g. "IST" or "GMT+5:30". */
+export function getZoneAbbreviation(tz: string, at: Date = new Date()): string {
+  const zone = normalizeTimezone(tz);
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      timeZoneName: 'short',
+    }).formatToParts(at);
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? zone;
+  } catch {
+    return zone;
+  }
+}

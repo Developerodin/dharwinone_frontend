@@ -1285,8 +1285,8 @@ export default function InterviewsClient() {
       .map((id) => agents.find((a) => a.id === id))
       .filter((a): a is AgentOption => Boolean(a))
       .map((a) => ({ id: a.id, name: a.name, email: a.email }))
-    const scheduledAt = wallClockToUtc(date, time, (form.querySelector('#schedule-timezone') as HTMLInputElement)?.value || 'UTC').toISOString()
-    const timezone = (form.querySelector('#schedule-timezone') as HTMLInputElement)?.value || 'UTC'
+    const scheduledAt = wallClockToUtc(date, time, (form.querySelector('#schedule-timezone') as HTMLInputElement)?.value || getViewerTimezone()).toISOString()
+    const timezone = (form.querySelector('#schedule-timezone') as HTMLInputElement)?.value || getViewerTimezone()
     const payload: CreateMeetingPayload = {
       title,
       description: description || undefined,

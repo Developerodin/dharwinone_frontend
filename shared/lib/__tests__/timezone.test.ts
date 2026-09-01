@@ -5,6 +5,7 @@ import {
   wallClockToUtc,
   getZoneOffsetLabel,
   formatZoneLabel,
+  getZoneAbbreviation,
   formatInZone,
   formatDualZone,
   localDateKey,
@@ -231,5 +232,22 @@ describe('zone offset helpers', () => {
 
   it('formatZoneLabel combines zone name and offset', () => {
     expect(formatZoneLabel('Asia/Kolkata')).toBe('Asia/Kolkata · UTC +05:30');
+  });
+
+  it('getZoneAbbreviation returns a short label for Asia/Kolkata', () => {
+    const abbr = getZoneAbbreviation('Asia/Kolkata', new Date('2026-09-01T02:00:00.000Z'));
+    expect(abbr).toMatch(/IST|GMT\+5:30|UTC\+5:30/i);
+  });
+
+  it('IST 7:30 AM wall clock stores as 02:00 UTC and round-trips for display', () => {
+    const utc = wallClockToUtc('2026-09-01', '07:30', 'Asia/Kolkata');
+    expect(utc.toISOString()).toBe('2026-09-01T02:00:00.000Z');
+    const wall = utcInstantToWallClock(utc, 'Asia/Kolkata');
+    expect(wall).toEqual({ date: '2026-09-01', time: '07:30' });
+  });
+
+  it('IST 8:00 AM wall clock stores as 02:30 UTC', () => {
+    const utc = wallClockToUtc('2026-09-01', '08:00', 'Asia/Kolkata');
+    expect(utc.toISOString()).toBe('2026-09-01T02:30:00.000Z');
   });
 });

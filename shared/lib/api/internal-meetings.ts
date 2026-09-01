@@ -92,6 +92,13 @@ export async function createInternalMeeting(
 export async function listInternalMeetings(params?: {
   title?: string;
   status?: string;
+  /**
+   * scheduledAt window, as ISO INSTANTS (not calendar days). Resolve the viewer's local
+   * day to UTC before calling — the server infers no timezone. Accepted by the endpoint
+   * since before this client exposed it.
+   */
+  dateFrom?: string;
+  dateTo?: string;
   page?: number;
   limit?: number;
   sortBy?: string;

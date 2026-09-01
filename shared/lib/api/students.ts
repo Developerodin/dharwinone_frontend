@@ -7,17 +7,34 @@ import { apiClient } from "@/shared/lib/api/client";
  * (status / position / search) so the export matches what's on screen.
  */
 export async function exportStudentsExcel(
-  params: { status?: string; position?: string; search?: string } = {}
-): Promise<Blob> {
-  const query: Record<string, string> = {};
+  params: ListStudentsParams = {}
+): Promise<{ blob: Blob; capped: boolean; totalResults?: number; exportMax?: number }> {
+  const query: Record<string, string | number> = {};
   if (params.status) query.status = params.status;
   if (params.position) query.position = params.position;
   if (params.search) query.search = params.search;
+  if (params.sortBy) query.sortBy = params.sortBy;
+  if (params.names?.length) query.names = params.names.join(",");
+  if (params.skills?.length) query.skills = params.skills.join(",");
+  if (params.education?.length) query.education = params.education.join(",");
+  if (params.email) query.email = params.email;
+  if (params.experienceMin != null) query.experienceMin = params.experienceMin;
+  if (params.experienceMax != null) query.experienceMax = params.experienceMax;
+
   const res = await apiClient.get<Blob>("/training/students/export", {
     params: query,
     responseType: "blob",
   });
-  return res.data;
+
+  const capped = res.headers["x-export-capped"] === "true";
+  const totalResults = res.headers["x-export-total-results"]
+    ? Number(res.headers["x-export-total-results"])
+    : undefined;
+  const exportMax = res.headers["x-export-max-rows"]
+    ? Number(res.headers["x-export-max-rows"])
+    : undefined;
+
+  return { blob: res.data, capped, totalResults, exportMax };
 }
 
 export interface StudentUser {
@@ -118,6 +135,12 @@ export interface ListStudentsParams {
   status?: string;
   position?: string;
   search?: string;
+  names?: string[];
+  skills?: string[];
+  education?: string[];
+  email?: string;
+  experienceMin?: number;
+  experienceMax?: number;
   sortBy?: string;
   limit?: number;
   page?: number;
@@ -127,9 +150,73 @@ export interface ListStudentsParams {
   excludeResignedEmployed?: boolean | "true" | "false" | "1" | "0";
 }
 
+export interface StudentFilterOptions {
+  names: string[];
+  skills: string[];
+  education: string[];
+  experience: { min: number; max: number };
+}
+
+export interface StudentNote {
+  id: string;
+  student: string;
+  note: string;
+  visibility: "public" | "private";
+  postedBy: string;
+  postedByName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function serializeListParams(params?: ListStudentsParams): Record<string, string | number | boolean> | undefined {
+  if (!params) return undefined;
+  const query: Record<string, string | number | boolean> = {};
+  if (params.status) query.status = params.status;
+  if (params.position) query.position = params.position;
+  if (params.search) query.search = params.search;
+  if (params.sortBy) query.sortBy = params.sortBy;
+  if (params.limit != null) query.limit = params.limit;
+  if (params.page != null) query.page = params.page;
+  if (params.email) query.email = params.email;
+  if (params.experienceMin != null) query.experienceMin = params.experienceMin;
+  if (params.experienceMax != null) query.experienceMax = params.experienceMax;
+  if (params.names?.length) query.names = params.names.join(",");
+  if (params.skills?.length) query.skills = params.skills.join(",");
+  if (params.education?.length) query.education = params.education.join(",");
+  if (params.employeeRoleOnly != null) query.employeeRoleOnly = params.employeeRoleOnly;
+  if (params.excludeResignedEmployed != null) query.excludeResignedEmployed = params.excludeResignedEmployed;
+  return query;
+}
+
 export async function listStudents(params?: ListStudentsParams): Promise<StudentsListResponse> {
-  const { data } = await apiClient.get<StudentsListResponse>("/training/students", { params });
+  const { data } = await apiClient.get<StudentsListResponse>("/training/students", {
+    params: serializeListParams(params),
+  });
   return data;
+}
+
+export async function getStudentFilterOptions(params?: Pick<ListStudentsParams, "status" | "search">): Promise<StudentFilterOptions> {
+  const { data } = await apiClient.get<StudentFilterOptions>("/training/students/filter-options", {
+    params: serializeListParams(params),
+  });
+  return data;
+}
+
+export async function listStudentNotes(studentId: string): Promise<{ results: StudentNote[] }> {
+  const { data } = await apiClient.get<{ results: StudentNote[] }>(`/training/students/${studentId}/notes`);
+  return data;
+}
+
+export async function createStudentNote(
+  studentId: string,
+  payload: { note: string; visibility: "public" | "private" }
+): Promise<StudentNote> {
+  const { data } = await apiClient.post<StudentNote>(`/training/students/${studentId}/notes`, payload);
+  return data;
+}
+
+export async function deleteStudentNote(noteId: string): Promise<void> {
+  await apiClient.delete(`/training/students/notes/${noteId}`);
 }
 
 export async function getStudent(studentId: string): Promise<Student> {
@@ -217,22 +304,29 @@ export async function uploadStudentProfileImage(studentId: string, file: File): 
 /**
  * Get a short-lived presigned URL for viewing the student's profile image.
  * GET /v1/training/students/:studentId/profile-image with Accept: application/json
+ * Returns null when the student has no uploaded profile image (HTTP 200, not 404).
  */
 export async function getStudentProfileImage(
   studentId: string
 ): Promise<StudentProfileImageInfo | null> {
-  const { data } = await apiClient.get<{ success?: boolean; data?: StudentProfileImageInfo }>(
-    `/training/students/${studentId}/profile-image`,
-    {
-      headers: { Accept: "application/json" },
+  try {
+    const { data } = await apiClient.get<{ success?: boolean; data?: StudentProfileImageInfo }>(
+      `/training/students/${studentId}/profile-image`,
+      {
+        headers: { Accept: "application/json" },
+      }
+    );
+
+    if (!data || (data.success === false && !data.data)) {
+      return null;
     }
-  );
 
-  if (!data || (data.success === false && !data.data)) {
-    return null;
+    return data.data ?? null;
+  } catch (e: unknown) {
+    const status = (e as { response?: { status?: number } })?.response?.status;
+    if (status === 404) return null;
+    throw e;
   }
-
-  return data.data ?? null;
 }
 
 export async function deleteStudent(studentId: string): Promise<void> {

@@ -129,6 +129,14 @@ export async function listMeetings(params?: {
   candidate?: string;
   recruiter?: string;
   interviewType?: string;
+  /**
+   * scheduledAt window, as ISO INSTANTS (not calendar days). Resolve the viewer's local
+   * day to UTC before calling — the server infers no timezone. Server-side filtering is
+   * what keeps a "today" query bounded by time rather than by row count.
+   * Max span 92 days; dateTo must not precede dateFrom.
+   */
+  dateFrom?: string;
+  dateTo?: string;
   page?: number;
   limit?: number;
   sortBy?: string;

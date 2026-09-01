@@ -7,6 +7,7 @@ import Seo from '@/shared/layout-components/seo/seo'
 import Swal from 'sweetalert2'
 import { AxiosError } from 'axios'
 import * as studentsApi from '@/shared/lib/api/students'
+import * as positionsApi from '@/shared/lib/api/positions'
 import * as usersApi from '@/shared/lib/api/users'
 import type { Student, StudentEducation, StudentExperience, StudentAddress, StudentDocument } from '@/shared/lib/api/students'
 
@@ -48,11 +49,34 @@ const EditStudentClient = () => {
   const [bio, setBio] = useState('')
   const [profileImageUrl, setProfileImageUrl] = useState('')
   const [status, setStatus] = useState<string>('active')
+  const [positionId, setPositionId] = useState<string>('')
+  const [positionOptions, setPositionOptions] = useState<{ value: string; label: string }[]>([])
 
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(true)
   const [error, setError] = useState('')
   const [userId, setUserId] = useState<string>('')
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const response = await positionsApi.listPositions({ limit: 500, page: 1 })
+        if (cancelled) return
+        setPositionOptions(
+          (response.results ?? []).map((position) => ({
+            value: position.id || position._id || '',
+            label: position.name,
+          }))
+        )
+      } catch {
+        if (!cancelled) setPositionOptions([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Fetch student data
   useEffect(() => {
@@ -94,6 +118,7 @@ const EditStudentClient = () => {
         setBio(student.bio ?? '')
         setProfileImageUrl(student.profileImageUrl ?? '')
         setStatus(student.status ?? 'active')
+        setPositionId(student.position?.id || student.position?._id || '')
       } catch (err) {
         if (cancelled) return
         const msg = getErrorMessage(err)
@@ -271,11 +296,12 @@ const EditStudentClient = () => {
         ...(addressData && { address: addressData }),
         ...(educationArray.length > 0 && { education: educationArray }),
         ...(experienceArray.length > 0 && { experience: experienceArray }),
-        ...(skills.length > 0 && { skills }),
+        skills,
         ...(documents.length > 0 && { documents }),
         ...(bio && { bio }),
         ...(profileImageUrl && { profileImageUrl }),
         status,
+        position: positionId || null,
       })
 
       await Swal.fire({
@@ -446,6 +472,26 @@ const EditStudentClient = () => {
                           <option value="male">Male</option>
                           <option value="female">Female</option>
                           <option value="other">Other</option>
+                        </select>
+                      </div>
+
+                      {/* Position */}
+                      <div className="mb-6">
+                        <label htmlFor="student-position" className="form-label">
+                          Position
+                        </label>
+                        <select
+                          id="student-position"
+                          className="form-control"
+                          value={positionId}
+                          onChange={(e) => setPositionId(e.target.value)}
+                        >
+                          <option value="">No position assigned</option>
+                          {positionOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
 

@@ -98,7 +98,14 @@ export function getTaskProjectMeta(task: Task): TaskProjectMeta {
 }
 
 export interface TasksListParams {
-  status?: TaskStatus;
+  /** Single status, or a comma-joined list ("new,todo,on_going,in_review" for open tasks). */
+  status?: TaskStatus | string;
+  /**
+   * Only tasks that carry a dueDate. Needed whenever results are ordered by dueDate:
+   * Mongo sorts missing values first on an ascending sort, so an undated backlog would
+   * otherwise crowd out every overdue task.
+   */
+  hasDueDate?: boolean;
   projectId?: string;
   priority?: string;
   sprintId?: string;
@@ -139,6 +146,7 @@ export async function listTasks(params?: TasksListParams): Promise<TasksListResp
           unassigned: params.unassigned === true ? "true" : undefined,
           leaving: params.leaving === true ? "true" : undefined,
           reassigned: params.reassigned === true ? "true" : undefined,
+          hasDueDate: params.hasDueDate === true ? "true" : undefined,
         }
       : undefined,
   });

@@ -17,10 +17,7 @@ import {
 import type { NotificationPreferences } from "@/shared/lib/api/users";
 import { useHasEmployeeRole } from "@/shared/hooks/use-has-employee-role";
 import { EmployeeProfileWizard } from "@/shared/workforce-profile";
-import {
-  isPersonalInfoWizardEnabled,
-  resolveSelfServiceWizardTarget,
-} from "@/shared/lib/personal-info-wizard";
+import { resolveSelfServiceWizardTarget } from "@/shared/lib/personal-info-wizard";
 import { PhoneCountrySelect } from "@/shared/components/PhoneCountrySelect";
 import { NotificationPreferencesEditor } from "@/shared/components/NotificationPreferencesEditor";
 import { ChangePasswordButton } from "@/shared/components/ChangePasswordButton";
@@ -326,12 +323,6 @@ export default function PersonalInformationPage() {
   const [extractingFromDoc, setExtractingFromDoc] = useState(false);
   const [avatarUploadLoading, setAvatarUploadLoading] = useState(false);
   const [avatarRemoveLoading, setAvatarRemoveLoading] = useState(false);
-  /**
-   * NEXT_PUBLIC_ENABLE_PERSONAL_INFO_WIZARD === "true" -> the wizard is the whole
-   * Personal Information experience. Missing/anything else -> the existing
-   * implementation below, unchanged.
-   */
-  const wizardEnabled = isPersonalInfoWizardEnabled();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -1138,12 +1129,11 @@ export default function PersonalInformationPage() {
     }
   }, [user, hasEmployeeProfile]);
 
-  // ── Feature flag branch ──────────────────────────────────────────────────
-  // NEXT_PUBLIC_ENABLE_PERSONAL_INFO_WIZARD=true -> the wizard IS Personal
-  // Information (Employee and Candidate each get their own wizard flow).
-  // Anything else -> fall through to the existing implementation below,
-  // which is left untouched.
-  if (wizardEnabled && (candidateRoleLoading || hasEmployeeProfile)) {
+  // ── Wizard branch ─────────────────────────────────────────────────
+  // Users who resolve to a person profile (Employee or Candidate persona) get the
+  // wizard as their Personal Information page; each role has its own flow. Staff
+  // accounts without a person profile fall through to the implementation below.
+  if (candidateRoleLoading || hasEmployeeProfile) {
     const { mode: wizardMode, role: wizardRole } =
       resolveSelfServiceWizardTarget(roleNames);
 

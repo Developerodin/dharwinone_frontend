@@ -153,6 +153,15 @@ export const ACTION_PERMISSIONS: Record<string, ActionRule> = Object.freeze({
     prefixes: ["training.modules"],
     anyOf: ["view", "create", "edit", "delete"],
   },
+
+  view_training_students: {
+    prefixes: ["training.students", "students"],
+    anyOf: ["view", "create", "edit", "delete"],
+  },
+  manage_training_students: {
+    prefixes: ["training.students", "students"],
+    anyOf: ["create", "edit", "delete"],
+  },
 });
 
 /**
