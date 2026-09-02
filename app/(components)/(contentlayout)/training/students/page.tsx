@@ -13,21 +13,39 @@ import type {
 import StudentViewModal from './_components/StudentViewModal'
 import StudentProfileImageModal from './_components/StudentProfileImageModal'
 import StudentFilters from './_components/StudentFilters'
+import StudentRowActions from './_components/StudentRowActions'
+import StudentColumnHeaderFilter from './_components/StudentColumnHeaderFilter'
+import { getInitials } from '@/shared/lib/initials'
+import { buildStudentProfileShareUrl } from '@/shared/lib/training/student-share'
+import { buildPageWindow } from '@/shared/lib/pagination-items'
 import { downloadStudentProfileXlsx } from '@/shared/lib/student-profile-export'
+import {
+  MISSING_PROFILE_VALUE,
+  mapStudentToRow,
+  type StudentListRow,
+} from '@/shared/lib/training/student-list-row'
 import {
   DEFAULT_STUDENT_SORT_API,
   isStudentSortOption,
+  nextStudentColumnSort,
   sortOptionToApiSortBy,
+  studentColumnAriaSort,
+  studentColumnSortFlags,
+  studentHeaderSortColumn,
+  studentSortButtonAriaLabel,
   type StudentSortOption,
 } from '@/shared/lib/training/student-list-sort'
+import { SortHeaderLabel } from '../evaluation/_components/evaluation-table-parts'
 import {
   buildStudentExportParams,
   buildStudentListParams,
-  isExperienceFilterActive,
+  studentHeaderFilterKey,
+  type StudentHeaderFilterKey,
   type StudentStatusFilter,
 } from '@/shared/lib/training/student-list-filters'
 import { useAuth } from '@/shared/contexts/auth-context'
 import { hasPermission } from '@/shared/lib/permissions'
+import { closeHsOverlay, openHsOverlay } from '../evaluation/_components/evaluation-overlay'
 
 interface FilterState {
   name: string[]
@@ -40,19 +58,56 @@ interface FilterState {
 // Default experience range when no data is available
 const DEFAULT_EXPERIENCE_RANGE: [number, number] = [0, 50]
 
-// Interface for display purposes (mapped from User)
-interface StudentRow {
-  id: string
+function StudentRowAvatar({
+  name,
+  imageUrl,
+  className = 'w-10 h-10 rounded-full',
+  onClick,
+  onKeyDown,
+}: {
   name: string
-  displayPicture: string
-  hasProfileImage: boolean
-  phone: string
-  email: string
-  skills: string[]
-  education: string
-  experience: number
-  bio: string
+  imageUrl?: string | null
+  className?: string
+  onClick?: () => void
+  onKeyDown?: (e: React.KeyboardEvent) => void
+}) {
+  const [imgFailed, setImgFailed] = useState(false)
+  const showImg = Boolean(imageUrl) && !imgFailed
+  const interactive = Boolean(onClick)
+
+  if (showImg) {
+    return (
+      <img
+        src={imageUrl!}
+        alt={name}
+        className={`object-cover flex-shrink-0 ${interactive ? 'cursor-pointer' : ''} ${className}`}
+        role={interactive ? 'button' : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        onKeyDown={onKeyDown}
+        onClick={onClick}
+        onError={() => setImgFailed(true)}
+      />
+    )
+  }
+
+  return (
+    <span
+      className={`flex items-center justify-center bg-primary/10 text-primary font-semibold text-sm flex-shrink-0 ring-1 ring-primary/15 ${interactive ? 'cursor-pointer' : ''} ${className}`}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={onKeyDown}
+      onClick={onClick}
+      aria-label={name}
+    >
+      {getInitials(name)}
+    </span>
+  )
 }
+
+// Interface for display purposes (mapped from User)
+type StudentRow = StudentListRow
+
+const missingProfileClass = 'text-sm text-gray-600 dark:text-gray-300'
 
 const Students = () => {
   const auth = useAuth()
@@ -64,21 +119,36 @@ const Students = () => {
   const [previewStudent, setPreviewStudent] = useState<any>(null)
   const [viewStudent, setViewStudent] = useState<studentsApi.Student | null>(null)
   const [viewStudentLoading, setViewStudentLoading] = useState(false)
+  const [viewingStudentId, setViewingStudentId] = useState<string | null>(null)
   const [notesStudentId, setNotesStudentId] = useState<string | null>(null)
   const [newNote, setNewNote] = useState({ text: '', visibility: 'public' as 'public' | 'private' })
   const [selectedSort, setSelectedSort] = useState<StudentSortOption>('')
-  const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StudentStatusFilter>('active')
   const [currentPage, setCurrentPage] = useState(1)
+  // Draft text of the "Go to page" field. Deliberately separate from currentPage so a
+  // half-typed number never triggers a fetch — the jump happens on submit.
+  const [gotoPageInput, setGotoPageInput] = useState('')
   const [pageSize, setPageSize] = useState(10)
   const [totalResults, setTotalResults] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
   const [sortBy, setSortBy] = useState<string>(DEFAULT_STUDENT_SORT_API)
-  // Excel menu: fully React-controlled — Preline hs-dropdown hooks were unreliable here (button never opened).
+  // Excel + Sort menus: fully React-controlled — Preline hs-dropdown hooks were unreliable here (button never opened).
   const [excelMenuOpen, setExcelMenuOpen] = useState(false)
+  const [sortMenuOpen, setSortMenuOpen] = useState(false)
   const [excelExporting, setExcelExporting] = useState(false)
+  const [downloadingStudentId, setDownloadingStudentId] = useState<string | null>(null)
+  const [bulkDeactivating, setBulkDeactivating] = useState(false)
+  const [filtersLoading, setFiltersLoading] = useState(false)
+  /** React-controlled filters panel — Preline data-hs-overlay misses registration after SPA navigation. */
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false)
+  const [openRowActionsMenuId, setOpenRowActionsMenuId] = useState<string | null>(null)
   const excelDropdownRef = useRef<HTMLDivElement | null>(null)
+  const sortDropdownRef = useRef<HTMLDivElement | null>(null)
+  const toolbarDropdownRef = useRef<HTMLDivElement | null>(null)
+  const viewRequestIdRef = useRef(0)
+  const fetchGenerationRef = useRef(0)
 
   // Profile image modal state
   const [profileImageStudent, setProfileImageStudent] = useState<StudentRow | null>(null)
@@ -98,6 +168,7 @@ const Students = () => {
     names: [],
     skills: [],
     education: [],
+    emails: [],
     experience: { min: DEFAULT_EXPERIENCE_RANGE[0], max: DEFAULT_EXPERIENCE_RANGE[1] },
   })
 
@@ -118,6 +189,7 @@ const Students = () => {
       statusFilter,
       filters,
       experienceBounds: experienceRanges,
+      studentRoleOnly: statusFilter !== 'inactive',
     }),
     [currentPage, pageSize, sortBy, debouncedSearchQuery, statusFilter, filters, experienceRanges]
   )
@@ -138,16 +210,52 @@ const Students = () => {
     setSelectedRows(newSelected)
   }
 
-  // Handle view student - fetch full details and open modal
+  const openStudentViewModal = useCallback(() => {
+    setTimeout(() => {
+      const modalEl = document.querySelector('#view-student-modal')
+      const HSOverlay = (window as { HSOverlay?: { open: (target: Element | string) => void } }).HSOverlay
+      const HSStaticMethods = (window as { HSStaticMethods?: { autoInit?: () => void } }).HSStaticMethods
+      if (HSStaticMethods?.autoInit) HSStaticMethods.autoInit()
+      if (modalEl && HSOverlay?.open) {
+        HSOverlay.open(modalEl)
+      } else if (HSOverlay?.open) {
+        HSOverlay.open('#view-student-modal')
+      }
+    }, 50)
+  }, [])
+
+  const closePreviewPanel = useCallback(() => {
+    const modalEl = document.querySelector('#student-preview-panel')
+    const HSOverlay = (window as { HSOverlay?: { close: (target: Element | string) => void } }).HSOverlay
+    if (modalEl && HSOverlay?.close) {
+      HSOverlay.close(modalEl)
+    } else if (HSOverlay?.close) {
+      HSOverlay.close('#student-preview-panel')
+    }
+    setPreviewStudent(null)
+  }, [])
+
+  // Handle view student - open modal immediately, then fetch full details
   const handleViewStudent = async (studentId: string) => {
+    const requestId = ++viewRequestIdRef.current
+    setViewStudent(null)
     setViewStudentLoading(true)
+    setViewingStudentId(studentId)
+    openStudentViewModal()
     try {
       const student = await studentsApi.getStudent(studentId)
+      if (requestId !== viewRequestIdRef.current) return
       setViewStudent(student)
-      setTimeout(() => {
-        ;(window as any).HSOverlay?.open(document.querySelector('#view-student-modal'))
-      }, 100)
     } catch (err) {
+      if (requestId !== viewRequestIdRef.current) return
+      setViewStudent(null)
+      const modalEl = document.querySelector('#view-student-modal')
+      const HSOverlay = (window as { HSOverlay?: { close: (target: Element | string) => void } }).HSOverlay
+      if (modalEl && HSOverlay?.close) {
+        HSOverlay.close(modalEl)
+      } else if (HSOverlay?.close) {
+        HSOverlay.close('#view-student-modal')
+      }
       const msg =
         err instanceof AxiosError && err.response?.data?.message
           ? String(err.response.data.message)
@@ -163,7 +271,10 @@ const Students = () => {
         timerProgressBar: true,
       })
     } finally {
-      setViewStudentLoading(false)
+      if (requestId === viewRequestIdRef.current) {
+        setViewStudentLoading(false)
+        setViewingStudentId(null)
+      }
     }
   }
 
@@ -223,61 +334,6 @@ const Students = () => {
       await Swal.fire({ icon: 'error', title: 'Failed to delete note', text: msg, toast: true, position: 'top-end', timer: 3000, showConfirmButton: false })
     }
   }
-
-  // Helper function to map Student API response to StudentRow format
-  const mapStudentToRow = useCallback((student: Student): StudentRow => {
-    // Format education from array to string
-    const educationStr = student.education && student.education.length > 0
-      ? student.education.map(edu => {
-          const parts = []
-          if (edu.degree) parts.push(edu.degree)
-          if (edu.institution) parts.push(edu.institution)
-          if (edu.endDate) {
-            try {
-              const year = new Date(edu.endDate).getFullYear()
-              if (!isNaN(year)) {
-                parts.push(`(${year})`)
-              }
-            } catch (e) {
-              // Invalid date, skip year
-            }
-          }
-          return parts.join(' - ')
-        }).filter(Boolean).join(', ')
-      : ''
-
-    // Calculate experience from experience array
-    const experienceYears = student.experience && student.experience.length > 0
-      ? student.experience.reduce((total, exp) => {
-          if (exp.startDate && exp.endDate) {
-            try {
-              const start = new Date(exp.startDate)
-              const end = new Date(exp.endDate)
-              if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-                const years = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365)
-                return total + Math.max(0, years)
-              }
-            } catch (e) {
-              // Invalid date, skip
-            }
-          }
-          return total
-        }, 0)
-      : 0
-
-    return {
-      id: student.id,
-      name: student.user?.name || 'Unknown',
-      displayPicture: student.profileImageUrl || '/assets/images/faces/1.jpg',
-      hasProfileImage: Boolean(student.profileImageUrl),
-      phone: student.phone || '',
-      email: student.user?.email || '',
-      skills: student.skills || [],
-      education: educationStr,
-      experience: Math.round(experienceYears),
-      bio: student.bio || '',
-    }
-  }, [])
 
   const openProfileImageModal = useCallback(
     async (student: StudentRow) => {
@@ -375,16 +431,21 @@ const Students = () => {
 
   // Fetch students from Students API
   const fetchStudents = useCallback(async () => {
+    const generation = ++fetchGenerationRef.current
     setLoading(true)
     try {
       const params = buildStudentListParams(listQueryInput)
       const response = await studentsApi.listStudents(params)
+
+      if (generation !== fetchGenerationRef.current) return
 
       const mappedStudents = response.results.map(mapStudentToRow)
       setStudents(mappedStudents)
       setTotalResults(response.totalResults)
       setTotalPages(response.totalPages)
     } catch (err) {
+      if (generation !== fetchGenerationRef.current) return
+
       console.error('Error fetching students:', err)
       const msg =
         err instanceof AxiosError && err.response?.data?.message
@@ -406,14 +467,18 @@ const Students = () => {
       setTotalResults(0)
       setTotalPages(0)
     } finally {
-      setLoading(false)
+      if (generation === fetchGenerationRef.current) {
+        setLoading(false)
+      }
     }
-  }, [listQueryInput, mapStudentToRow])
+  }, [listQueryInput])
 
   const fetchFilterOptions = useCallback(async () => {
+    setFiltersLoading(true)
     try {
       const options = await studentsApi.getStudentFilterOptions({
         status: statusFilter,
+        ...(statusFilter !== 'inactive' ? { studentRoleOnly: true } : {}),
         ...(debouncedSearchQuery.trim() && { search: debouncedSearchQuery.trim() }),
       })
       setFilterOptions(options)
@@ -422,20 +487,42 @@ const Students = () => {
         names: [],
         skills: [],
         education: [],
+        emails: [],
         experience: { min: DEFAULT_EXPERIENCE_RANGE[0], max: DEFAULT_EXPERIENCE_RANGE[1] },
       })
+    } finally {
+      setFiltersLoading(false)
     }
   }, [statusFilter, debouncedSearchQuery])
 
-  // Close the Excel menu on outside click.
+  // Close Excel / Sort menus on outside click or Escape.
   useEffect(() => {
-    if (!excelMenuOpen) return
+    if (!excelMenuOpen && !sortMenuOpen && !toolbarMenuOpen) return
     const onDoc = (e: MouseEvent) => {
-      if (!excelDropdownRef.current?.contains(e.target as Node)) setExcelMenuOpen(false)
+      if (excelMenuOpen && !excelDropdownRef.current?.contains(e.target as Node)) {
+        setExcelMenuOpen(false)
+      }
+      if (sortMenuOpen && !sortDropdownRef.current?.contains(e.target as Node)) {
+        setSortMenuOpen(false)
+      }
+      if (toolbarMenuOpen && !toolbarDropdownRef.current?.contains(e.target as Node)) {
+        setToolbarMenuOpen(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setExcelMenuOpen(false)
+        setSortMenuOpen(false)
+        setToolbarMenuOpen(false)
+      }
     }
     document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [excelMenuOpen])
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [excelMenuOpen, sortMenuOpen, toolbarMenuOpen])
 
   /** Download students (respecting the active search) as an .xlsx file. */
   const handleExportStudents = useCallback(async () => {
@@ -479,14 +566,35 @@ const Students = () => {
     }
   }, [listQueryInput])
 
+  const openFilterPanel = useCallback(() => {
+    setFilterPanelOpen(true)
+    queueMicrotask(() => openHsOverlay('#students-filter-panel'))
+  }, [])
+
+  const closeFilterPanel = useCallback(() => {
+    setFilterPanelOpen(false)
+    closeHsOverlay('#students-filter-panel')
+  }, [])
+
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 300)
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchName)
+    }, 300)
     return () => window.clearTimeout(timer)
-  }, [searchQuery])
+  }, [searchName])
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [debouncedSearchQuery, statusFilter, filters])
+  }, [statusFilter, filters, sortBy, pageSize, debouncedSearchQuery])
+
+  useEffect(() => {
+    if (!filterPanelOpen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeFilterPanel()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [filterPanelOpen, closeFilterPanel])
 
   useEffect(() => {
     fetchFilterOptions()
@@ -496,6 +604,17 @@ const Students = () => {
   useEffect(() => {
     fetchStudentsRef.current = fetchStudents
   }, [fetchStudents])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const viewId = params.get('view')?.trim()
+    if (!viewId) return
+    void handleViewStudent(viewId)
+    params.delete('view')
+    const next = params.toString()
+    window.history.replaceState({}, '', next ? `${window.location.pathname}?${next}` : window.location.pathname)
+  }, [])
 
   useEffect(() => {
     fetchStudents()
@@ -598,43 +717,48 @@ const Students = () => {
 
     if (!result.isConfirmed) return
 
-    const ids = Array.from(selectedRows)
-    const results = await Promise.allSettled(ids.map((id) => studentsApi.deleteStudent(id)))
-    const succeeded = results.filter((r) => r.status === 'fulfilled').length
-    const failed = results.length - succeeded
+    setBulkDeactivating(true)
+    try {
+      const ids = Array.from(selectedRows)
+      const results = await Promise.allSettled(ids.map((id) => studentsApi.deleteStudent(id)))
+      const succeeded = results.filter((r) => r.status === 'fulfilled').length
+      const failed = results.length - succeeded
 
-    if (failed === 0) {
-      await Swal.fire({
-        icon: 'success',
-        title: 'Deactivated',
-        text: `${succeeded} student(s) have been deactivated.`,
-        toast: true,
-        position: 'top-end',
-        timer: 3000,
-        showConfirmButton: false,
-        timerProgressBar: true,
-      })
-      setSelectedRows(new Set())
-      if (fetchStudentsRef.current) {
-        await fetchStudentsRef.current()
+      if (failed === 0) {
+        await Swal.fire({
+          icon: 'success',
+          title: 'Deactivated',
+          text: `${succeeded} student(s) have been deactivated.`,
+          toast: true,
+          position: 'top-end',
+          timer: 3000,
+          showConfirmButton: false,
+          timerProgressBar: true,
+        })
+        setSelectedRows(new Set())
+        if (fetchStudentsRef.current) {
+          await fetchStudentsRef.current()
+        }
+      } else {
+        await Swal.fire({
+          icon: failed === results.length ? 'error' : 'warning',
+          title: failed === results.length ? 'Deactivation failed' : 'Partially deactivated',
+          text:
+            failed === results.length
+              ? 'Failed to deactivate the selected students.'
+              : `${succeeded} deactivated, ${failed} failed.`,
+          toast: true,
+          position: 'top-end',
+          timer: 4000,
+          showConfirmButton: false,
+          timerProgressBar: true,
+        })
+        if (succeeded > 0 && fetchStudentsRef.current) {
+          await fetchStudentsRef.current()
+        }
       }
-    } else {
-      await Swal.fire({
-        icon: failed === results.length ? 'error' : 'warning',
-        title: failed === results.length ? 'Deactivation failed' : 'Partially deactivated',
-        text:
-          failed === results.length
-            ? 'Failed to deactivate the selected students.'
-            : `${succeeded} deactivated, ${failed} failed.`,
-        toast: true,
-        position: 'top-end',
-        timer: 4000,
-        showConfirmButton: false,
-        timerProgressBar: true,
-      })
-      if (succeeded > 0 && fetchStudentsRef.current) {
-        await fetchStudentsRef.current()
-      }
+    } finally {
+      setBulkDeactivating(false)
     }
   }, [selectedRows, canManageStudents])
 
@@ -645,6 +769,7 @@ const Students = () => {
   }
 
   const handleDownloadStudentProfile = async (studentRow: StudentRow) => {
+    setDownloadingStudentId(studentRow.id)
     try {
       const student = await studentsApi.getStudent(studentRow.id)
       downloadStudentProfileXlsx(student, studentRow.name)
@@ -666,18 +791,45 @@ const Students = () => {
           ? err.message
           : 'Failed to download student data.'
       await Swal.fire({ icon: 'error', title: 'Download failed', text: msg })
+    } finally {
+      setDownloadingStudentId(null)
     }
   }
 
-  const handleShareClick = (student: any) => {
-    void handleViewStudent(student.id)
+  const handleShareClick = async (student: StudentRow) => {
+    if (typeof window === 'undefined') return
+    const shareUrl = buildStudentProfileShareUrl(student.id, window.location.href)
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+      await navigator.clipboard.writeText(shareUrl)
+      await Swal.fire({
+        icon: 'success',
+        title: 'Link copied',
+        text: 'Student profile link copied to clipboard.',
+        toast: true,
+        position: 'top-end',
+        timer: 2500,
+        showConfirmButton: false,
+        timerProgressBar: true,
+      })
+    } catch {
+      await Swal.fire({
+        icon: 'error',
+        title: 'Copy failed',
+        text: 'Unable to copy the profile link.',
+        toast: true,
+        position: 'top-end',
+        timer: 3000,
+        showConfirmButton: false,
+      })
+    }
   }
 
   // Define columns
   const columns = useMemo(
     () => [
       {
-        Header: 'All',
+        Header: 'Select',
         id: 'select',
         accessor: 'id',
         disableSortBy: true,
@@ -699,44 +851,56 @@ const Students = () => {
           return (
             <div className="flex items-center gap-3">
               <div className="flex-shrink-0">
-                <img
-                  src={student.displayPicture || '/assets/images/faces/1.jpg'}
-                  alt={student.name}
-                  className="w-10 h-10 rounded-full object-cover cursor-pointer"
-                  role="button"
-                  tabIndex={0}
+                <StudentRowAvatar
+                  name={student.name}
+                  imageUrl={student.hasProfileImage ? student.displayPicture : null}
+                  onClick={() => openProfileImageModal(student)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
                       openProfileImageModal(student)
                     }
                   }}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/assets/images/faces/1.jpg'
-                  }}
-                  onClick={() => openProfileImageModal(student)}
                 />
               </div>
               <div className="flex-1 min-w-0">
                 <div 
                   className="font-semibold text-gray-800 dark:text-white truncate cursor-pointer hover:text-primary"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => {
                     setPreviewStudent(student)
                     setTimeout(() => {
                       ;(window as any).HSOverlay?.open(document.querySelector('#student-preview-panel'))
                     }, 100)
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setPreviewStudent(student)
+                      setTimeout(() => {
+                        ;(window as any).HSOverlay?.open(document.querySelector('#student-preview-panel'))
+                      }, 100)
+                    }
+                  }}
+                  aria-label={`Preview ${student.name}`}
                 >
                   {student.name}
                 </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                <div className="text-xs text-gray-600 dark:text-gray-300 truncate">
                   <div className="flex items-center gap-1">
-                    <i className="ri-phone-line"></i>
-                    {student.phone}
+                    <i className="ri-phone-line" aria-hidden="true"></i>
+                    {student.phone.trim() ? (
+                      <a href={`tel:${student.phone}`} className="truncate hover:text-primary">{student.phone}</a>
+                    ) : (
+                      <span className={missingProfileClass}>{MISSING_PROFILE_VALUE}</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
-                    <i className="ri-mail-line"></i>
-                    {student.email}
+                    <i className="ri-mail-line" aria-hidden="true"></i>
+                    {student.email.trim() ? student.email : (
+                      <span className={missingProfileClass}>{MISSING_PROFILE_VALUE}</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -749,9 +913,12 @@ const Students = () => {
         accessor: 'skills',
         Cell: ({ row }: any) => {
           const student = row.original
+          if (!student.skills?.length) {
+            return <span className={missingProfileClass}>{MISSING_PROFILE_VALUE}</span>
+          }
           return (
-            <div className="flex flex-wrap gap-1.5">
-              {student.skills?.slice(0, 3).map((skill: string, index: number) => (
+            <div className="flex flex-wrap gap-1.5 whitespace-normal">
+              {student.skills.slice(0, 3).map((skill: string, index: number) => (
                 <span
                   key={index}
                   className="badge bg-primary/10 text-primary border border-primary/30 px-2 py-1 rounded-md text-xs font-medium"
@@ -759,8 +926,11 @@ const Students = () => {
                   {skill}
                 </span>
               ))}
-              {student.skills?.length > 3 && (
-                <span className="badge bg-gray-100 dark:bg-black/20 text-gray-600 dark:text-gray-400 px-2 py-1 rounded-md text-xs font-medium">
+              {student.skills.length > 3 && (
+                <span
+                  className="badge bg-gray-100 dark:bg-black/20 text-gray-700 dark:text-gray-300 px-2 py-1 rounded-md text-xs font-medium"
+                  aria-label={`${student.skills.length - 3} more skills: ${student.skills.slice(3).join(', ')}`}
+                >
                   +{student.skills.length - 3}
                 </span>
               )}
@@ -771,16 +941,20 @@ const Students = () => {
       {
         Header: 'Education',
         accessor: 'education',
+        disableSortBy: true,
         Cell: ({ row }: any) => {
           const student = row.original
+          if (!student.education?.trim()) {
+            return <span className={missingProfileClass}>{MISSING_PROFILE_VALUE}</span>
+          }
           // Parse education: split by " - " to separate degree and university
-          const educationParts = student.education ? student.education.split(' - ') : ['', '']
+          const educationParts = student.education.split(' - ')
           const degree = educationParts[0] || ''
           const university = educationParts.slice(1).join(' - ') || ''
           
           return (
             <div 
-              className="text-sm text-gray-800 dark:text-white" 
+              className="text-sm text-gray-800 dark:text-white whitespace-normal" 
               style={{ 
                 maxWidth: '280px',
                 minHeight: '60px',
@@ -790,12 +964,12 @@ const Students = () => {
               title={student.education}
             >
               <div className="font-medium flex items-center gap-2">
-                <i className="ri-graduation-cap-line text-primary"></i>
+                <i className="ri-graduation-cap-line text-primary" aria-hidden="true"></i>
                 <span>{degree}</span>
               </div>
               {university && (
                 <div className="text-gray-600 dark:text-gray-400 mt-0.5 flex items-center gap-2">
-                  <i className="ri-building-line text-info"></i>
+                  <i className="ri-building-line text-info" aria-hidden="true"></i>
                   <span>{university}</span>
                 </div>
               )}
@@ -806,11 +980,15 @@ const Students = () => {
       {
         Header: 'Bio',
         accessor: 'bio',
+        disableSortBy: true,
         Cell: ({ row }: any) => {
           const student = row.original
+          if (!student.bio?.trim()) {
+            return <span className={missingProfileClass}>{MISSING_PROFILE_VALUE}</span>
+          }
           return (
             <div 
-              className="text-sm text-gray-700 dark:text-gray-300" 
+              className="text-sm text-gray-700 dark:text-gray-300 whitespace-normal" 
               style={{ 
                 maxWidth: '280px',
                
@@ -834,107 +1012,27 @@ const Students = () => {
         accessor: 'id',
         disableSortBy: true,
         Cell: ({ row }: any) => (
-          <div className="flex items-center gap-2">
-            <div className="hs-tooltip ti-main-tooltip">
-              <button
-                type="button"
-                onClick={() => handleViewStudent(row.original.id)}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-success"
-                title="View Student"
-                disabled={viewStudentLoading}
-              >
-                <i className="ri-eye-line"></i>
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  View Student
-                </span>
-              </button>
-            </div>
-            {canManageStudents && (
-            <div className="hs-tooltip ti-main-tooltip">
-              <Link
-                href={`/training/students/edit/?id=${encodeURIComponent(row.original.id)}`}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-info"
-                title="Edit Student"
-              >
-                <i className="ri-pencil-line"></i>
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  Edit Student
-                </span>
-              </Link>
-            </div>
-            )}
-            {canManageStudents && (
-            <div className="hs-tooltip ti-main-tooltip">
-              <button
-                type="button"
-                onClick={() => { void handleAddNote(row.original.id) }}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-warning"
-                title="Add Note"
-              >
-                <i className="ri-file-add-line"></i>
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  Add Note
-                </span>
-              </button>
-            </div>
-            )}
-            <div className="hs-tooltip ti-main-tooltip">
-              <button
-                type="button"
-                onClick={() => handleShareClick(row.original)}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-success"
-                title="View Student Profile"
-              >
-                <i className="ri-share-line"></i>
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  View Student Profile
-                </span>
-              </button>
-            </div>
-            <div className="hs-tooltip ti-main-tooltip">
-              <button
-                type="button"
-                onClick={() => { void handleDownloadStudentProfile(row.original) }}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-primary"
-                title="Download Student Data"
-              >
-                <i className="ri-download-line"></i>
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  Download Student Data
-                </span>
-              </button>
-            </div>
-            {canManageStudents && (
-            <div className="hs-tooltip ti-main-tooltip">
-              <button
-                type="button"
-                onClick={() => handleDelete(row.original.id)}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-danger"
-              >
-                <i className="ri-user-unfollow-line"></i>
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  Deactivate
-                </span>
-              </button>
-            </div>
-            )}
-          </div>
+          <StudentRowActions
+            student={row.original}
+            canManageStudents={canManageStudents}
+            viewingStudentId={viewingStudentId}
+            viewStudentLoading={viewStudentLoading}
+            downloadingStudentId={downloadingStudentId}
+            menuOpen={openRowActionsMenuId === row.original.id}
+            onToggleMenu={() =>
+              setOpenRowActionsMenuId((prev) => (prev === row.original.id ? null : row.original.id))
+            }
+            onCloseMenu={() => setOpenRowActionsMenuId(null)}
+            onView={() => { void handleViewStudent(row.original.id) }}
+            onDownload={() => { void handleDownloadStudentProfile(row.original) }}
+            onShare={() => { void handleShareClick(row.original) }}
+            onAddNote={() => { void handleAddNote(row.original.id) }}
+            onDelete={() => { void handleDelete(row.original.id) }}
+          />
         ),
       },
     ],
-    [selectedRows, handleDelete, canManageStudents, viewStudentLoading, openProfileImageModal]
+    [selectedRows, handleDelete, canManageStudents, viewingStudentId, viewStudentLoading, openProfileImageModal, downloadingStudentId, openRowActionsMenuId]
   )
 
   const displayData = students
@@ -942,6 +1040,7 @@ const Students = () => {
   const allSkills = filterOptions.skills
   const allEducation = filterOptions.education
   const allNames = filterOptions.names
+  const allEmails = filterOptions.emails ?? []
 
   // Filter options based on search terms
   const filteredNames = useMemo(() => {
@@ -984,13 +1083,13 @@ const Students = () => {
     }))
   }
 
-  const handleExperienceRangeChange = (values: number[]) => {
-    setCurrentPage(1)
-    setFilters(prev => ({ ...prev, experience: [values[0], values[1]] as [number, number] }))
+  const handleClearHeaderFilter = (key: StudentHeaderFilterKey) => {
+    setFilters((prev) => ({ ...prev, [key]: [] }))
   }
 
   const handleResetFilters = () => {
     setCurrentPage(1)
+    setStatusFilter('active')
     setFilters({
       name: [],
       skills: [],
@@ -999,6 +1098,7 @@ const Students = () => {
       experience: [experienceRanges.min, experienceRanges.max]
     })
     setSearchName('')
+    setDebouncedSearchQuery('')
     setSearchSkills('')
     setSearchEducation('')
   }
@@ -1008,7 +1108,7 @@ const Students = () => {
     filters.skills.length > 0 ||
     filters.education.length > 0 ||
     filters.email !== '' ||
-    isExperienceFilterActive(filters, experienceRanges) ||
+    debouncedSearchQuery.trim() !== '' ||
     statusFilter !== 'active'
 
   const activeFilterCount = 
@@ -1016,7 +1116,7 @@ const Students = () => {
     filters.skills.length +
     filters.education.length +
     (filters.email !== '' ? 1 : 0) +
-    (isExperienceFilterActive(filters, experienceRanges) ? 1 : 0) +
+    (debouncedSearchQuery.trim() !== '' ? 1 : 0) +
     (statusFilter !== 'active' ? 1 : 0)
 
   const data = useMemo(() => displayData, [displayData])
@@ -1039,20 +1139,21 @@ const Students = () => {
 
   // Handle sort selection
   const handleSortChange = (sortOption: string) => {
-    if (sortOption === 'clear-sort') {
-      setSelectedSort('')
-      setSortBy(DEFAULT_STUDENT_SORT_API)
-    } else if (isStudentSortOption(sortOption)) {
+    if (isStudentSortOption(sortOption)) {
       setSelectedSort(sortOption)
       setSortBy(sortOptionToApiSortBy(sortOption))
-    } else {
-      setSelectedSort('')
-      setSortBy(DEFAULT_STUDENT_SORT_API)
+      setCurrentPage(1)
+      setSortMenuOpen(false)
     }
-    setCurrentPage(1) // Reset to first page when sorting changes
   }
 
-  // Handle select all checkbox - select ALL rows in filtered dataset
+  const handleColumnSort = (columnId: string) => {
+    const column = studentHeaderSortColumn(columnId)
+    if (!column) return
+    handleSortChange(nextStudentColumnSort(selectedSort, column))
+  }
+
+  // Handle select all checkbox - selects all rows on the current page
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
       const allIds = new Set(displayData.map((student) => student.id))
@@ -1062,7 +1163,7 @@ const Students = () => {
     }
   }
 
-  // Check if all rows in filtered dataset are selected
+  // Check if all rows on the current page are selected
   const isAllSelected = selectedRows.size === displayData.length && displayData.length > 0
   const isIndeterminate = selectedRows.size > 0 && selectedRows.size < displayData.length
 
@@ -1081,27 +1182,6 @@ const Students = () => {
                 </span>
               </div>
               <div className="flex flex-wrap gap-2 items-center">
-                <input
-                  type="search"
-                  className="form-control !w-auto !py-1 !px-3 !text-[0.75rem] min-w-[12rem]"
-                  placeholder="Search students..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  aria-label="Search students"
-                />
-                <select
-                  className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem]"
-                  value={statusFilter}
-                  onChange={(e) => {
-                    setStatusFilter(e.target.value as StudentStatusFilter)
-                    setCurrentPage(1)
-                  }}
-                  aria-label="Filter by status"
-                >
-                  <option value="all">All statuses</option>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
                 <select
                   className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem] me-2"
                   value={pageSize}
@@ -1109,6 +1189,7 @@ const Students = () => {
                     setPageSize(Number(e.target.value))
                     setCurrentPage(1)
                   }}
+                  aria-label="Results per page"
                 >
                   {[10, 25, 50, 100].map((size) => (
                     <option key={size} value={size}>
@@ -1116,93 +1197,60 @@ const Students = () => {
                     </option>
                   ))}
                 </select>
-                <div className="hs-dropdown ti-dropdown me-2">
+                <div ref={sortDropdownRef} className="relative me-2 hidden md:block">
                   <button
                     type="button"
-                    className="ti-btn ti-btn-light !py-1 !px-2 !text-[0.75rem] ti-dropdown-toggle"
+                    className="ti-btn ti-btn-light !py-1 !px-2 !text-[0.75rem]"
                     id="sort-dropdown-button"
                     aria-haspopup="menu"
-                    aria-expanded="false"
+                    aria-expanded={sortMenuOpen}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setSortMenuOpen((prev) => !prev)
+                    }}
                   >
                     <i className="ri-arrow-up-down-line font-semibold align-middle me-1"></i>Sort
                     <i className="ri-arrow-down-s-line align-middle ms-1 inline-block"></i>
                   </button>
-                  <ul className="hs-dropdown-menu ti-dropdown-menu hidden" role="menu" aria-labelledby="sort-dropdown-button">
-                    <li>
-                      <button
-                        type="button"
-                        className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'name-asc' ? 'active' : ''}`}
-                        onClick={() => handleSortChange('name-asc')}
-                      >
-                        <i className="ri-sort-asc me-2 align-middle inline-block"></i>Name (A-Z)
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'name-desc' ? 'active' : ''}`}
-                        onClick={() => handleSortChange('name-desc')}
-                      >
-                        <i className="ri-sort-desc me-2 align-middle inline-block"></i>Name (Z-A)
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'skills-asc' ? 'active' : ''}`}
-                        onClick={() => handleSortChange('skills-asc')}
-                      >
-                        <i className="ri-code-s-slash-line me-2 align-middle inline-block"></i>Skills (A-Z)
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'skills-desc' ? 'active' : ''}`}
-                        onClick={() => handleSortChange('skills-desc')}
-                      >
-                        <i className="ri-code-s-slash-line me-2 align-middle inline-block"></i>Skills (Z-A)
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'education-asc' ? 'active' : ''}`}
-                        onClick={() => handleSortChange('education-asc')}
-                      >
-                        <i className="ri-graduation-cap-line me-2 align-middle inline-block"></i>Education (A-Z)
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'education-desc' ? 'active' : ''}`}
-                        onClick={() => handleSortChange('education-desc')}
-                      >
-                        <i className="ri-graduation-cap-line me-2 align-middle inline-block"></i>Education (Z-A)
-                      </button>
-                    </li>
-                    <li className="ti-dropdown-divider"></li>
-                    <li>
-                      <button
-                        type="button"
-                        className="ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left text-gray-500 dark:text-gray-400"
-                        onClick={() => handleSortChange('clear-sort')}
-                      >
-                        <i className="ri-close-line me-2 align-middle inline-block"></i>Clear Sort
-                      </button>
-                    </li>
-                  </ul>
+                  {sortMenuOpen && (
+                    <ul
+                      className="absolute end-0 top-full z-50 mt-1 min-w-[10rem] rounded-lg border border-defaultborder dark:border-defaultborder/20 bg-white py-1 shadow-lg dark:bg-bodybg"
+                      role="menu"
+                      aria-labelledby="sort-dropdown-button"
+                    >
+                      <li role="none">
+                        <button
+                          type="button"
+                          className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'name-asc' ? 'active' : ''}`}
+                          role="menuitem"
+                          onClick={() => handleSortChange('name-asc')}
+                        >
+                          <i className="ri-sort-asc me-2 align-middle inline-block"></i>Name (A-Z)
+                        </button>
+                      </li>
+                      <li role="none">
+                        <button
+                          type="button"
+                          className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'name-desc' ? 'active' : ''}`}
+                          role="menuitem"
+                          onClick={() => handleSortChange('name-desc')}
+                        >
+                          <i className="ri-sort-desc me-2 align-middle inline-block"></i>Name (Z-A)
+                        </button>
+                      </li>
+                    </ul>
+                  )}
                 </div>
                 {canManageStudents && (
                 <Link
                   href="/training/students/add"
-                  className="ti-btn ti-btn-primary-full !py-1 !px-2 !text-[0.75rem] me-2"
+                  className="ti-btn ti-btn-primary-full !py-1 !px-2 !text-[0.75rem] me-2 hidden md:inline-flex"
                 >
                   <i className="ri-add-line font-semibold align-middle"></i>Add Student
                 </Link>
                 )}
-                <div ref={excelDropdownRef} className="relative me-2">
+                <div ref={excelDropdownRef} className="relative me-2 hidden md:block">
                   <button
                     type="button"
                     className="ti-btn ti-btn-primary !py-1 !px-2 !text-[0.75rem]"
@@ -1240,10 +1288,12 @@ const Students = () => {
                 </div>
                 <button
                   type="button"
-                  className="ti-btn ti-btn-light !py-1 !px-2 !text-[0.75rem] me-2"
-                  data-hs-overlay="#students-filter-panel"
+                  className={`ti-btn ti-btn-light !py-1 !px-2 !text-[0.75rem] me-2 hidden md:inline-flex ${filterPanelOpen ? 'ring-2 ring-primary/30 bg-primary/[0.06]' : ''}`}
+                  aria-expanded={filterPanelOpen}
+                  aria-controls="students-filter-panel"
+                  onClick={() => (filterPanelOpen ? closeFilterPanel() : openFilterPanel())}
                 >
-                  <i className="ri-search-line font-semibold align-middle me-1"></i>Search
+                  <i className={`ri-${filtersLoading ? 'loader-4-line animate-spin' : 'filter-3-line'} font-semibold align-middle me-1`} aria-hidden="true"></i>Filters
                   {hasActiveFilters && (
                     <span className="badge bg-primary text-white rounded-full ms-1 text-[0.65rem]">
                       {activeFilterCount}
@@ -1254,13 +1304,71 @@ const Students = () => {
                 {canManageStudents && (
                 <button
                   type="button"
-                  className="ti-btn ti-btn-danger !py-1 !px-2 !text-[0.75rem]"
-                  onClick={handleDeleteSelected}
-                  disabled={selectedRows.size === 0}
+                  className="ti-btn ti-btn-danger !py-1 !px-2 !text-[0.75rem] hidden md:inline-flex"
+                  onClick={() => { void handleDeleteSelected() }}
+                  disabled={selectedRows.size === 0 || bulkDeactivating}
+                  aria-busy={bulkDeactivating}
                 >
-                  <i className="ri-user-unfollow-line font-semibold align-middle me-1"></i>Deactivate
+                  <i className={`ri-${bulkDeactivating ? 'loader-4-line animate-spin' : 'user-unfollow-line'} font-semibold align-middle me-1`} aria-hidden="true"></i>{bulkDeactivating ? 'Deactivating…' : 'Deactivate'}
                 </button>
                 )}
+                <div ref={toolbarDropdownRef} className="relative md:hidden">
+                  <button
+                    type="button"
+                    className="ti-btn ti-btn-light !py-1 !px-2 !text-[0.75rem]"
+                    aria-haspopup="menu"
+                    aria-expanded={toolbarMenuOpen}
+                    aria-label="More toolbar actions"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setToolbarMenuOpen((prev) => !prev)
+                    }}
+                  >
+                    <i className="ri-more-2-fill font-semibold align-middle" aria-hidden="true"></i>
+                  </button>
+                  {toolbarMenuOpen && (
+                    <ul
+                      className="absolute end-0 top-full z-50 mt-1 min-w-[12rem] rounded-lg border border-defaultborder dark:border-defaultborder/20 bg-white py-1 shadow-lg dark:bg-bodybg"
+                      role="menu"
+                    >
+                      <li role="none">
+                        <button type="button" className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'name-asc' ? 'active' : ''}`} role="menuitem" onClick={() => { setToolbarMenuOpen(false); handleSortChange('name-asc') }}>
+                          <i className="ri-sort-asc me-2" aria-hidden="true"></i>Name (A-Z)
+                        </button>
+                      </li>
+                      <li role="none">
+                        <button type="button" className={`ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left ${selectedSort === 'name-desc' ? 'active' : ''}`} role="menuitem" onClick={() => { setToolbarMenuOpen(false); handleSortChange('name-desc') }}>
+                          <i className="ri-sort-desc me-2" aria-hidden="true"></i>Name (Z-A)
+                        </button>
+                      </li>
+                      {canManageStudents && (
+                        <li role="none">
+                          <Link href="/training/students/add" className="ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left flex items-center gap-2" role="menuitem" onClick={() => setToolbarMenuOpen(false)}>
+                            <i className="ri-add-line" aria-hidden="true"></i>Add Student
+                          </Link>
+                        </li>
+                      )}
+                      <li role="none">
+                        <button type="button" className="ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left disabled:opacity-60" role="menuitem" disabled={excelExporting} onClick={() => { setToolbarMenuOpen(false); void handleExportStudents() }}>
+                          <i className="ri-file-excel-2-line me-2" aria-hidden="true"></i>{excelExporting ? 'Exporting…' : 'Export Excel'}
+                        </button>
+                      </li>
+                      <li role="none">
+                        <button type="button" className="ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left" role="menuitem" onClick={() => { setToolbarMenuOpen(false); openFilterPanel() }}>
+                          <i className={`ri-${filtersLoading ? 'loader-4-line animate-spin' : 'filter-3-line'} me-2`} aria-hidden="true"></i>Filters
+                        </button>
+                      </li>
+                      {canManageStudents && (
+                        <li role="none">
+                          <button type="button" className="ti-dropdown-item !py-2 !px-[0.9375rem] !text-[0.8125rem] !font-medium w-full text-left text-danger disabled:opacity-60" role="menuitem" disabled={selectedRows.size === 0 || bulkDeactivating} aria-busy={bulkDeactivating} onClick={() => { setToolbarMenuOpen(false); void handleDeleteSelected() }}>
+                            <i className={`ri-${bulkDeactivating ? 'loader-4-line animate-spin' : 'user-unfollow-line'} me-2`} aria-hidden="true"></i>{bulkDeactivating ? 'Deactivating…' : 'Deactivate Selected'}
+                          </button>
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
               </div>
             </div>
             <div className="box-body !p-0 flex-1 flex flex-col overflow-hidden">
@@ -1269,9 +1377,11 @@ const Students = () => {
                   <thead>
                     {headerGroups.map((headerGroup: any, i) => (
                       <tr {...headerGroup.getHeaderGroupProps()} className="bg-primary/10 dark:bg-primary/20 border-b border-gray-300 dark:border-gray-600" key={`header-group-${i}`}>
-                        {headerGroup.headers.map((column: any, j) => (
+                        {headerGroup.headers.map((column: any, j) => {
+                          const sortColumn = studentHeaderSortColumn(column.id)
+                          return (
                           <th
-                            {...column.getHeaderProps(column.getSortByToggleProps())}
+                            {...column.getHeaderProps()}
                             scope="col"
                             className="text-start sticky top-0 z-10 bg-gray-50 dark:bg-black/20"
                             key={column.id || `col-${j}`}
@@ -1280,6 +1390,11 @@ const Students = () => {
                               top: 0, 
                               zIndex: 10
                             }}
+                            aria-sort={
+                              sortColumn
+                                ? studentColumnAriaSort(selectedSort, sortColumn)
+                                : undefined
+                            }
                           >
                             {column.id === 'select' ? (
                               <input
@@ -1290,26 +1405,75 @@ const Students = () => {
                                   if (input) input.indeterminate = isIndeterminate
                                 }}
                                 onChange={handleSelectAll}
-                                aria-label="Select all"
+                                aria-label="Select all on page"
                               />
-                            ) : (
-                              <div className="flex items-center gap-2">
+                            ) : (() => {
+                              const filterKey = studentHeaderFilterKey(column.id)
+                              const options =
+                                filterKey === 'name'
+                                  ? allNames
+                                  : filterKey === 'skills'
+                                    ? allSkills
+                                    : allEducation
+                              const filterControl = filterKey ? (
+                                <StudentColumnHeaderFilter
+                                  filterKey={filterKey}
+                                  label={String(column.Header)}
+                                  options={options}
+                                  selected={filters[filterKey]}
+                                  onToggle={(value) => handleMultiSelectChange(filterKey, value)}
+                                  onClear={() => handleClearHeaderFilter(filterKey)}
+                                  hideLabel={Boolean(sortColumn)}
+                                  {...(filterKey === 'name'
+                                    ? {
+                                        emailOptions: allEmails,
+                                        emailSelected: filters.email,
+                                        onToggleEmail: (value: string) => {
+                                          setCurrentPage(1)
+                                          setFilters((prev) => ({
+                                            ...prev,
+                                            email: prev.email === value ? '' : value,
+                                          }))
+                                        },
+                                        onClearEmail: () => {
+                                          setCurrentPage(1)
+                                          setFilters((prev) => ({ ...prev, email: '' }))
+                                        },
+                                      }
+                                    : {})}
+                                />
+                              ) : null
+                              if (sortColumn) {
+                                const { isSorted, isSortedDesc } = studentColumnSortFlags(
+                                  selectedSort,
+                                  sortColumn
+                                )
+                                return (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      className="tabletitle group/th inline-flex items-center gap-1 text-start cursor-pointer select-none hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+                                      aria-label={studentSortButtonAriaLabel(sortColumn, selectedSort)}
+                                      onClick={() => handleColumnSort(column.id)}
+                                    >
+                                      <SortHeaderLabel
+                                        label={column.render('Header')}
+                                        isSorted={isSorted}
+                                        isSortedDesc={isSortedDesc}
+                                      />
+                                    </button>
+                                    {filterControl}
+                                  </div>
+                                )
+                              }
+                              if (filterControl) return filterControl
+                              return (
                                 <span className="tabletitle">{column.render('Header')}</span>
-                              <span>
-                                {column.isSorted ? (
-                                  column.isSortedDesc ? (
-                                    <i className="ri-arrow-down-s-line text-[0.875rem]"></i>
-                                  ) : (
-                                    <i className="ri-arrow-up-s-line text-[0.875rem]"></i>
-                                  )
-                                ) : (
-                                  ''
-                                )}
-                              </span>
-                              </div>
-                            )}
+                              )
+                            })()}
                           </th>
-                        ))}
+                          )
+                        })}
                       </tr>
                     ))}
                   </thead>
@@ -1382,7 +1546,9 @@ const Students = () => {
                   Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalResults)} of {totalResults} entries{' '}
                   <i className="bi bi-arrow-right ms-2 font-semibold"></i>
                 </div>
-                <div className="ms-auto">
+                {/* Pagination + "Go to page" travel together: the strip is capped at five
+                    numbers, so the input is the only way to reach a page outside it. */}
+                <div className="ms-auto flex flex-wrap items-center gap-x-4 gap-y-2">
                   <nav aria-label="Page navigation" className="pagination-style-4">
                     <ul className="ti-pagination mb-0">
                       <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
@@ -1394,85 +1560,29 @@ const Students = () => {
                           Prev
                         </button>
                       </li>
-                      {totalPages <= 7 ? (
-                        // Show all pages if 7 or fewer
-                        Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                          <li
-                            key={page}
-                            className={`page-item ${currentPage === page ? 'active' : ''}`}
+                      {/* Was: a first-page anchor, an ellipsis, a five-wide window, another
+                          ellipsis and a last-page anchor — up to SEVEN numbers on screen
+                          (1 … 2 3 4 5 6 … 22), which is what made this hard to scan. It
+                          also double-rendered page 1 at currentPage === 3, where the anchor
+                          fired but the ellipsis between it and the window did not.
+                          buildPageWindow returns a clamped, contiguous run of at most five,
+                          so the strip is a fixed width at every page and slides by one as
+                          you move. */}
+                      {buildPageWindow(currentPage, totalPages, 5).map((page) => (
+                        <li
+                          key={page}
+                          className={`page-item ${currentPage === page ? 'active' : ''}`}
+                        >
+                          <button
+                            className="page-link px-3 py-[0.375rem]"
+                            onClick={() => setCurrentPage(page)}
+                            aria-current={currentPage === page ? 'page' : undefined}
+                            aria-label={`Go to page ${page}`}
                           >
-                            <button
-                              className="page-link px-3 py-[0.375rem]"
-                              onClick={() => setCurrentPage(page)}
-                              aria-current={currentPage === page ? 'page' : undefined}
-                            >
-                              {page}
-                            </button>
-                          </li>
-                        ))
-                      ) : (
-                        // Show smart pagination for more pages
-                        <>
-                          {currentPage > 2 && (
-                            <>
-                              <li className="page-item">
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => setCurrentPage(1)}
-                                >
-                                  1
-                                </button>
-                              </li>
-                              {currentPage > 3 && (
-                                <li className="page-item disabled">
-                                  <span className="page-link px-3 py-[0.375rem]">...</span>
-                                </li>
-                              )}
-                            </>
-                          )}
-                          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                            let pageNum
-                            if (currentPage < 3) {
-                              pageNum = i + 1
-                            } else if (currentPage > totalPages - 3) {
-                              pageNum = totalPages - 4 + i
-                            } else {
-                              pageNum = currentPage - 2 + i
-                            }
-                            return (
-                              <li
-                                key={pageNum}
-                                className={`page-item ${currentPage === pageNum ? 'active' : ''}`}
-                              >
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => setCurrentPage(pageNum)}
-                                  aria-current={currentPage === pageNum ? 'page' : undefined}
-                                >
-                                  {pageNum}
-                                </button>
-                              </li>
-                            )
-                          })}
-                          {currentPage < totalPages - 2 && (
-                            <>
-                              {currentPage < totalPages - 3 && (
-                                <li className="page-item disabled">
-                                  <span className="page-link px-3 py-[0.375rem]">...</span>
-                                </li>
-                              )}
-                              <li className="page-item">
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => setCurrentPage(totalPages)}
-                                >
-                                  {totalPages}
-                                </button>
-                              </li>
-                            </>
-                          )}
-                        </>
-                      )}
+                            {page}
+                          </button>
+                        </li>
+                      ))}
                       <li className={`page-item ${currentPage === totalPages || totalPages === 0 ? 'disabled' : ''}`}>
                         <button
                           className="page-link px-3 py-[0.375rem] text-primary"
@@ -1484,6 +1594,54 @@ const Students = () => {
                       </li>
                     </ul>
                   </nav>
+
+                  {/* A real <form>, so Enter submits with no keydown handler of our own.
+                      Hidden at one page, where there is nowhere to jump to. */}
+                  {totalPages > 1 && (
+                    <form
+                      className="flex items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        const raw = gotoPageInput.trim()
+                        if (!raw) return
+                        const parsed = Number(raw)
+                        if (!Number.isFinite(parsed)) return
+                        // Clamp rather than reject: typing 99 on a 22-page list means "the
+                        // end", and an error message for that would be pedantic. min/max
+                        // below let the browser hint the same bounds.
+                        setCurrentPage(Math.min(Math.max(Math.trunc(parsed), 1), totalPages))
+                        setGotoPageInput('')
+                      }}
+                    >
+                      <label
+                        htmlFor="students-goto-page"
+                        className="whitespace-nowrap text-[0.8125rem] text-[#8c9097] dark:text-white/60"
+                      >
+                        Go to page
+                      </label>
+                      <input
+                        id="students-goto-page"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={totalPages}
+                        value={gotoPageInput}
+                        onChange={(e) => setGotoPageInput(e.currentTarget.value)}
+                        placeholder={String(currentPage)}
+                        aria-describedby="students-goto-page-hint"
+                        className="ti-form-control form-control-sm !w-[4.5rem] !py-[0.375rem]"
+                      />
+                      <span id="students-goto-page-hint" className="sr-only">
+                        Enter a page number between 1 and {totalPages}
+                      </span>
+                      <button
+                        type="submit"
+                        className="ti-btn ti-btn-primary ti-btn-sm !mb-0 !py-[0.375rem]"
+                      >
+                        Go
+                      </button>
+                    </form>
+                  )}
                 </div>
               </div>
             </div>
@@ -1508,9 +1666,11 @@ const Students = () => {
       <StudentFilters
         filters={filters}
         setFilters={setFilters}
+        onClose={closeFilterPanel}
         allNames={allNames}
         allSkills={allSkills}
         allEducation={allEducation}
+        allEmails={allEmails}
         filteredNames={filteredNames}
         filteredSkills={filteredSkills}
         filteredEducation={filteredEducation}
@@ -1520,10 +1680,10 @@ const Students = () => {
         setSearchSkills={setSearchSkills}
         searchEducation={searchEducation}
         setSearchEducation={setSearchEducation}
-        experienceRanges={experienceRanges}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
         handleMultiSelectChange={handleMultiSelectChange}
         handleRemoveFilter={handleRemoveFilter}
-        handleExperienceRangeChange={handleExperienceRangeChange}
         handleResetFilters={handleResetFilters}
       />
 
@@ -1555,24 +1715,21 @@ const Students = () => {
             <div className="space-y-4">
               {/* Student Header Info */}
               <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 dark:border-primary/30 rounded-lg">
-                <img
-                  src={previewStudent.displayPicture || '/assets/images/faces/1.jpg'}
-                  alt={previewStudent.name}
-                  className="w-16 h-16 rounded-full object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/assets/images/faces/1.jpg'
-                  }}
+                <StudentRowAvatar
+                  name={previewStudent.name}
+                  imageUrl={previewStudent.hasProfileImage ? previewStudent.displayPicture : null}
+                  className="w-16 h-16 rounded-full"
                 />
                 <div className="flex-1">
                   <h6 className="font-bold text-gray-800 dark:text-white text-xl mb-1">{previewStudent.name}</h6>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                     <span className="flex items-center gap-1">
-                      <i className="ri-mail-line"></i>
-                      {previewStudent.email}
+                      <i className="ri-mail-line" aria-hidden="true"></i>
+                      {previewStudent.email?.trim() ? previewStudent.email : MISSING_PROFILE_VALUE}
                     </span>
                     <span className="flex items-center gap-1">
-                      <i className="ri-phone-line"></i>
-                      {previewStudent.phone}
+                      <i className="ri-phone-line" aria-hidden="true"></i>
+                      {previewStudent.phone?.trim() ? previewStudent.phone : MISSING_PROFILE_VALUE}
                     </span>
                   </div>
                 </div>
@@ -1582,35 +1739,41 @@ const Students = () => {
               <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 dark:bg-black/20 rounded-lg">
                 <div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Education</div>
-                  <div className="font-semibold text-gray-800 dark:text-white">{previewStudent.education}</div>
+                  {previewStudent.education?.trim() ? (
+                    <div className="font-semibold text-gray-800 dark:text-white">{previewStudent.education}</div>
+                  ) : (
+                    <div className="text-sm font-normal text-gray-600 dark:text-gray-300">{MISSING_PROFILE_VALUE}</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Skills</div>
                   <div className="flex flex-wrap gap-1.5">
-                    {previewStudent.skills?.map((skill: string, index: number) => (
-                      <span
-                        key={index}
-                        className="badge bg-primary/10 text-primary border border-primary/30 px-2 py-1 rounded-md text-xs font-medium"
-                      >
-                        {skill}
-                      </span>
-                    ))}
+                    {previewStudent.skills?.length ? (
+                      previewStudent.skills.map((skill: string, index: number) => (
+                        <span
+                          key={index}
+                          className="badge bg-primary/10 text-primary border border-primary/30 px-2 py-1 rounded-md text-xs font-medium"
+                        >
+                          {skill}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm font-normal text-gray-600 dark:text-gray-300">{MISSING_PROFILE_VALUE}</span>
+                    )}
                   </div>
                 </div>
               </div>
 
               {/* Bio Section */}
-              {previewStudent.bio && (
-                <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
-                  <h6 className="font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
-                    <i className="ri-file-text-line text-primary"></i>
-                    Bio
-                  </h6>
-                  <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                    {previewStudent.bio}
-                  </p>
-                </div>
-              )}
+              <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
+                <h6 className="font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
+                  <i className="ri-file-text-line text-primary" aria-hidden="true"></i>
+                  Bio
+                </h6>
+                <p className={`text-sm leading-relaxed ${previewStudent.bio?.trim() ? 'text-gray-700 dark:text-gray-300' : 'text-gray-600 dark:text-gray-300'}`}>
+                  {previewStudent.bio?.trim() ? previewStudent.bio : MISSING_PROFILE_VALUE}
+                </p>
+              </div>
 
               {/* Action Buttons */}
               <div className="pt-4 border-t border-gray-200 dark:border-defaultborder/10 flex gap-3">
@@ -1627,6 +1790,7 @@ const Students = () => {
                   className="ti-btn ti-btn-primary flex-1"
                   onClick={() => {
                     if (previewStudent?.id) {
+                      closePreviewPanel()
                       void handleViewStudent(previewStudent.id)
                     }
                   }}
@@ -1675,12 +1839,12 @@ const Students = () => {
                     <h6 className="font-bold text-gray-800 dark:text-white text-lg mb-2">{studentDetails.name}</h6>
                     <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                       <span className="flex items-center gap-1">
-                        <i className="ri-mail-line"></i>
-                        {studentDetails.email}
+                        <i className="ri-mail-line" aria-hidden="true"></i>
+                        {studentDetails.email?.trim() ? studentDetails.email : MISSING_PROFILE_VALUE}
                       </span>
                       <span className="flex items-center gap-1">
-                        <i className="ri-phone-line"></i>
-                        {studentDetails.phone}
+                        <i className="ri-phone-line" aria-hidden="true"></i>
+                        {studentDetails.phone?.trim() ? studentDetails.phone : MISSING_PROFILE_VALUE}
                       </span>
                     </div>
                   </div>

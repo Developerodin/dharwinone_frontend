@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_STUDENT_SORT_API,
+  nextStudentColumnSort,
   normalizeStudentEducation,
   normalizeStudentName,
   normalizeStudentSkills,
   sortOptionToApiSortBy,
   sortStudentRows,
+  studentColumnAriaSort,
+  studentHeaderSortColumn,
+  studentSortButtonAriaLabel,
   type StudentSortableRow,
 } from "../training/student-list-sort";
 
@@ -48,19 +52,6 @@ describe("student-list-sort", () => {
     ]);
   });
 
-  it("sorts by skills and education with null-safe values", () => {
-    expect(sortStudentRows(rows, "skills-asc").map((row) => row.name)).toEqual([
-      "alex",
-      "Morgan",
-      "Zara",
-    ]);
-    expect(sortStudentRows(rows, "education-asc").map((row) => row.name)).toEqual([
-      "alex",
-      "Morgan",
-      "Zara",
-    ]);
-  });
-
   it("returns the original order when sort is cleared", () => {
     const original = [...rows];
     expect(sortStudentRows(rows, "")).toEqual(original);
@@ -74,7 +65,45 @@ describe("student-list-sort", () => {
 
   it("maps UI sort options to API sort params", () => {
     expect(sortOptionToApiSortBy("name-asc")).toBe("name:asc");
-    expect(sortOptionToApiSortBy("education-desc")).toBe("education:desc");
+    expect(sortOptionToApiSortBy("name-desc")).toBe("name:desc");
+    expect(sortOptionToApiSortBy("skills-asc")).toBe("skills:asc");
+    expect(sortOptionToApiSortBy("skills-desc")).toBe("skills:desc");
     expect(sortOptionToApiSortBy("")).toBe(DEFAULT_STUDENT_SORT_API);
+  });
+
+  it("sorts by joined skill names and keeps empty skills last", () => {
+    expect(sortStudentRows(rows, "skills-asc").map((row) => row.name)).toEqual([
+      "Morgan",
+      "Zara",
+      "alex",
+    ]);
+    expect(sortStudentRows(rows, "skills-desc").map((row) => row.name)).toEqual([
+      "Zara",
+      "Morgan",
+      "alex",
+    ]);
+  });
+
+  it("cycles a column none → asc → desc → none and switches exclusive columns", () => {
+    expect(nextStudentColumnSort("", "name")).toBe("name-asc");
+    expect(nextStudentColumnSort("name-asc", "name")).toBe("name-desc");
+    expect(nextStudentColumnSort("name-desc", "name")).toBe("");
+    expect(nextStudentColumnSort("skills-asc", "name")).toBe("name-asc");
+    expect(nextStudentColumnSort("name-desc", "skills")).toBe("skills-asc");
+  });
+
+  it("maps student info / skills headers to sort columns", () => {
+    expect(studentHeaderSortColumn("studentInfo")).toBe("name");
+    expect(studentHeaderSortColumn("skills")).toBe("skills");
+    expect(studentHeaderSortColumn("education")).toBeNull();
+  });
+
+  it("exposes aria-sort and button labels for the active column", () => {
+    expect(studentColumnAriaSort("name-asc", "name")).toBe("ascending");
+    expect(studentColumnAriaSort("name-asc", "skills")).toBe("none");
+    expect(studentSortButtonAriaLabel("name", "")).toBe("Sort by name");
+    expect(studentSortButtonAriaLabel("skills", "skills-desc")).toBe(
+      "Sort by skills, currently descending"
+    );
   });
 });

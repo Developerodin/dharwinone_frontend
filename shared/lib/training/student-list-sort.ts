@@ -1,11 +1,6 @@
-export type StudentSortOption =
-  | ""
-  | "name-asc"
-  | "name-desc"
-  | "skills-asc"
-  | "skills-desc"
-  | "education-asc"
-  | "education-desc";
+export type StudentSortOption = "" | "name-asc" | "name-desc" | "skills-asc" | "skills-desc";
+
+export type StudentSortColumn = "name" | "skills";
 
 export const DEFAULT_STUDENT_SORT_API = "createdAt:desc";
 
@@ -27,8 +22,6 @@ const STUDENT_SORT_OPTIONS: StudentSortOption[] = [
   "name-desc",
   "skills-asc",
   "skills-desc",
-  "education-asc",
-  "education-desc",
 ];
 
 export function isStudentSortOption(value: string): value is StudentSortOption {
@@ -96,18 +89,12 @@ export function sortStudentRows<T extends StudentSortableRow>(
       );
     }
     if (sortOption.startsWith("skills-")) {
-      return compareStrings(
-        normalizeStudentSkills(left.skills),
-        normalizeStudentSkills(right.skills),
-        direction
-      );
-    }
-    if (sortOption.startsWith("education-")) {
-      return compareStrings(
-        normalizeStudentEducation(left.education),
-        normalizeStudentEducation(right.education),
-        direction
-      );
+      const leftKey = normalizeStudentSkills(left.skills);
+      const rightKey = normalizeStudentSkills(right.skills);
+      if (!leftKey && !rightKey) return 0;
+      if (!leftKey) return 1;
+      if (!rightKey) return -1;
+      return compareStrings(leftKey, rightKey, direction);
     }
     return 0;
   });
@@ -125,11 +112,56 @@ export function sortOptionToApiSortBy(sortOption: StudentSortOption): string {
       return "skills:asc";
     case "skills-desc":
       return "skills:desc";
-    case "education-asc":
-      return "education:asc";
-    case "education-desc":
-      return "education:desc";
     default:
       return DEFAULT_STUDENT_SORT_API;
   }
+}
+
+/** Map Students table column ids to the Evaluation-style exclusive sort columns. */
+export function studentHeaderSortColumn(columnId: string): StudentSortColumn | null {
+  if (columnId === "studentInfo") return "name";
+  if (columnId === "skills") return "skills";
+  return null;
+}
+
+/** Neutral → ascending → descending → neutral, matching react-table useSortBy. */
+export function nextStudentColumnSort(
+  current: StudentSortOption,
+  column: StudentSortColumn
+): StudentSortOption {
+  const asc = `${column}-asc` as StudentSortOption;
+  const desc = `${column}-desc` as StudentSortOption;
+  if (current === asc) return desc;
+  if (current === desc) return "";
+  return asc;
+}
+
+export function studentColumnAriaSort(
+  current: StudentSortOption,
+  column: StudentSortColumn
+): "none" | "ascending" | "descending" {
+  if (current === `${column}-asc`) return "ascending";
+  if (current === `${column}-desc`) return "descending";
+  return "none";
+}
+
+export function studentColumnSortFlags(
+  current: StudentSortOption,
+  column: StudentSortColumn
+): { isSorted: boolean; isSortedDesc: boolean } {
+  return {
+    isSorted: current === `${column}-asc` || current === `${column}-desc`,
+    isSortedDesc: current === `${column}-desc`,
+  };
+}
+
+export function studentSortButtonAriaLabel(
+  column: StudentSortColumn,
+  current: StudentSortOption
+): string {
+  const name = column === "name" ? "name" : "skills";
+  const state = studentColumnAriaSort(current, column);
+  if (state === "ascending") return `Sort by ${name}, currently ascending`;
+  if (state === "descending") return `Sort by ${name}, currently descending`;
+  return `Sort by ${name}`;
 }
