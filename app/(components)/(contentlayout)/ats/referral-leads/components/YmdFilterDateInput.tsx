@@ -16,6 +16,12 @@ interface YmdFilterDateInputProps {
   minDate?: string;
   maxDate?: string;
   rangeError?: string | null;
+  /** Keep the accessible name but hide the visible label (section headings supply it). */
+  hideLabel?: boolean;
+  portalId?: string;
+  popperClassName?: string;
+  inputClassName?: string;
+  wrapperClassName?: string;
 }
 
 function toPickerDate(ymd: string | undefined): Date | undefined {
@@ -31,6 +37,11 @@ export function YmdFilterDateInput({
   minDate,
   maxDate,
   rangeError = null,
+  hideLabel = false,
+  portalId,
+  popperClassName = "!z-[60]",
+  inputClassName,
+  wrapperClassName,
 }: YmdFilterDateInputProps) {
   const inputId = useId();
   const errorId = `${inputId}-error`;
@@ -67,8 +78,8 @@ export function YmdFilterDateInput({
   };
 
   return (
-    <div>
-      <label htmlFor={inputId} className="form-label text-xs">
+    <div className={wrapperClassName}>
+      <label htmlFor={inputId} className={hideLabel ? "sr-only" : "form-label text-xs"}>
         {label}
       </label>
       <DatePicker
@@ -91,20 +102,21 @@ export function YmdFilterDateInput({
         // portal makes the viewport the boundary, so collision handling works.
         // Per-field node: From and To sharing one portal id would have them mount and
         // unmount the same element if both are ever open at once.
-        portalId={`referral-leads-datepicker-portal-${label.toLowerCase()}`}
+        portalId={portalId ?? `referral-leads-datepicker-portal-${label.toLowerCase()}`}
         // floating-ui defaults to `bottom` (centred): a ~280px calendar under a 150px
         // input overhangs ~65px each side. Anchor its start edge to the input instead.
         popperPlacement="bottom-start"
-        popperClassName="!z-[60]"
+        popperClassName={popperClassName}
         calendarClassName="filter-dp-cal"
-        className={`form-control form-control-sm w-[150px] ${error ? "is-invalid" : ""}`}
+        wrapperClassName={wrapperClassName}
+        className={`${inputClassName ?? "form-control form-control-sm w-[150px]"} ${error ? "is-invalid" : ""}`}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? errorId : undefined}
       />
       {error ? (
         <p
           id={errorId}
-          className="invalid-feedback d-block text-xs mt-0.5 mb-0 max-w-[150px]"
+          className={`invalid-feedback d-block text-xs mt-0.5 mb-0 ${inputClassName ? "" : "max-w-[150px]"}`}
           aria-live="polite"
           role="alert"
         >

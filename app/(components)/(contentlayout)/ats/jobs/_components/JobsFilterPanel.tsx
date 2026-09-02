@@ -1,6 +1,7 @@
 "use client"
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { YmdFilterDateInput } from '../../referral-leads/components/YmdFilterDateInput'
 
 interface FilterState {
   jobTitle: string[]
@@ -450,14 +451,19 @@ const JobsFilterPanel: React.FC<JobsFilterPanelProps> = ({
             </div>
           </section>
 
-          {/* Posting Date */}
           <section>
-            <label className={`${SECTION_TITLE} mb-1.5 block`}>Posted On</label>
-            <input
-              type="date"
-              className={INPUT_PLAIN}
+            <div className={`${SECTION_TITLE} mb-1.5`}>Posted On</div>
+            <YmdFilterDateInput
+              label="Posted On"
+              hideLabel
               value={draft.postingDate}
-              onChange={(e) => setDraft((prev) => ({ ...prev, postingDate: e.target.value }))}
+              onCommit={(sanitized) =>
+                setDraft((prev) => ({ ...prev, postingDate: sanitized }))
+              }
+              portalId="ats-jobs-datepicker-portal-posted-on"
+              popperClassName="!z-[9999]"
+              wrapperClassName="w-full"
+              inputClassName={INPUT_PLAIN}
             />
           </section>
 
