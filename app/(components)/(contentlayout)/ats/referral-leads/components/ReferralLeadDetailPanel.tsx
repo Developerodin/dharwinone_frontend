@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { ROUTES } from "@/shared/lib/constants";
 import { EMPLOYEE_STATUS_META, LINK_TYPE, getStatusMeta } from "@/shared/lib/ats/referral-leads-constants";
@@ -39,8 +40,28 @@ export function ReferralLeadDetailPanel({
 }: ReferralLeadDetailPanelProps) {
   const a = attributionLabel(lead);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // aria-modal="true" promises the rest of the page is inert; without a key handler
+  // the panel could only be dismissed by mouse.
+  useEffect(() => {
+    panelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Referral detail">
+    <div
+      ref={panelRef}
+      tabIndex={-1}
+      className="fixed inset-0 z-50 flex focus:outline-none"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Referral detail"
+    >
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <aside className="relative ml-auto h-full w-full max-w-md bg-white dark:bg-bodybg2 shadow-2xl flex flex-col overflow-y-auto">
         <div className="p-5 border-b border-slate-200 dark:border-white/10 flex justify-between items-start">

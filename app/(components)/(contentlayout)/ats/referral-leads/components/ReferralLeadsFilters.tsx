@@ -1,7 +1,10 @@
-"use client";
+﻿"use client";
 
+import { useEffect, useState } from "react";
 import { STATUS_META } from "@/shared/lib/ats/referral-leads-constants";
 import { SalesAgentFilterSelect } from "./SalesAgentFilterSelect";
+import { YmdFilterDateInput } from "./YmdFilterDateInput";
+import { getReferralLeadsDateRangeError } from "../utils/sanitizeDateInput.util";
 import type { ReferralLeadsFilterState } from "../hooks/useReferralLeadsFilters";
 import type { DatePreset } from "../utils/dateRange.util";
 import type { QuickStatusFilter } from "../utils/attributionScope.util";
@@ -25,26 +28,52 @@ export function ReferralLeadsFilters({
   distinctReferrers,
   featureEnabled = false,
 }: ReferralLeadsFiltersProps) {
+  // Typing committed straight to the filter state, so every keystroke was a request.
+  // Draft locally and commit on a 300ms pause (page.tsx sequences the responses).
+  const [searchDraft, setSearchDraft] = useState(filters.search);
+  useEffect(() => {
+    setSearchDraft(filters.search);
+  }, [filters.search]);
+  useEffect(() => {
+    if (searchDraft === filters.search) return;
+    const t = setTimeout(() => setFilter("search", searchDraft), 300);
+    return () => clearTimeout(t);
+  }, [searchDraft, filters.search, setFilter]);
+
   const setQuickStatus = (value: QuickStatusFilter) => {
     setFilter("quickStatus", filters.quickStatus === value ? null : value);
   };
+
+  const commitCustomDate = (key: "customFrom" | "customTo", sanitized: string) => {
+    setFilter(key, sanitized);
+    if (sanitized) setFilter("datePreset", "all");
+  };
+
+  const dateRangeError = getReferralLeadsDateRangeError(filters.customFrom, filters.customTo);
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-bodybg2 p-4 mb-4 space-y-3">
       <div className="flex flex-wrap items-end gap-3">
       <div className="flex-1 min-w-[200px]">
-        <label className="form-label text-xs">Search</label>
+        <label className="form-label text-xs" htmlFor="referral-leads-search">
+          Search
+        </label>
         <input
+          id="referral-leads-search"
+          type="search"
           className="form-control form-control-sm w-full"
           placeholder="Name, email, job…"
-          value={filters.search}
-          onChange={(e) => setFilter("search", e.target.value)}
+          value={searchDraft}
+          onChange={(e) => setSearchDraft(e.target.value)}
         />
       </div>
       {canUseOrgReferralControls && (
         <div>
-          <label className="form-label text-xs">Referrer</label>
+          <label className="form-label text-xs" htmlFor="referral-leads-referrer">
+            Referrer
+          </label>
           <select
+            id="referral-leads-referrer"
             className="form-select form-select-sm min-w-[160px]"
             value={filters.filterReferrer}
             onChange={(e) => setFilter("filterReferrer", e.target.value)}
@@ -72,8 +101,11 @@ export function ReferralLeadsFilters({
         </div>
       )}
       <div>
-        <label className="form-label text-xs">Link type</label>
+        <label className="form-label text-xs" htmlFor="referral-leads-link-type">
+          Link type
+        </label>
         <select
+          id="referral-leads-link-type"
           className="form-select form-select-sm min-w-[140px]"
           value={filters.filterType}
           onChange={(e) => setFilter("filterType", e.target.value)}
@@ -84,8 +116,11 @@ export function ReferralLeadsFilters({
         </select>
       </div>
       <div>
-        <label className="form-label text-xs">Status</label>
+        <label className="form-label text-xs" htmlFor="referral-leads-status">
+          Status
+        </label>
         <select
+          id="referral-leads-status"
           className="form-select form-select-sm min-w-[150px]"
           value={filters.filterStatus}
           onChange={(e) => setFilter("filterStatus", e.target.value)}
@@ -102,8 +137,11 @@ export function ReferralLeadsFilters({
         </select>
       </div>
       <div>
-        <label className="form-label text-xs">Date range</label>
+        <label className="form-label text-xs" htmlFor="referral-leads-date-preset">
+          Date range
+        </label>
         <select
+          id="referral-leads-date-preset"
           className="form-select form-select-sm min-w-[140px]"
           value={filters.datePreset}
           onChange={(e) => {
@@ -118,30 +156,22 @@ export function ReferralLeadsFilters({
           <option value="quarter">Last 90 days</option>
         </select>
       </div>
-      <div>
-        <label className="form-label text-xs">From</label>
-        <input
-          type="date"
-          className="form-control form-control-sm w-[150px]"
-          value={filters.customFrom}
-          onChange={(e) => {
-            setFilter("customFrom", e.target.value);
-            if (e.target.value) setFilter("datePreset", "all");
-          }}
-        />
-      </div>
-      <div>
-        <label className="form-label text-xs">To</label>
-        <input
-          type="date"
-          className="form-control form-control-sm w-[150px]"
-          value={filters.customTo}
-          onChange={(e) => {
-            setFilter("customTo", e.target.value);
-            if (e.target.value) setFilter("datePreset", "all");
-          }}
-        />
-      </div>
+      <YmdFilterDateInput
+        key={`custom-from-${filters.datePreset}-${filters.customFrom}`}
+        label="From"
+        value={filters.customFrom}
+        maxDate={filters.customTo || undefined}
+        rangeError={dateRangeError}
+        onCommit={(sanitized) => commitCustomDate("customFrom", sanitized)}
+      />
+      <YmdFilterDateInput
+        key={`custom-to-${filters.datePreset}-${filters.customTo}`}
+        label="To"
+        value={filters.customTo}
+        minDate={filters.customFrom || undefined}
+        rangeError={dateRangeError}
+        onCommit={(sanitized) => commitCustomDate("customTo", sanitized)}
+      />
       {hasActiveFilters && (
         <div className="shrink-0">
           <label className="form-label text-xs select-none pointer-events-none opacity-0" aria-hidden>
@@ -184,7 +214,7 @@ export function ReferralLeadsFilters({
                   key={value}
                   type="button"
                   aria-pressed={active}
-                  className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`inline-flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-medium transition-colors sm:min-h-0 ${
                     active
                       ? "bg-primary text-white shadow-sm"
                       : "border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"

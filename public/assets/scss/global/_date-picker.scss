@@ -99,9 +99,10 @@
   @apply shadow-none;
 }
 
-/* Scheduler calendars — shared grid polish (meeting popup + interview inline) */
+/* Scheduler calendars — shared grid polish (meeting popup + interview inline + filter bar) */
 .react-datepicker.schedule-interview-dp-cal,
-.react-datepicker.schedule-interview-dp-inline {
+.react-datepicker.schedule-interview-dp-inline,
+.react-datepicker.filter-dp-cal {
   .react-datepicker__header {
     @apply pt-4 px-3 pb-2 #{!important};
   }
@@ -117,7 +118,7 @@
   .react-datepicker__day--outside-month {
     @apply text-textmuted/50 #{!important};
   }
-  .react-datepicker__day--today:not(.react-datepicker__day--selected) {
+  .react-datepicker__day--today:not(.react-datepicker__day--selected):not(.react-datepicker__day--keyboard-selected) {
     @apply font-bold text-primary #{!important};
   }
 }
@@ -161,5 +162,95 @@
   /* Today: subtle full-width link, not a heavy gray strip */
   .react-datepicker__today-button {
     @apply bg-transparent border-t border-defaultborder dark:border-defaultborder/10 py-2.5 text-[0.8125rem] font-semibold text-primary hover:bg-primary/[0.06] transition-colors #{!important};
+  }
+}
+
+/*
+  Filter-bar datepicker (referral leads From/To) — portaled popup whose header uses
+  native month/year selects (dropdownMode="select"). Shares the grid polish above.
+*/
+.react-datepicker.filter-dp-cal {
+  @apply rounded-xl shadow-2xl border-defaultborder dark:border-defaultborder/10 #{!important};
+  font-family: inherit;
+
+  /* The two selects already state month and year, so the label above them is noise. */
+  .react-datepicker__current-month {
+    @apply hidden #{!important};
+  }
+  .react-datepicker__header {
+    @apply rounded-t-xl #{!important};
+  }
+  /* Inline padding clears the absolutely-positioned prev/next buttons. */
+  .react-datepicker__header__dropdown {
+    @apply flex items-center justify-center gap-2 px-10 #{!important};
+  }
+  .react-datepicker__month-dropdown-container,
+  .react-datepicker__year-dropdown-container {
+    @apply m-0 #{!important};
+  }
+  .react-datepicker__month-select,
+  .react-datepicker__year-select {
+    /* Specificity beats the global `select { ... !important }` rule in _forms.
+       py-0 is load-bearing: Tailwind preflight gives every select `padding: .5rem .75rem`
+       and `line-height: 1.5rem`, which is 40px of content inside this 32px border-box —
+       the descenders get clipped. pe-7 leaves room for preflight's chevron background. */
+    @apply h-8 py-0 leading-tight rounded-lg border border-defaultborder dark:border-defaultborder/10 bg-white dark:bg-bodybg2 text-defaulttextcolor text-[0.8125rem] font-medium ps-2 pe-7 cursor-pointer #{!important};
+    /* That same global rule forces a dark background; without this the native option
+       list renders dark-on-dark in light mode. */
+    color-scheme: light;
+  }
+  .react-datepicker__month-select {
+    width: 7rem;
+  }
+  .react-datepicker__year-select {
+    width: 5.25rem;
+  }
+  /* Arrows sit on the select row rather than floating above it. */
+  .react-datepicker__navigation {
+    @apply top-3 w-8 h-8 flex items-center justify-center rounded-lg transition-colors #{!important};
+  }
+  .react-datepicker__navigation:hover {
+    @apply bg-primary/10 #{!important};
+  }
+  .react-datepicker__navigation--previous {
+    @apply start-1.5 end-auto #{!important};
+  }
+  .react-datepicker__navigation--next {
+    @apply end-1.5 start-auto #{!important};
+  }
+  .react-datepicker__navigation-icon::before {
+    @apply border-textmuted #{!important};
+  }
+  /* Default cells are 1.7rem, which cramps seven columns under the header. */
+  .react-datepicker__day-names {
+    @apply mt-2.5 mb-0 #{!important};
+  }
+  .react-datepicker__day-name,
+  .react-datepicker__day {
+    @apply w-9 leading-9 m-0.5 #{!important};
+  }
+  .react-datepicker__month {
+    @apply px-2 py-2 m-0 #{!important};
+  }
+  /* The theme stacks several !important colour rules on __day--selected, one of
+     which paints it primary-on-primary. Pin it, as schedule-interview-dp-cal does. */
+  .react-datepicker__day.react-datepicker__day--selected,
+  .react-datepicker__day.react-datepicker__day--keyboard-selected,
+  .react-datepicker__day.react-datepicker__day--selected:hover,
+  .react-datepicker__day.react-datepicker__day--keyboard-selected:hover {
+    @apply bg-primary text-white #{!important};
+  }
+  .react-datepicker__day--disabled {
+    @apply text-textmuted/40 cursor-not-allowed #{!important};
+  }
+  .react-datepicker__day--disabled:hover {
+    @apply bg-transparent #{!important};
+  }
+}
+
+.dark .react-datepicker.filter-dp-cal {
+  .react-datepicker__month-select,
+  .react-datepicker__year-select {
+    color-scheme: dark;
   }
 }

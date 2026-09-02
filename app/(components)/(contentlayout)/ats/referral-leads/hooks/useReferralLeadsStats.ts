@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { getReferralLeadsStats, type ReferralLeadsQueryParams, type ReferralLeadsStatsResponse } from "@/shared/lib/api/referralLeads";
 
-export function useReferralLeadsStats(queryParams: ReferralLeadsQueryParams, permissionsLoaded: boolean) {
+export function useReferralLeadsStats(queryParams: ReferralLeadsQueryParams, enabled: boolean) {
   const [stats, setStats] = useState<ReferralLeadsStatsResponse | null>(null);
   const [statsSnapshot, setStatsSnapshot] = useState<number | null>(null);
   const [isStale, setIsStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!permissionsLoaded) return;
+    if (!enabled) return;
     setError(null);
     setIsStale(false);
     try {
@@ -23,15 +23,15 @@ export function useReferralLeadsStats(queryParams: ReferralLeadsQueryParams, per
       setError(msg);
       throw e;
     }
-  }, [permissionsLoaded, queryParams]);
+  }, [enabled, queryParams]);
 
   useEffect(() => {
-    if (!permissionsLoaded) return;
+    if (!enabled) return;
     void refresh().catch(() => undefined);
-  }, [permissionsLoaded, queryParams, refresh]);
+  }, [enabled, queryParams, refresh]);
 
   useEffect(() => {
-    if (!permissionsLoaded || statsSnapshot == null) return;
+    if (!enabled || statsSnapshot == null) return;
     const t = setInterval(() => {
       void (async () => {
         try {
@@ -49,7 +49,7 @@ export function useReferralLeadsStats(queryParams: ReferralLeadsQueryParams, per
       })();
     }, 60_000);
     return () => clearInterval(t);
-  }, [permissionsLoaded, queryParams, statsSnapshot]);
+  }, [enabled, queryParams, statsSnapshot]);
 
   return { stats, isStale, error, refresh, setIsStale };
 }

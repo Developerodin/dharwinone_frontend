@@ -1,7 +1,8 @@
 "use client";
 
 import Seo from "@/shared/layout-components/seo/seo";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/shared/contexts/auth-context";
 import {
   listReferralLeads,
@@ -15,6 +16,13 @@ import {
   canSeeReferralLeaderboardFromRoles,
 } from "./utils/referralPermissions.util";
 import { useReferralLeadsFilters, type ReferralLeadsFilterState } from "./hooks/useReferralLeadsFilters";
+import {
+  DEFAULT_REFERRAL_LEADS_PAGE_SIZE,
+  areReferralLeadsListQueryStringsEquivalent,
+  buildReferralLeadsListQueryString,
+  parseReferralLeadsListState,
+  withReferralLeadsPagination,
+} from "./referral-leads-list-query";
 import { useReferralLeadsStats } from "./hooks/useReferralLeadsStats";
 import {
   useReferralSalesAgentFeatureFlag,
@@ -36,6 +44,10 @@ import { BackfillReferralModal } from "./modals/BackfillReferralModal";
 type HistoryTab = "referrer" | "salesAgent";
 
 export default function ReferralLeadsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const initial = parseReferralLeadsListState(searchParams);
   const { permissions, permissionsLoaded, roleNames, isAdministrator, isPlatformSuperUser } = useAuth();
 
   const featureEnabled = useReferralSalesAgentFeatureFlag();
@@ -53,12 +65,22 @@ export default function ReferralLeadsPage() {
   const canUseOrgReferralControls = canManage && !isSalesAgent;
   const canOverrideAttribution = canUseOrgReferralControls;
 
-  const { filters, setFilter, clearFilters, hasActiveFilters, baseParams } = useReferralLeadsFilters(featureEnabled);
-  const { stats, isStale, refresh: refreshStats, setIsStale } = useReferralLeadsStats(baseParams, permissionsLoaded);
+  const { filters, setFilter, setFilters, clearFilters, hasActiveFilters, dateRangeInvalid, baseParams } =
+    useReferralLeadsFilters(featureEnabled, initial.filters);
+  // Gate both fetches on a usable range so the table never shows unfiltered rows
+  // while the From/To fields are displaying a range error.
+  const canFetch = permissionsLoaded && !dateRangeInvalid;
+  const {
+    stats,
+    error: statsError,
+    isStale,
+    refresh: refreshStats,
+    setIsStale,
+  } = useReferralLeadsStats(baseParams, canFetch);
 
-  const PAGE_SIZE = 25;
+  const PAGE_SIZE = DEFAULT_REFERRAL_LEADS_PAGE_SIZE;
   const [list, setList] = useState<ReferralLeadRow[]>([]);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initial.page);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -87,34 +109,72 @@ export default function ReferralLeadsPage() {
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [actionLead, setActionLead] = useState<ReferralLeadRow | null>(null);
 
+  /** Monotonic id: only the newest in-flight list request may write state. */
+  const listRequestRef = useRef(0);
+  const skipFetchForClampRef = useRef(false);
+
+  const syncUrl = useCallback(() => {
+    const qs = buildReferralLeadsListQueryString({ page, filters });
+    const nextSearch = qs ? qs.slice(1) : "";
+    const currentSearch = searchParams.toString();
+    if (areReferralLeadsListQueryStringsEquivalent(nextSearch, currentSearch)) return;
+    router.replace(qs ? `${pathname}${qs}` : pathname, { scroll: false });
+  }, [page, filters, pathname, router, searchParams]);
+
+  useEffect(() => {
+    syncUrl();
+  }, [syncUrl]);
+
+  useEffect(() => {
+    const fromUrl = parseReferralLeadsListState(searchParams);
+    setPage((prev) => (prev === fromUrl.page ? prev : fromUrl.page));
+    setFilters((prev) => {
+      const prevQs = buildReferralLeadsListQueryString({ page: 1, filters: prev });
+      const nextQs = buildReferralLeadsListQueryString({ page: 1, filters: fromUrl.filters });
+      return prevQs === nextQs ? prev : fromUrl.filters;
+    });
+  }, [searchParams, setFilters]);
+
   const refreshList = useCallback(async () => {
-    if (!permissionsLoaded) return;
+    if (!canFetch) return;
+    const requestId = listRequestRef.current + 1;
+    listRequestRef.current = requestId;
     setLoading(true);
     setError(null);
     setIsStale(false);
     try {
-      const params: ReferralLeadsQueryParams = { ...baseParams, page, limit: PAGE_SIZE };
+      const params: ReferralLeadsQueryParams = withReferralLeadsPagination(baseParams, page, PAGE_SIZE);
       const res = await listReferralLeads(params);
+      if (listRequestRef.current !== requestId) return;
       setList(res.results);
       setTotal(res.total);
       setTotalPages(res.totalPages);
+      if (res.page !== page) {
+        skipFetchForClampRef.current = true;
+        setPage(res.page);
+      }
     } catch (e: unknown) {
+      if (listRequestRef.current !== requestId) return;
       const msg =
         e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : "Failed to load";
       setError(msg);
     } finally {
-      setLoading(false);
+      if (listRequestRef.current === requestId) setLoading(false);
     }
-  }, [permissionsLoaded, baseParams, page, setIsStale]);
+  }, [canFetch, baseParams, page, setIsStale]);
 
   const refresh = useCallback(async () => {
     await Promise.all([refreshList(), refreshStats().catch(() => undefined)]);
   }, [refreshList, refreshStats]);
 
   useEffect(() => {
-    if (!permissionsLoaded) return;
+    if (!canFetch) return;
+    if (skipFetchForClampRef.current) {
+      skipFetchForClampRef.current = false;
+      return;
+    }
     void refreshList();
-  }, [permissionsLoaded, baseParams, refreshList]);
+  }, [canFetch, baseParams, refreshList]);
 
   const mergeLead = useCallback((updated?: ReferralLeadRow) => {
     if (!updated) return;
@@ -151,7 +211,7 @@ export default function ReferralLeadsPage() {
     try {
       await downloadReferralLeadsExport(exportQueryParams);
     } catch {
-      alert("Export failed. Check permissions and try again.");
+      setError("Export failed. Check permissions and try again.");
     }
   };
 
@@ -207,6 +267,15 @@ export default function ReferralLeadsPage() {
 
         {isStale && <StaleDataBanner loading={loading} onRefresh={() => void refresh()} />}
 
+        {statsError && !stats && (
+          <div
+            className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+            role="status"
+          >
+            Summary counts could not be loaded ({statsError}). The list below is unaffected.
+          </div>
+        )}
+
         {stats && (
           <StatCards stats={stats} canSeeReferralLeaderboard={canSeeReferralLeaderboard} featureEnabled={featureEnabled} />
         )}
@@ -249,7 +318,9 @@ export default function ReferralLeadsPage() {
         )}
 
         {list.length > 0 && (
-          <>
+          /* Rows stay on screen while refetching; dim + block them so a stale table
+             is never mistaken for the result of the filter just changed. */
+          <div className={loading ? "pointer-events-none opacity-60 transition-opacity" : "transition-opacity"}>
             <ReferralLeadsTable
               list={list}
               featureEnabled={featureEnabled}
@@ -283,7 +354,7 @@ export default function ReferralLeadsPage() {
               disabled={loading}
               onPageChange={setPage}
             />
-          </>
+          </div>
         )}
       </div>
 

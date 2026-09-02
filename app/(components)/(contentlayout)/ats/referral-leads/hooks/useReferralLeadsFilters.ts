@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ReferralLeadsQueryParams } from "@/shared/lib/api/referralLeads";
 import { type DatePreset, rangeForPreset } from "../utils/dateRange.util";
+import { isReferralLeadsDateRangeInvalid } from "../utils/sanitizeDateInput.util";
 import type { QuickStatusFilter } from "../utils/attributionScope.util";
 
 export interface ReferralLeadsFilterState {
@@ -31,16 +32,31 @@ const INITIAL: ReferralLeadsFilterState = {
   quickStatus: null,
 };
 
-export function useReferralLeadsFilters(featureEnabled = false) {
-  const [filters, setFilters] = useState<ReferralLeadsFilterState>(INITIAL);
+export function useReferralLeadsFilters(
+  featureEnabled = false,
+  initialFilters: ReferralLeadsFilterState = INITIAL
+) {
+  const [filters, setFilters] = useState<ReferralLeadsFilterState>(initialFilters);
 
   const setFilter = <K extends keyof ReferralLeadsFilterState>(key: K, value: ReferralLeadsFilterState[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
+  /**
+   * True while From > To. Picking a custom date sets datePreset to "all", so the
+   * fallback below resolves to no date filter at all -- callers must not fetch on
+   * these params or the table shows unfiltered rows under an inline range error.
+   */
+  const dateRangeInvalid = useMemo(
+    () => isReferralLeadsDateRangeInvalid(filters.customFrom, filters.customTo),
+    [filters.customFrom, filters.customTo]
+  );
+
   const baseParams = useMemo((): ReferralLeadsQueryParams => {
+    const hasCustomDates = !!(filters.customFrom || filters.customTo);
+    const customRangeInvalid = isReferralLeadsDateRangeInvalid(filters.customFrom, filters.customTo);
     const { from, to } =
-      filters.customFrom || filters.customTo
+      hasCustomDates && !customRangeInvalid
         ? { from: filters.customFrom || undefined, to: filters.customTo || undefined }
         : rangeForPreset(filters.datePreset);
 
@@ -90,6 +106,7 @@ export function useReferralLeadsFilters(featureEnabled = false) {
     setFilters,
     clearFilters,
     hasActiveFilters,
+    dateRangeInvalid,
     baseParams,
     queryParams: baseParams,
   };

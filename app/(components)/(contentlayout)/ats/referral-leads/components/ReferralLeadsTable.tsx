@@ -37,7 +37,18 @@ export function ReferralLeadsTable({
           {list.map((lead) => (
             <tr
               key={lead.id}
-              className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50/80 dark:hover:bg-white/5 cursor-pointer"
+              // The row is the only way into the detail panel, so it needs to be
+              // reachable and activatable without a mouse.
+              tabIndex={0}
+              role="button"
+              aria-label={`Open details for ${lead.fullName || lead.email || "referral lead"}`}
+              className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50/80 dark:hover:bg-white/5 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                if (e.target !== e.currentTarget) return; // let buttons inside the row handle their own keys
+                e.preventDefault();
+                onSelect(lead);
+              }}
               onClick={() => onSelect(lead)}
             >
               <td className="px-4 py-3">

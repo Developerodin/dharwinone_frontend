@@ -2821,6 +2821,35 @@ label {
   @apply mt-8 mb-0 mx-auto !important;
 }
 
+/* Dropdowns inside a SweetAlert (`input: "select"`) — the Reparent dialog on
+   Organization > Structure is the one people meet.
+
+   @tailwindcss/forms runs with the base strategy (tailwind.config.ts), so it gives every
+   `select` `appearance: none` AND a background-image chevron to stand in for the native
+   arrow it just removed. SweetAlert2 then sets
+   `.swal2-select { background: var(--swal2-input-background) }` — the SHORTHAND, which
+   resets background-image to `none`. Net result: no native arrow and no drawn arrow, so
+   the control reads as a plain text box with nothing to say it opens.
+
+   Redrawing the forms plugin's own chevron keeps it identical to every other select in
+   the app. SweetAlert2 injects its stylesheet at runtime and can land after this one, so
+   the background longhands need !important. SweetAlert2 has no `.swal2-select:focus`
+   rule, so this single declaration covers the closed and open states both. */
+.swal2-container .swal2-select {
+  @apply bg-white dark:bg-bodybg2 text-defaulttextcolor dark:text-white/80 border border-solid border-defaultborder dark:border-white/10 rounded-[0.35rem] text-[0.875rem];
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 0.6rem center !important;
+  background-size: 1.25em 1.25em !important;
+  padding-inline-end: 2.25rem !important;
+}
+
+/* The global `select { rtl:bg-left }` rule cannot outrank the !important above, so the
+   mirrored position is restated rather than inherited. */
+[dir=rtl] .swal2-container .swal2-select {
+  background-position: left 0.6rem center !important;
+}
+
 /* end:: cart */
 /* Start:: Checkout */
 .product-checkout .tab-style-2 .nav-item .nav-link {
@@ -12196,6 +12225,16 @@ input[type=week]::-webkit-calendar-picker-indicator, input[type=month]::-webkit-
 .ti-pagination li .page-link:hover {
   @apply text-primary bg-light border-defaultborder;
 }
+/* The CURRENT page keeps its own colours while focused or hovered. The :focus rule above
+   is (0,3,1) and outranked `.page-item.active .page-link` (0,3,0), repainting only the
+   background and leaving white text on a light chip — the current page number vanished
+   until the button lost focus. Generated from tailwind/_pagination.scss; keep the two in
+   step. */
+.ti-pagination li.page-item.active .page-link,
+.ti-pagination li.page-item.active .page-link:focus,
+.ti-pagination li.page-item.active .page-link:hover {
+  @apply bg-primary text-white border-primary !important;
+}
 .ti-pagination li:first-child .page-link {
   @apply rounded-s-md;
 }
@@ -14007,9 +14046,10 @@ h6 {
   @apply shadow-none;
 }
 
-/* Scheduler calendars — shared grid polish (meeting popup + interview inline) */
+/* Scheduler calendars — shared grid polish (meeting popup + interview inline + filter bar) */
 .react-datepicker.schedule-interview-dp-cal .react-datepicker__header,
-.react-datepicker.schedule-interview-dp-inline .react-datepicker__header {
+.react-datepicker.schedule-interview-dp-inline .react-datepicker__header,
+.react-datepicker.filter-dp-cal .react-datepicker__header {
   @apply pt-4 px-3 pb-2 !important;
 }
 .react-datepicker.schedule-interview-dp-cal .react-datepicker__current-month,
@@ -14017,19 +14057,23 @@ h6 {
   @apply text-[0.95rem] font-semibold mb-3 !important;
 }
 .react-datepicker.schedule-interview-dp-cal .react-datepicker__day-name,
-.react-datepicker.schedule-interview-dp-inline .react-datepicker__day-name {
+.react-datepicker.schedule-interview-dp-inline .react-datepicker__day-name,
+.react-datepicker.filter-dp-cal .react-datepicker__day-name {
   @apply text-[0.7rem] font-semibold uppercase tracking-wide text-textmuted !important;
 }
 .react-datepicker.schedule-interview-dp-cal .react-datepicker__day,
-.react-datepicker.schedule-interview-dp-inline .react-datepicker__day {
+.react-datepicker.schedule-interview-dp-inline .react-datepicker__day,
+.react-datepicker.filter-dp-cal .react-datepicker__day {
   @apply rounded-lg font-medium transition-colors !important;
 }
 .react-datepicker.schedule-interview-dp-cal .react-datepicker__day--outside-month,
-.react-datepicker.schedule-interview-dp-inline .react-datepicker__day--outside-month {
+.react-datepicker.schedule-interview-dp-inline .react-datepicker__day--outside-month,
+.react-datepicker.filter-dp-cal .react-datepicker__day--outside-month {
   @apply text-textmuted/50 !important;
 }
-.react-datepicker.schedule-interview-dp-cal .react-datepicker__day--today:not(.react-datepicker__day--selected),
-.react-datepicker.schedule-interview-dp-inline .react-datepicker__day--today:not(.react-datepicker__day--selected) {
+.react-datepicker.schedule-interview-dp-cal .react-datepicker__day--today:not(.react-datepicker__day--selected):not(.react-datepicker__day--keyboard-selected),
+.react-datepicker.schedule-interview-dp-inline .react-datepicker__day--today:not(.react-datepicker__day--selected):not(.react-datepicker__day--keyboard-selected),
+.react-datepicker.filter-dp-cal .react-datepicker__day--today:not(.react-datepicker__day--selected):not(.react-datepicker__day--keyboard-selected) {
   @apply font-bold text-primary !important;
 }
 
@@ -14072,6 +14116,93 @@ h6 {
 }
 .react-datepicker.schedule-interview-dp-cal .react-datepicker__today-button {
   @apply bg-transparent border-t border-defaultborder dark:border-defaultborder/10 py-2.5 text-[0.8125rem] font-semibold text-primary hover:bg-primary/[0.06] transition-colors !important;
+}
+
+/*
+  Filter-bar datepicker (referral leads From/To) — portaled popup with month/year
+  selects. Shares the grid polish above; adds only the floating chrome and the
+  header layout the `dropdownMode="select"` variant needs.
+*/
+.react-datepicker.filter-dp-cal {
+  @apply rounded-xl shadow-2xl border-defaultborder dark:border-defaultborder/10 !important;
+  font-family: inherit;
+}
+/* The two selects already state month and year, so the label above them is noise. */
+.react-datepicker.filter-dp-cal .react-datepicker__current-month {
+  @apply hidden !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__header {
+  @apply rounded-t-xl !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__header__dropdown {
+  /* Inline padding clears the absolutely-positioned prev/next buttons. */
+  @apply flex items-center justify-center gap-2 px-10 !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__month-dropdown-container,
+.react-datepicker.filter-dp-cal .react-datepicker__year-dropdown-container {
+  @apply m-0 !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__month-select,
+.react-datepicker.filter-dp-cal .react-datepicker__year-select {
+  /* Specificity beats the global `select { ... !important }` rule further up.
+     py-0 is load-bearing: Tailwind preflight gives every select `padding: .5rem .75rem`
+     and `line-height: 1.5rem`, which is 40px of content inside this 32px border-box —
+     the descenders get clipped. pe-7 leaves room for preflight's chevron background. */
+  @apply h-8 py-0 leading-tight rounded-lg border border-defaultborder dark:border-defaultborder/10 bg-white dark:bg-bodybg2 text-defaulttextcolor text-[0.8125rem] font-medium ps-2 pe-7 cursor-pointer !important;
+  /* That same global rule forces a dark background; without this the native option
+     list renders dark-on-dark in light mode. */
+  color-scheme: light;
+}
+.dark .react-datepicker.filter-dp-cal .react-datepicker__month-select,
+.dark .react-datepicker.filter-dp-cal .react-datepicker__year-select {
+  color-scheme: dark;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__month-select {
+  width: 7rem;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__year-select {
+  width: 5.25rem;
+}
+/* Arrows sit on the select row rather than floating above it. */
+.react-datepicker.filter-dp-cal .react-datepicker__navigation {
+  @apply top-3 w-8 h-8 flex items-center justify-center rounded-lg transition-colors !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__navigation:hover {
+  @apply bg-primary/10 !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__navigation--previous {
+  @apply start-1.5 end-auto !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__navigation--next {
+  @apply end-1.5 start-auto !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__navigation-icon::before {
+  @apply border-textmuted !important;
+}
+/* Default cells are 1.7rem, which cramps seven columns under the header. */
+.react-datepicker.filter-dp-cal .react-datepicker__day-names {
+  @apply mt-2.5 mb-0 !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__day-name,
+.react-datepicker.filter-dp-cal .react-datepicker__day {
+  @apply w-9 leading-9 m-0.5 !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__month {
+  @apply px-2 py-2 m-0 !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__day.react-datepicker__day--selected,
+.react-datepicker.filter-dp-cal .react-datepicker__day.react-datepicker__day--keyboard-selected {
+  @apply bg-primary text-white !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__day.react-datepicker__day--selected:hover,
+.react-datepicker.filter-dp-cal .react-datepicker__day.react-datepicker__day--keyboard-selected:hover {
+  @apply bg-primary text-white !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__day--disabled {
+  @apply text-textmuted/40 cursor-not-allowed !important;
+}
+.react-datepicker.filter-dp-cal .react-datepicker__day--disabled:hover {
+  @apply bg-transparent !important;
 }
 
 .react-datepicker__input-container input:focus-within {
