@@ -36,6 +36,10 @@ const FREQUENCY_OPTIONS: { value: AutoFetchFrequencyMinutes; label: string }[] =
   { value: 1440, label: "Daily" },
 ];
 
+/** Match the backend caps in externalJobAutoFetch.controller.js. */
+const MAX_TERMS = 50;
+const MAX_TERM_LENGTH = 100;
+
 /** Chip list with add-input + remove -- used for both titles and locations. */
 function ChipListEditor({
   label,
@@ -49,10 +53,24 @@ function ChipListEditor({
   onChange: (next: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const add = () => {
     const v = draft.trim();
-    if (!v) return;
-    if (!values.some((x) => x.toLowerCase() === v.toLowerCase())) onChange([...values, v]);
+    if (!v) {
+      setError("Enter a value before adding.");
+      return;
+    }
+    if (values.length >= MAX_TERMS) {
+      setError(`Up to ${MAX_TERMS} entries.`);
+      return;
+    }
+    if (values.some((x) => x.toLowerCase() === v.toLowerCase())) {
+      setError("Already added.");
+      setDraft("");
+      return;
+    }
+    setError(null);
+    onChange([...values, v]);
     setDraft("");
   };
   return (
@@ -82,7 +100,12 @@ function ChipListEditor({
       <div className="flex gap-2">
         <input
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          maxLength={MAX_TERM_LENGTH}
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (error) setError(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -100,6 +123,11 @@ function ChipListEditor({
           Add
         </button>
       </div>
+      {error && (
+        <p className="mt-1.5 text-[0.72rem] font-medium text-danger" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

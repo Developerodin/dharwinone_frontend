@@ -28,7 +28,26 @@ const SOURCE_OPTIONS: { value: ExternalJobSource; label: string }[] = [
   { value: "linkedin-job-search-api", label: "LinkedIn Job Search API" },
 ];
 
+const POSTED_OPTIONS: { value: string; label: string }[] = [
+  { value: "24h", label: "Last 24 hours" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "6m", label: "Last 6 months" },
+  { value: "all", label: "All Time" },
+];
+
+// LinkedIn publishes only 24h and 7d feeds, so the wider windows aren't offered
+// for it -- the backend refuses them rather than quietly serving 7 days.
+const POSTED_VALUES_BY_SOURCE: Record<ExternalJobSource, string[]> = {
+  "active-jobs-db": ["24h", "7d", "6m", "all"],
+  "linkedin-job-search-api": ["24h", "7d"],
+  "linkedin-jobs-api": ["24h", "7d"],
+};
+/** Widest window every source supports -- where a narrower source lands on switch. */
+const POSTED_FALLBACK = "7d";
+
 const SEARCH_COOLDOWN_SEC = 5;
+/** Matches the backend cap on job_title / job_location (externalJob.validation.js). */
+const SEARCH_TERM_MAX = 200;
 const PAGE_SIZES = [10, 25, 50];
 /** Must match backend batch size for search `offset` steps (see /external-jobs/search). */
 const SEARCH_BATCH_SIZE = 10;
@@ -244,8 +263,8 @@ export default function ExternalJobsPage() {
       await saveExternalJob(job);
       setSavedJobs((prev) => [...prev, { ...job, savedAt: new Date().toISOString() }]);
       setBrowseListedHint(true);
-    } catch {
-      // ignore
+    } catch (err: any) {
+      setRateLimitError(err?.response?.data?.message || err?.message || "Could not save this job.");
     } finally {
       setSavingId(null);
     }
@@ -718,6 +737,7 @@ export default function ExternalJobsPage() {
                         type="text"
                         className="form-control !rounded-xl !border-defaultborder/80 !py-[0.45rem] !ps-8 !pe-3 !text-[0.8125rem] !shadow-none focus:!border-primary/60 focus:!ring-2 focus:!ring-primary/15 dark:!border-white/10"
                         placeholder="Role or keywords"
+                        maxLength={SEARCH_TERM_MAX}
                         value={filters.job_title}
                         onChange={(e) => setFilters((f) => ({ ...f, job_title: e.target.value }))}
                         onKeyDown={(e) => e.key === "Enter" && !searchLoading && searchCooldown <= 0 && handleSearch()}
@@ -734,6 +754,7 @@ export default function ExternalJobsPage() {
                         type="text"
                         className="form-control !rounded-xl !border-defaultborder/80 !py-[0.45rem] !ps-8 !pe-3 !text-[0.8125rem] !shadow-none focus:!border-primary/60 focus:!ring-2 focus:!ring-primary/15 dark:!border-white/10"
                         placeholder="City or region"
+                        maxLength={SEARCH_TERM_MAX}
                         value={filters.job_location}
                         onChange={(e) => setFilters((f) => ({ ...f, job_location: e.target.value }))}
                         onKeyDown={(e) => e.key === "Enter" && !searchLoading && searchCooldown <= 0 && handleSearch()}
@@ -747,7 +768,15 @@ export default function ExternalJobsPage() {
                     <select
                       className="form-select !rounded-xl !border-defaultborder/80 !py-[0.45rem] !text-[0.8125rem] !shadow-none focus:!border-primary/60 focus:!ring-2 focus:!ring-primary/15 dark:!border-white/10"
                       value={filters.source}
-                      onChange={(e) => setFilters((f) => ({ ...f, source: e.target.value as ExternalJobSource }))}
+                      onChange={(e) => {
+                        const source = e.target.value as ExternalJobSource;
+                        const allowed = POSTED_VALUES_BY_SOURCE[source];
+                        setFilters((f) => ({
+                          ...f,
+                          source,
+                          date_posted: allowed.includes(f.date_posted) ? f.date_posted : POSTED_FALLBACK,
+                        }));
+                      }}
                     >
                       {SOURCE_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -763,8 +792,11 @@ export default function ExternalJobsPage() {
                       value={filters.date_posted}
                       onChange={(e) => setFilters((f) => ({ ...f, date_posted: e.target.value }))}
                     >
-                      <option value="24h">Last 24 hours</option>
-                      <option value="7d">Last 7 days</option>
+                      {POSTED_OPTIONS.filter((opt) =>
+                        POSTED_VALUES_BY_SOURCE[filters.source].includes(opt.value)
+                      ).map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
                     </select>
                   </div>
 
