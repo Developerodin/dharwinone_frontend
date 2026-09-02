@@ -105,7 +105,7 @@ export function canAssignCandidateAgent(rawPermissions: string[], isPlatformSupe
   });
 }
 
-/** PATCH /training/modules/:id (add student to module) requires modules.manage on the backend. */
+/** PATCH /training/modules/:id (add or remove student on module roster) requires modules.manage on the backend. */
 export function canAssignTrainingCourseFromSop(rawPermissions: string[], isPlatformSuperUser: boolean): boolean {
   if (isPlatformSuperUser) return true;
   return rawPermissions.some((p) => {

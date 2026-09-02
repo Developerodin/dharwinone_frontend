@@ -9,6 +9,8 @@ export interface ConfirmOptions {
   tone?: 'danger' | 'primary' | 'success'
   /** Single-button mode — hides the cancel button. Use for info / success acknowledgements. */
   hideCancel?: boolean
+  /** Overlay stacking class. Raise above nested modals (e.g. z-[10100]). Default z-[1200]. */
+  overlayClassName?: string
 }
 
 /**
@@ -42,11 +44,20 @@ export function useConfirm() {
     setOpts(null)
   }, [])
 
+  const cancel = useCallback(() => settle(false), [settle])
+
+  useEffect(() => {
+    return () => {
+      resolverRef.current?.(false)
+      resolverRef.current = null
+    }
+  }, [])
+
   const confirmDialog = opts ? (
     <ConfirmDialog options={opts} onConfirm={() => settle(true)} onCancel={() => settle(false)} />
   ) : null
 
-  return { confirm, confirmDialog }
+  return { confirm, confirmDialog, cancel }
 }
 
 function ConfirmDialog({
@@ -65,6 +76,7 @@ function ConfirmDialog({
     cancelLabel = 'Cancel',
     tone = 'primary',
     hideCancel = false,
+    overlayClassName = 'z-[1200]',
   } = options
   const confirmRef = useRef<HTMLButtonElement>(null)
 
@@ -86,7 +98,7 @@ function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 p-4"
+      className={`fixed inset-0 ${overlayClassName} flex items-center justify-center bg-black/50 p-4`}
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
@@ -112,7 +124,7 @@ function ConfirmDialog({
           {!hideCancel && (
             <button
               type="button"
-              className="ti-btn ti-btn-light !min-h-[44px] !py-2 !px-4 !text-sm font-medium"
+              className="ti-btn ti-btn-light !min-h-[44px] !py-2 !px-4 !text-sm font-medium cursor-pointer"
               onClick={onCancel}
             >
               {cancelLabel}
@@ -121,7 +133,7 @@ function ConfirmDialog({
           <button
             ref={confirmRef}
             type="button"
-            className={`ti-btn !min-h-[44px] !py-2 !px-4 !text-sm font-medium ${t.btn}`}
+            className={`ti-btn !min-h-[44px] !py-2 !px-4 !text-sm font-medium cursor-pointer ${t.btn}`}
             onClick={onConfirm}
           >
             {confirmLabel}

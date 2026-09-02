@@ -4,6 +4,7 @@ import {
   INLINE_STATUS_TOAST_INNER_CLASSES,
   INLINE_STATUS_TOAST_POSITION_BOTTOM_CENTER,
   INLINE_STATUS_TOAST_POSITION_BOTTOM_RIGHT,
+  INLINE_STATUS_TOAST_POSITION_TOP_END,
 } from "@/shared/lib/inline-status-toast";
 import { InlineStatusToast } from "@/shared/components/InlineStatusToast";
 
@@ -21,6 +22,7 @@ describe("inline-status-toast classes", () => {
   it("exposes stable position helpers", () => {
     expect(INLINE_STATUS_TOAST_POSITION_BOTTOM_RIGHT).toContain("bottom-4");
     expect(INLINE_STATUS_TOAST_POSITION_BOTTOM_CENTER).toContain("left-1/2");
+    expect(INLINE_STATUS_TOAST_POSITION_TOP_END).toContain("top-4");
   });
 });
 

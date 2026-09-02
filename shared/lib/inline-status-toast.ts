@@ -10,3 +10,6 @@ export const INLINE_STATUS_TOAST_POSITION_BOTTOM_RIGHT = "fixed bottom-4 right-4
 
 export const INLINE_STATUS_TOAST_POSITION_BOTTOM_CENTER =
   "fixed bottom-6 left-1/2 z-[80] -translate-x-1/2";
+
+/** Above SOP assign modals (z-[10050]) and confirm (z-[10100]); no page scrim. */
+export const INLINE_STATUS_TOAST_POSITION_TOP_END = "fixed top-4 right-4 z-[11000]";
