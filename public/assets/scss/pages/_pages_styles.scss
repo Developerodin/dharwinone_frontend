@@ -310,6 +310,35 @@ label {
 .swal2-container .swal2-icon {
   @apply mt-8 mb-0 mx-auto #{!important};
 }
+
+/* Dropdowns inside a SweetAlert (`input: "select"`) — the Reparent dialog on
+   Organization > Structure is the one people meet.
+
+   @tailwindcss/forms runs with the base strategy (tailwind.config.ts), so it gives every
+   `select` `appearance: none` AND a background-image chevron to stand in for the native
+   arrow it just removed. SweetAlert2 then sets
+   `.swal2-select { background: var(--swal2-input-background) }` — the SHORTHAND, which
+   resets background-image to `none`. Net result: no native arrow and no drawn arrow, so
+   the control reads as a plain text box with nothing to say it opens.
+
+   Redrawing the forms plugin's own chevron keeps it identical to every other select in
+   the app. SweetAlert2 injects its stylesheet at runtime and can land after this one, so
+   the background longhands need !important. SweetAlert2 has no `.swal2-select:focus`
+   rule, so this single declaration covers the closed and open states both. */
+.swal2-container .swal2-select {
+  @apply bg-white dark:bg-bodybg2 text-defaulttextcolor dark:text-white/80 border border-solid border-defaultborder dark:border-white/10 rounded-[0.35rem] text-[0.875rem];
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e") #{!important};
+  background-repeat: no-repeat #{!important};
+  background-position: right 0.6rem center #{!important};
+  background-size: 1.25em 1.25em #{!important};
+  padding-inline-end: 2.25rem #{!important};
+}
+
+/* The global `select { rtl:bg-left }` rule cannot outrank the !important above, so the
+   mirrored position is restated rather than inherited. */
+[dir="rtl"] .swal2-container .swal2-select {
+  background-position: left 0.6rem center #{!important};
+}
 /* end:: cart */
 /* Start:: Checkout */
 .product-checkout {
