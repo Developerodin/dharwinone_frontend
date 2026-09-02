@@ -20,6 +20,24 @@
                 }
             }
 
+            /* The CURRENT page keeps its own colours while focused or hovered.
+               Every `.active` rule in this file targets `.page-link.active`, but the
+               markup puts the class on the list item (`<li class="page-item active">`),
+               so the only rule colouring the current page is `.page-item.active
+               .page-link` in pages/_pages_styles.scss — specificity (0,3,0). The
+               `.ti-pagination li .page-link:focus` rule above is (0,3,1) and wins,
+               repainting ONLY the background: the text stayed white, so the current page
+               number vanished into a light chip until the button lost focus. Hover was
+               the milder version of the same clash. Anchoring on `li.page-item.active`
+               makes this (0,4,1), which outranks both. */
+            &.page-item.active .page-link {
+                &,
+                &:focus,
+                &:hover {
+                    @apply bg-primary text-white border-primary #{!important};
+                }
+            }
+
             // &:not(:first-child) .page-link {
             //     @apply ms-[calc(1px_*_-1)];
             // }

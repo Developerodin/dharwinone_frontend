@@ -18,6 +18,23 @@ export const DEFAULT_EVALUATION_PAGE_SIZE = 50
 
 export const EVALUATION_PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const
 
+export const STUDENT_EVALUATION_SORT_IDS = [
+  'student',
+  'position',
+  'courses',
+  'avgCompletion',
+  'status',
+  'avgQuiz',
+] as const
+
+export const COURSE_EVALUATION_SORT_IDS = [
+  'course',
+  'categories',
+  'students',
+  'avgCompletion',
+  'atRisk',
+] as const
+
 const STATUS_VALUES: ReadonlyArray<'' | EvaluationDisplayStatus> = [
   '',
   'Completed',
@@ -60,6 +77,9 @@ export function parseEvaluationListState(
   searchParams: Pick<URLSearchParams, 'get'>
 ): EvaluationListState {
   const sortOrder = searchParams.get('sortOrder') === 'desc' ? 'desc' : 'asc'
+  const view: EvaluationViewMode = searchParams.get('view') === 'course' ? 'course' : 'student'
+  const rawSortBy = searchParams.get('sortBy') ?? ''
+  const sortBy = isEvaluationSortValidForView(rawSortBy, view) ? rawSortBy : ''
   return {
     page: parseEvaluationPage(searchParams.get('page')),
     pageSize: parseEvaluationPageSize(searchParams.get('pageSize')),
@@ -67,10 +87,20 @@ export function parseEvaluationListState(
     q: searchParams.get('q') ?? '',
     course: searchParams.get('course') ?? '',
     atRisk: searchParams.get('atRisk') === 'true',
-    view: searchParams.get('view') === 'course' ? 'course' : 'student',
-    sortBy: searchParams.get('sortBy') ?? '',
+    view,
+    sortBy,
     sortOrder,
   }
+}
+
+export function isEvaluationSortValidForView(
+  sortBy: string,
+  view: EvaluationViewMode
+): boolean {
+  if (!sortBy) return true
+  const valid =
+    view === 'course' ? COURSE_EVALUATION_SORT_IDS : STUDENT_EVALUATION_SORT_IDS
+  return (valid as readonly string[]).includes(sortBy)
 }
 
 export function normalizeEvaluationListQueryString(raw: string): string {

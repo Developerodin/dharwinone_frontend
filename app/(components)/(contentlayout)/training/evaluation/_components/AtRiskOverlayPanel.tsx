@@ -29,8 +29,8 @@ const AtRiskOverlayPanel: React.FC<AtRiskOverlayPanelProps> = ({
 }) => {
   const isCourseView = context?.type === 'course'
   const subtitle = isCourseView
-    ? 'Students flagged as at risk in this course'
-    : 'Courses where this student is at risk'
+    ? 'Users flagged as at risk in this course'
+    : 'Courses where this user is at risk'
 
   return (
     <>

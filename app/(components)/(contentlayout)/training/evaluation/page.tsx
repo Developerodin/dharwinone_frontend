@@ -52,6 +52,7 @@ import { buildPaginationItems, getPaginationRange } from './_components/evaluati
 import {
   areEvaluationListQueryStringsEquivalent,
   buildEvaluationListQueryString,
+  isEvaluationSortValidForView,
   parseEvaluationListState,
 } from './_components/evaluation-list-query'
 import pipelineStyles from '../../ats/ats-pipeline-list.module.css'
@@ -65,6 +66,19 @@ const STATUS_OPTIONS: { value: '' | EvaluationDisplayStatus; label: string }[] =
 
 interface StudentSummaryRow extends EvaluationStudentRow {}
 interface CourseSummaryRow extends EvaluationCourseRow {}
+
+function getEvaluationTableRowKey(
+  viewMode: 'student' | 'course',
+  row: StudentSummaryRow | CourseSummaryRow,
+  index: number,
+): string {
+  if (viewMode === 'student') {
+    const studentId = (row as StudentSummaryRow).studentId
+    return studentId ? `eval-row-student-${studentId}` : `eval-row-student-${index}`
+  }
+  const courseId = (row as CourseSummaryRow).courseId
+  return courseId ? `eval-row-course-${courseId}` : `eval-row-course-${index}`
+}
 
 const EMPTY_SUMMARY: EvaluationSummary = {
   totalCourses: 0,
@@ -97,6 +111,7 @@ const Evaluation = () => {
 
   const skipFetchForClampRef = useRef(false)
   const syncingFromUrlRef = useRef(false)
+  const fetchGenerationRef = useRef(0)
   const prevDebouncedSearchRef = useRef(initial.q)
   const prevSortRef = useRef({ sortBy: initial.sortBy, sortOrder: initial.sortOrder })
 
@@ -157,6 +172,7 @@ const Evaluation = () => {
   }, [])
 
   const fetchData = useCallback(async (requestedPage: number, limit: number, sortBy?: string, sortDesc?: boolean) => {
+    const requestId = ++fetchGenerationRef.current
     setLoading(true)
     setError(null)
     try {
@@ -171,6 +187,7 @@ const Evaluation = () => {
         sortBy: sortBy || undefined,
         sortOrder: sortDesc ? 'desc' : 'asc',
       })
+      if (requestId !== fetchGenerationRef.current) return
       setSummary(res.summary)
       setEvaluations(res.evaluations ?? [])
       setTableRows(res.rows ?? [])
@@ -189,12 +206,15 @@ const Evaluation = () => {
         })
       }
     } catch (e: unknown) {
+      if (requestId !== fetchGenerationRef.current) return
       const message = e && typeof e === 'object' && 'response' in e
         ? (e as { response?: { data?: { message?: string } } }).response?.data?.message
         : null
       setError(message ? String(message) : 'Failed to load evaluation data.')
     } finally {
-      setLoading(false)
+      if (requestId === fetchGenerationRef.current) {
+        setLoading(false)
+      }
     }
   }, [viewMode, filterStatus, debouncedQ, filterCourseId, filterAtRiskOnly])
 
@@ -265,7 +285,7 @@ const Evaluation = () => {
       const msg =
         err instanceof AxiosError && err.response?.data?.message
           ? String(err.response.data.message)
-          : 'Failed to load student profile.'
+          : 'Failed to load user profile.'
       await Swal.fire({
         icon: 'error',
         title: 'Could not open profile',
@@ -301,7 +321,7 @@ const Evaluation = () => {
     () => [
       {
         id: 'student',
-        Header: 'Student',
+        Header: 'User',
         accessor: 'studentName' as const,
         Cell: ({ row }: { row: { original: StudentSummaryRow } }) => (
           <StudentNameCell
@@ -414,7 +434,7 @@ const Evaluation = () => {
       },
       {
         id: 'students',
-        Header: 'Students',
+        Header: 'Users',
         accessor: 'studentsAssigned' as const,
         Cell: ({ row }: { row: { original: CourseSummaryRow } }) => (
           <CountCompleted
@@ -496,7 +516,10 @@ const Evaluation = () => {
   const { key: _evaluationTableKey, ...evaluationTableProps } = getTableProps()
   const tableBodyProps = getTableBodyProps()
 
-  const { sortBy: tableSortBy, sortDesc: tableSortDesc } = state
+  const { sortBy: tableSortBy } = state
+  const activeSort = tableSortBy?.[0]
+  const activeSortId = activeSort?.id ?? ''
+  const activeSortDesc = activeSort?.desc ?? false
   const total = meta.total
   const pageCount = meta.totalPages
   const currentPage = meta.page
@@ -518,8 +541,8 @@ const Evaluation = () => {
       course: filterCourseId,
       atRisk: filterAtRiskOnly,
       view: viewMode,
-      sortBy: tableSortBy?.[0] ?? '',
-      sortOrder: tableSortDesc?.[0] ? 'desc' : 'asc',
+      sortBy: activeSortId,
+      sortOrder: activeSortDesc ? 'desc' : 'asc',
     })
     const nextSearch = qs ? qs.slice(1) : ''
     const currentSearch = searchParams.toString()
@@ -533,8 +556,8 @@ const Evaluation = () => {
     filterCourseId,
     filterAtRiskOnly,
     viewMode,
-    tableSortBy,
-    tableSortDesc,
+    activeSortId,
+    activeSortDesc,
     pathname,
     router,
     searchParams,
@@ -549,7 +572,11 @@ const Evaluation = () => {
     syncingFromUrlRef.current = true
     setPage((prev) => (prev === fromUrl.page ? prev : fromUrl.page))
     setListPageSize((prev) => (prev === fromUrl.pageSize ? prev : fromUrl.pageSize))
-    setViewMode((prev) => (prev === fromUrl.view ? prev : fromUrl.view))
+    setViewMode((prev) => {
+      if (prev === fromUrl.view) return prev
+      setLoading(true)
+      return fromUrl.view
+    })
     setFilterStatus((prev) => (prev === fromUrl.status ? prev : fromUrl.status))
     setFilterStudent((prev) => (prev === fromUrl.q ? prev : fromUrl.q))
     setDebouncedQ((prev) => {
@@ -571,8 +598,8 @@ const Evaluation = () => {
 
   useEffect(() => {
     if (syncingFromUrlRef.current) return
-    const currentSortBy = tableSortBy?.[0] ?? ''
-    const currentSortOrder = tableSortDesc?.[0] ? 'desc' : 'asc'
+    const currentSortBy = activeSortId
+    const currentSortOrder = activeSortDesc ? 'desc' : 'asc'
     if (
       prevSortRef.current.sortBy === currentSortBy &&
       prevSortRef.current.sortOrder === currentSortOrder
@@ -581,15 +608,15 @@ const Evaluation = () => {
     }
     prevSortRef.current = { sortBy: currentSortBy, sortOrder: currentSortOrder }
     setPage(1)
-  }, [tableSortBy, tableSortDesc])
+  }, [activeSortId, activeSortDesc])
 
   useEffect(() => {
     if (skipFetchForClampRef.current) {
       skipFetchForClampRef.current = false
       return
     }
-    fetchData(page, listPageSize, tableSortBy?.[0], tableSortDesc?.[0])
-  }, [fetchData, page, listPageSize, tableSortBy, tableSortDesc])
+    fetchData(page, listPageSize, activeSortId || undefined, activeSortDesc)
+  }, [fetchData, page, listPageSize, activeSortId, activeSortDesc])
 
   return (
     <Fragment>
@@ -598,7 +625,7 @@ const Evaluation = () => {
         <div className="mb-6 grid min-w-0 grid-cols-12 gap-4">
           {[
             { label: 'Courses', value: summary.totalCourses, icon: 'ri-book-open-line', color: 'primary' },
-            { label: 'Active students', value: summary.totalStudentsEnrolled, icon: 'ri-user-line', color: 'success' },
+            { label: 'Active users', value: summary.totalStudentsEnrolled, icon: 'ri-user-line', color: 'success' },
             { label: 'At-risk enrollments', value: summary.atRiskCount, icon: 'ri-alert-line', color: 'danger' },
             { label: 'Completed pairs', value: summary.completedPairs, icon: 'ri-checkbox-circle-line', color: 'info' },
           ].map((card) => (
@@ -625,7 +652,7 @@ const Evaluation = () => {
             <div className="mb-4 flex min-w-0 flex-col gap-3 px-4 pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
               <div className="flex min-w-0 w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
                 <div className="box-title mb-0 min-w-0">
-                  {viewMode === 'student' ? 'Students' : 'Courses'}
+                  {viewMode === 'student' ? 'Users' : 'Courses'}
                   <span className="badge bg-light text-default rounded-full ms-1 text-[0.75rem] align-middle">
                     {total}
                   </span>
@@ -644,11 +671,16 @@ const Evaluation = () => {
                       className={`${viewMode === mode ? EVAL_BTN_TAB_ACTIVE : EVAL_BTN_TAB_INACTIVE} min-w-0 flex-1 sm:flex-none`}
                       onClick={() => {
                         if (viewMode === mode) return
+                        setLoading(true)
                         setViewMode(mode)
                         setPage(1)
+                        const currentSort = activeSortId
+                        if (currentSort && !isEvaluationSortValidForView(currentSort, mode)) {
+                          setSortBy([])
+                        }
                       }}
                     >
-                      {mode === 'student' ? 'By student' : 'By course'}
+                      {mode === 'student' ? 'By user' : 'By course'}
                     </button>
                   ))}
                 </div>
@@ -712,7 +744,7 @@ const Evaluation = () => {
                   id="eval-filter-search"
                   type="search"
                   className="form-control select-show-page-size min-h-[44px] w-full min-w-0 max-w-full !py-1.5 !px-3 !text-[0.8125rem] sm:min-w-[180px] sm:w-auto"
-                  placeholder="Student or course…"
+                  placeholder="User or course…"
                   value={filterStudent}
                   onChange={(e) => setFilterStudent(e.target.value)}
                 />
@@ -762,7 +794,7 @@ const Evaluation = () => {
             {error && (
               <div className="mx-4 mb-4 p-3 rounded-lg bg-danger/10 text-danger text-sm flex flex-wrap items-center justify-between gap-2" role="alert">
                 <span>{error}</span>
-                <button type="button" className={EVAL_BTN_DANGER} onClick={() => fetchData(page, listPageSize, tableSortBy?.[0], tableSortDesc?.[0])} aria-label="Retry loading evaluation data">
+                <button type="button" className={EVAL_BTN_DANGER} onClick={() => fetchData(page, listPageSize, activeSortId || undefined, activeSortDesc)} aria-label="Retry loading evaluation data">
                   <i className="ri-refresh-line" aria-hidden />
                   Retry
                 </button>
@@ -778,7 +810,7 @@ const Evaluation = () => {
                 <p className="text-sm text-defaulttextcolor/60 max-w-md">
                   {hasActiveFilters
                     ? 'No rows match your filters. Try clearing filters or broadening your search.'
-                    : 'Assign students to courses to see progress and quiz results here.'}
+                    : 'Assign users to courses to see progress and quiz results here.'}
                 </p>
                 {hasActiveFilters && (
                   <button type="button" className={`${EVAL_BTN_PRIMARY} mt-4`} onClick={clearFilters}>
@@ -841,15 +873,11 @@ const Evaluation = () => {
                         {tablePage.map((row, rowIndex) => {
                           prepareRow(row)
                           const { key: _rowKey, ...rowProps } = row.getRowProps()
-                          const rowKey =
-                            viewMode === 'student'
-                              ? (row.original as StudentSummaryRow).studentId
-                              : (row.original as CourseSummaryRow).courseId
                           return (
                             <tr
                               {...rowProps}
                               className={`border-b border-defaultborder/50 last:border-b-0 transition-colors duration-150 hover:bg-primary/5 dark:hover:bg-white/[0.03] ${evalRowClass(rowIndex)}`}
-                              key={`eval-row-${viewMode}-${rowKey}`}
+                              key={getEvaluationTableRowKey(viewMode, row.original, rowIndex)}
                             >
                               {row.cells.map((cell, cellIndex) => {
                                 const { key: _cellKey, ...cellProps } = cell.getCellProps()

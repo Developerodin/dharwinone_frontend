@@ -3,6 +3,7 @@ import {
   DEFAULT_EVALUATION_PAGE_SIZE,
   areEvaluationListQueryStringsEquivalent,
   buildEvaluationListQueryString,
+  isEvaluationSortValidForView,
   parseEvaluationListState,
   parseEvaluationPage,
   parseEvaluationPageSize,
@@ -37,7 +38,7 @@ describe('parseEvaluationPageSize', () => {
 describe('parseEvaluationListState', () => {
   it('reads filters and pagination from search params', () => {
     const params = new URLSearchParams(
-      'page=3&pageSize=25&status=Completed&q=Prakhar&course=c1&atRisk=true&view=course&sortBy=studentName&sortOrder=desc'
+      'page=3&pageSize=25&status=Completed&q=Prakhar&course=c1&atRisk=true&view=course&sortBy=students&sortOrder=desc'
     )
     expect(parseEvaluationListState(params)).toEqual({
       page: 3,
@@ -47,7 +48,7 @@ describe('parseEvaluationListState', () => {
       course: 'c1',
       atRisk: true,
       view: 'course',
-      sortBy: 'studentName',
+      sortBy: 'students',
       sortOrder: 'desc',
     })
   })
@@ -107,5 +108,22 @@ describe('areEvaluationListQueryStringsEquivalent', () => {
     expect(
       areEvaluationListQueryStringsEquivalent('page=2&q=test', 'q=test&page=2')
     ).toBe(true)
+  })
+})
+
+describe('isEvaluationSortValidForView', () => {
+  it('accepts sort ids for the active view only', () => {
+    expect(isEvaluationSortValidForView('status', 'student')).toBe(true)
+    expect(isEvaluationSortValidForView('status', 'course')).toBe(false)
+    expect(isEvaluationSortValidForView('atRisk', 'course')).toBe(true)
+    expect(isEvaluationSortValidForView('atRisk', 'student')).toBe(false)
+    expect(isEvaluationSortValidForView('', 'student')).toBe(true)
+  })
+})
+
+describe('parseEvaluationListState sort validation', () => {
+  it('drops invalid sortBy for the selected view', () => {
+    const params = new URLSearchParams('view=course&sortBy=status&sortOrder=desc')
+    expect(parseEvaluationListState(params).sortBy).toBe('')
   })
 })
