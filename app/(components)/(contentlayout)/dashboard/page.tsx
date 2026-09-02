@@ -57,7 +57,6 @@ import TodayEventsCard, {
   type EventSourceError,
 } from "./_components/TodayEventsCard";
 import {
-  TODAY_EVENTS_DISPLAY_CAP,
   TODAY_EVENTS_FETCH_LIMIT,
   filterToViewerToday,
   mergeEvents,
@@ -111,33 +110,11 @@ function formatDate(s: string | undefined): string {
   });
 }
 
-function formatTime(s: string | undefined | null): string {
-  if (!s) return "—";
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
 /* isToday() lived here. It ORed a raw UTC prefix compare (dateStr.slice(0,10)) against
    a local date key, so a task due 20:00Z counted as "today" for an IST viewer whose
    local clock already said tomorrow. Day bucketing now goes through localDateKey /
    wallClockDateKey, and the task window is decided server-side.
    isFuture() went with the unrendered meetings list it filtered. */
-
-function relativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
 
 function stripHtml(html: string): string {
   if (typeof document === "undefined") {

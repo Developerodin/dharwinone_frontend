@@ -1,7 +1,7 @@
 "use client";
 
 import Seo from "@/shared/layout-components/seo/seo";
-import React, { Fragment, useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { Fragment, useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { useTable, useSortBy, usePagination } from "react-table";
 import {
   searchExternalJobs,
@@ -83,7 +83,7 @@ export default function ExternalJobsPage() {
   const [activeTab, setActiveTab] = useState<"search" | "saved" | "contacts">("search");
   const [searchResults, setSearchResults] = useState<ExternalJob[]>([]);
   const [savedJobs, setSavedJobs] = useState<SavedExternalJob[]>([]);
-  const [savedPage, setSavedPage] = useState(1);
+  const [, setSavedPage] = useState(1);
   const [savedTotal, setSavedTotal] = useState(0);
   const [savedContacts, setSavedContacts] = useState<SavedHrContact[]>([]);
   const [savedContactsLoading, setSavedContactsLoading] = useState(false);

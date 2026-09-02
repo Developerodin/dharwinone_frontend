@@ -3,7 +3,7 @@ import Seo from '@/shared/layout-components/seo/seo'
 import React, { Fragment, useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { useSearchParams } from 'next/navigation'
-import { useTable, useSortBy, useGlobalFilter, usePagination } from 'react-table'
+import { useTable, useSortBy, usePagination } from 'react-table'
 import Link from 'next/link'
 import JobsFilterPanel from './_components/JobsFilterPanel'
 import JobPreviewPanel from './_components/JobPreviewPanel'
@@ -23,9 +23,7 @@ import {
   listJobBookmarks,
   addJobBookmark,
   deleteJobBookmark,
-  getJobStats,
   type JobBookmarkNote,
-  type JobStatsResponse,
   type JobsListParams,
 } from '@/shared/lib/api/jobs'
 import { listCandidates } from '@/shared/lib/api/candidates'
@@ -78,18 +76,6 @@ function nextCompanySortToggle(current: string): 'company-asc' | 'company-desc' 
   if (current === 'company-asc') return 'company-desc'
   if (current === 'company-desc') return 'clear-sort'
   return 'company-asc'
-}
-
-function nextLocationSortToggle(current: string): 'location-asc' | 'location-desc' | 'clear-sort' {
-  if (current === 'location-asc') return 'location-desc'
-  if (current === 'location-desc') return 'clear-sort'
-  return 'location-asc'
-}
-
-function nextExperienceSortToggle(current: string): 'experience-asc' | 'experience-desc' | 'clear-sort' {
-  if (current === 'experience-asc') return 'experience-desc'
-  if (current === 'experience-desc') return 'clear-sort'
-  return 'experience-asc'
 }
 
 function formatPostingDateMeta(raw?: string | null): { formatted: string; relative: string } {
@@ -870,7 +856,7 @@ const Jobs = () => {
             <div className="hs-tooltip ti-main-tooltip">
               <button
                 type="button"
-                onClick={() => handleBookmark(row.original.id, row.original)}
+                onClick={() => handleBookmark(row.original.id)}
                 className={`hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ${bookmarkedJobs.has(row.original.id) ? 'ti-btn-warning' : 'ti-btn-light'}`}
               >
                 <i className={bookmarkedJobs.has(row.original.id) ? 'ri-bookmark-fill' : 'ri-bookmark-line'}></i>
@@ -1525,7 +1511,6 @@ const Jobs = () => {
                   page.map((row: any, i: number) => {
                     prepareRow(row)
                     const job = row.original
-                    const urgencyBadge = getUrgencyBadge(job.urgency || 'medium')
                     const openPreview = () => {
                       setPreviewJob(job)
                       setTimeout(() => {
@@ -1620,7 +1605,7 @@ const Jobs = () => {
                             )}
                             <button
                               type="button"
-                              onClick={() => handleBookmark(job.id, job)}
+                              onClick={() => handleBookmark(job.id)}
                               className={`ti-btn ti-btn-icon ti-btn-sm ${bookmarkedJobs.has(job.id) ? 'ti-btn-warning' : 'ti-btn-light'}`}
                               aria-label={bookmarkedJobs.has(job.id) ? 'View notes' : 'Bookmark job'}
                             >

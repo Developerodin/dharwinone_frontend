@@ -11,13 +11,13 @@ describe("sweetalert2 dark-mode styles", () => {
   const source = readFileSync(PAGES_STYLES, "utf8");
 
   it("themes modal popups for dark mode", () => {
-    expect(source).toMatch(/\.swal2-container \.swal2-popup\s*\{[^}]*dark:bg-bodybg/s);
-    expect(source).toMatch(/\.swal2-container \.swal2-title\s*\{[^}]*dark:text-white/s);
+    expect(source).toMatch(/\.swal2-container \.swal2-popup\s*\{[^}]*dark:bg-bodybg/);
+    expect(source).toMatch(/\.swal2-container \.swal2-title\s*\{[^}]*dark:text-white/);
   });
 
   it("themes toast popups separately from modal dialogs", () => {
-    expect(source).toMatch(/\.swal2-container \.swal2-popup\.swal2-toast\s*\{[^}]*dark:bg-bodybg2/s);
-    expect(source).toMatch(/\.swal2-container \.swal2-popup\.swal2-toast\s*\{[^}]*dark:text-white/s);
+    expect(source).toMatch(/\.swal2-container \.swal2-popup\.swal2-toast\s*\{[^}]*dark:bg-bodybg2/);
+    expect(source).toMatch(/\.swal2-container \.swal2-popup\.swal2-toast\s*\{[^}]*dark:text-white/);
   });
 
   /* `input: "select"` dialogs (Organization > Structure "Reparent") had no dropdown arrow

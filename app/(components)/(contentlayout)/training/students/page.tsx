@@ -7,7 +7,6 @@ import Swal from 'sweetalert2'
 import { AxiosError } from 'axios'
 import * as studentsApi from '@/shared/lib/api/students'
 import type {
-  Student,
   StudentNote,
 } from '@/shared/lib/api/students'
 import StudentViewModal from './_components/StudentViewModal'
@@ -1375,9 +1374,9 @@ const Students = () => {
               <div className="table-responsive flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
                 <table {...getTableProps()} className="table whitespace-nowrap min-w-full table-striped table-hover table-bordered border-gray-300 dark:border-gray-600">
                   <thead>
-                    {headerGroups.map((headerGroup: any, i) => (
+                    {headerGroups.map((headerGroup: any, i: number) => (
                       <tr {...headerGroup.getHeaderGroupProps()} className="bg-primary/10 dark:bg-primary/20 border-b border-gray-300 dark:border-gray-600" key={`header-group-${i}`}>
-                        {headerGroup.headers.map((column: any, j) => {
+                        {headerGroup.headers.map((column: any, j: number) => {
                           const sortColumn = studentHeaderSortColumn(column.id)
                           return (
                           <th
