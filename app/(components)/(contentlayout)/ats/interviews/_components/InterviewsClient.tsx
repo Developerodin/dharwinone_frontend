@@ -1933,10 +1933,10 @@ export default function InterviewsClient() {
                   id="sort-toggle-button"
                   onClick={() => handleSortChange(selectedSort === 'date-asc' ? 'date-desc' : 'date-asc')}
                   className="ti-btn ti-btn-light !py-1.5 !px-2.5 !text-[0.75rem] inline-flex items-center"
-                  aria-label={selectedSort === 'date-desc' ? 'Sorted latest first — click to sort soonest first' : 'Sorted soonest first — click to sort latest first'}
+                  aria-label={selectedSort === 'date-desc' ? 'Sorted Latest First — click to sort Oldest First' : 'Sorted Oldest First — click to sort Latest First'}
                 >
                   <i className={`${selectedSort === 'date-desc' ? 'ri-sort-desc' : 'ri-sort-asc'} font-semibold align-middle sm:me-1`}></i>
-                  <span className="hidden sm:inline">{selectedSort === 'date-desc' ? 'Latest first' : 'Soonest first'}</span>
+                  <span className="hidden sm:inline">{selectedSort === 'date-desc' ? 'Latest First' : 'Oldest First'}</span>
                 </button>
                 <div className="flex items-center rounded-lg border border-defaultborder dark:border-defaultborder/20 p-0.5 bg-white dark:bg-black/10">
                   <button
