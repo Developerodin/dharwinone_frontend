@@ -11,6 +11,7 @@ import JobShareModal from './_components/JobShareModal'
 import { useFeaturePermissions } from '@/shared/hooks/use-feature-permissions'
 import { useAuth } from '@/shared/contexts/auth-context'
 import { hasSalesAgentRole } from '@/shared/lib/roles'
+import { buildPageWindow } from '@/shared/lib/pagination-items'
 import {
   listJobs,
   deleteJob,
@@ -133,6 +134,9 @@ const Jobs = () => {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
 
   const [bookmarkedJobs, setBookmarkedJobs] = useState<Set<string>>(new Set())
+  // Draft text of the "Go to page" field. Deliberately separate from react-table's
+  // pageIndex so a half-typed number never repaginates — the jump happens on submit.
+  const [gotoPageInput, setGotoPageInput] = useState('')
   const [previewJob, setPreviewJob] = useState<any>(null)
   const [companyModal, setCompanyModal] = useState<any>(null)
   const [bookmarkNotesJobId, setBookmarkNotesJobId] = useState<string | null>(null)
@@ -1171,7 +1175,6 @@ const Jobs = () => {
     previousPage,
     canNextPage,
     canPreviousPage,
-    pageOptions,
     gotoPage,
     pageCount,
     setPageSize,
@@ -1306,7 +1309,7 @@ const Jobs = () => {
       <div className="jobs-page-shell mt-5 grid grid-cols-12 gap-6 sm:mt-6">
         <div className="xl:col-span-12 col-span-12 h-full min-h-0 flex flex-col">
           <div className="box custom-box h-full min-h-0 flex flex-col overflow-hidden">
-            <div className="box-header shrink-0 flex items-center justify-between flex-wrap gap-3 sm:gap-4 !p-3 sm:!p-4">
+            <div className="box-header shrink-0 flex items-center justify-between flex-wrap gap-3 sm:gap-4 !px-5 !py-3 sm:!py-4 bg-white dark:bg-bodybg">
               <div className="box-title">
                 Jobs
                 <span className="badge bg-light text-default rounded-full ms-1 text-[0.75rem] align-middle">
@@ -1341,6 +1344,22 @@ const Jobs = () => {
                     </span>
                   )}
                 </button>
+                {/* Rows per page. Moved up from the box-footer: it shapes the view, like
+                    Search / Filter / Sort beside it, rather than reporting on it the way
+                    the footer's "Showing x to y" and pager do. Sized to match the other
+                    toolbar controls (h-8, 0.75rem). */}
+                <select
+                  className="form-control select-show-page-size !w-auto !h-8 !py-1 !text-[0.75rem] !rounded-lg me-2"
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  aria-label="Jobs per page"
+                >
+                  {[10, 25, 50, 100].map((size) => (
+                    <option key={size} value={size}>
+                      Show {size}
+                    </option>
+                  ))}
+                </select>
                 <div className="hs-dropdown ti-dropdown me-2">
                   <button
                     type="button"
@@ -1634,16 +1653,16 @@ const Jobs = () => {
                 )}
               </div>
 
-              <div className="jobs-table-scroll hidden md:block table-responsive flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
+              <div className="jobs-table-scroll hidden md:block table-responsive flex-1 overflow-y-auto bg-white dark:bg-bodybg" style={{ minHeight: 0 }}>
                 <table
                   {...getTableProps()}
-                  className="table w-full max-w-full whitespace-nowrap table-striped table-hover table-bordered border-gray-300 dark:border-gray-600"
+                  className="table w-full max-w-full whitespace-nowrap table-striped table-hover table-bordered border-separate border-spacing-0 border-gray-300 dark:border-gray-600"
                 >
-                  <thead>
+                  <thead className="bg-gray-50 dark:bg-bodybg">
                     {headerGroups.map((headerGroup: any, i: number) => (
                       <tr
                         {...headerGroup.getHeaderGroupProps()}
-                        className="bg-primary/10 dark:bg-primary/20 border-b border-gray-300 dark:border-gray-600"
+                        className="border-b border-gray-300 dark:border-gray-600"
                         key={`header-group-${i}`}
                       >
                         {headerGroup.headers.map((column: any, i: number) => {
@@ -1678,7 +1697,7 @@ const Jobs = () => {
                             <th
                               {...headerProps}
                               scope="col"
-                              className={`text-start sticky top-0 z-10 bg-gray-50 dark:bg-black/20${hidePostingCol ? ' hidden w-0 max-w-0 !p-0 !border-0 overflow-hidden' : ''}${
+                              className={`text-start sticky top-0 z-10 bg-gray-50 dark:bg-bodybg${hidePostingCol ? ' hidden w-0 max-w-0 !p-0 !border-0 overflow-hidden' : ''}${
                                 clickableHeader ? ' cursor-pointer select-none' : ''
                               } ${COLUMN_VISIBILITY[column.id] ?? ''}`}
                               key={column.id || `col-${i}`}
@@ -1732,7 +1751,6 @@ const Jobs = () => {
                                 ...headerProps.style,
                                 position: 'sticky',
                                 top: 0,
-                                zIndex: 10,
                               }}
                             >
                               {isCheckboxCol ? (
@@ -1783,25 +1801,18 @@ const Jobs = () => {
                 </table>
               </div>
             </div>
-            <div className="box-footer shrink-0 !border-t-0">
+            <div className="box-footer shrink-0 !border-t-0 bg-white dark:bg-bodybg">
+              {/* "Show N" used to lead this row; it now sits in the box-header toolbar
+                  with the other view controls. What is left here reports on the current
+                  view: the range, the pager, and the page jump. */}
               <div className="flex items-center flex-wrap gap-4">
-                <select
-                  className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem]"
-                  value={pageSize}
-                  onChange={(e) => setPageSize(Number(e.target.value))}
-                  aria-label="Jobs per page"
-                >
-                  {[10, 25, 50, 100].map((size) => (
-                    <option key={size} value={size}>
-                      Show {size}
-                    </option>
-                  ))}
-                </select>
                 <div>
                   Showing {pageIndex * pageSize + 1} to {Math.min((pageIndex + 1) * pageSize, data.length)} of {data.length} entries{' '}
                   <i className="bi bi-arrow-right ms-2 font-semibold"></i>
                 </div>
-                <div className="ms-auto">
+                {/* Pagination + "Go to page" travel together: the strip is capped at five
+                    numbers, so the input is the only way to reach a page outside it. */}
+                <div className="ms-auto flex flex-wrap items-center gap-x-4 gap-y-2">
                   <nav aria-label="Page navigation" className="pagination-style-4">
                     <ul className="ti-pagination mb-0">
                       <li className={`page-item ${!canPreviousPage ? 'disabled' : ''}`}>
@@ -1813,83 +1824,29 @@ const Jobs = () => {
                           Prev
                         </button>
                       </li>
-                      {pageOptions.length <= 7 ? (
-                        // Show all pages if 7 or fewer
-                        pageOptions.map((page: number) => (
-                          <li
-                            key={page}
-                            className={`page-item ${pageIndex === page ? 'active' : ''}`}
+                      {/* Was: a first-page anchor, an ellipsis, a five-wide window, another
+                          ellipsis and a last-page anchor — up to seven numbers on screen
+                          (here: 1 2 3 4 5 … 12), which is what made this hard to scan.
+                          buildPageWindow returns a clamped, contiguous run of at most five,
+                          so the strip is a fixed width at every page and slides by one as
+                          you move. It speaks 1-based page numbers; react-table's gotoPage
+                          and pageIndex are 0-based, so the conversion happens here and only
+                          here. */}
+                      {buildPageWindow(pageIndex + 1, pageCount, 5).map((page) => (
+                        <li
+                          key={page}
+                          className={`page-item ${pageIndex === page - 1 ? 'active' : ''}`}
+                        >
+                          <button
+                            className="page-link px-3 py-[0.375rem]"
+                            onClick={() => gotoPage(page - 1)}
+                            aria-current={pageIndex === page - 1 ? 'page' : undefined}
+                            aria-label={`Go to page ${page}`}
                           >
-                            <button
-                              className="page-link px-3 py-[0.375rem]"
-                              onClick={() => gotoPage(page)}
-                            >
-                              {page + 1}
-                            </button>
-                          </li>
-                        ))
-                      ) : (
-                        // Show smart pagination for more pages
-                        <>
-                          {pageIndex > 2 && (
-                            <>
-                              <li className="page-item">
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => gotoPage(0)}
-                                >
-                                  1
-                                </button>
-                              </li>
-                              {pageIndex > 3 && (
-                                <li className="page-item disabled">
-                                  <span className="page-link px-3 py-[0.375rem]">...</span>
-                                </li>
-                              )}
-                            </>
-                          )}
-                          {Array.from({ length: Math.min(5, pageCount) }, (_, i) => {
-                            let pageNum
-                            if (pageIndex < 3) {
-                              pageNum = i
-                            } else if (pageIndex > pageCount - 4) {
-                              pageNum = pageCount - 5 + i
-                            } else {
-                              pageNum = pageIndex - 2 + i
-                            }
-                            return (
-                              <li
-                                key={pageNum}
-                                className={`page-item ${pageIndex === pageNum ? 'active' : ''}`}
-                              >
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => gotoPage(pageNum)}
-                                >
-                                  {pageNum + 1}
-                                </button>
-                              </li>
-                            )
-                          })}
-                          {pageIndex < pageCount - 3 && (
-                            <>
-                              {pageIndex < pageCount - 4 && (
-                                <li className="page-item disabled">
-                                  <span className="page-link px-3 py-[0.375rem]">...</span>
-                                </li>
-                              )}
-                              <li className="page-item">
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => gotoPage(pageCount - 1)}
-                                >
-                                  {pageCount}
-                                </button>
-                              </li>
-                            </>
-                          )}
-                        </>
-                      )}
+                            {page}
+                          </button>
+                        </li>
+                      ))}
                       <li className={`page-item ${!canNextPage ? 'disabled' : ''}`}>
                         <button
                           className="page-link px-3 py-[0.375rem] text-primary"
@@ -1901,6 +1858,55 @@ const Jobs = () => {
                       </li>
                     </ul>
                   </nav>
+
+                  {/* A real <form>, so Enter submits with no keydown handler of our own.
+                      Hidden at one page, where there is nowhere to jump to. */}
+                  {pageCount > 1 && (
+                    <form
+                      className="flex items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        const raw = gotoPageInput.trim()
+                        if (!raw) return
+                        const parsed = Number(raw)
+                        if (!Number.isFinite(parsed)) return
+                        // Clamp rather than reject: typing 99 on a 12-page list means "the
+                        // end", and an error message for that would be pedantic. min/max
+                        // below let the browser hint the same bounds.
+                        const target = Math.min(Math.max(Math.trunc(parsed), 1), pageCount)
+                        gotoPage(target - 1)
+                        setGotoPageInput('')
+                      }}
+                    >
+                      <label
+                        htmlFor="jobs-goto-page"
+                        className="whitespace-nowrap text-[0.8125rem] text-[#8c9097] dark:text-white/60"
+                      >
+                        Go to page
+                      </label>
+                      <input
+                        id="jobs-goto-page"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={pageCount}
+                        value={gotoPageInput}
+                        onChange={(e) => setGotoPageInput(e.currentTarget.value)}
+                        placeholder={String(pageIndex + 1)}
+                        aria-describedby="jobs-goto-page-hint"
+                        className="ti-form-control form-control-sm !w-[4.5rem] !py-[0.375rem]"
+                      />
+                      <span id="jobs-goto-page-hint" className="sr-only">
+                        Enter a page number between 1 and {pageCount}
+                      </span>
+                      <button
+                        type="submit"
+                        className="ti-btn ti-btn-primary ti-btn-sm !mb-0 !py-[0.375rem]"
+                      >
+                        Go
+                      </button>
+                    </form>
+                  )}
                 </div>
               </div>
             </div>

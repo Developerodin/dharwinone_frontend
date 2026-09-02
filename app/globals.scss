@@ -529,6 +529,17 @@ html.swal2-shown {
 }
 
 /*
+ * Sticky `th` + `border-collapse: collapse` (Tailwind preflight / .table) makes
+ * thead share a paint edge with the first tbody row, so Job Title cell content
+ * (date + map-pin location) draws into the header. Separate borders keep thead
+ * in flow; rows clip under the opaque header inside this overflow:auto port.
+ */
+.jobs-table-scroll table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/*
  * Meetings list: fill viewport below main header (same offset as recordings page)
  * so box header stays at top, pagination footer at bottom, table body scrolls.
  */
