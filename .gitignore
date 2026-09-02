@@ -58,6 +58,7 @@ next-env.d.ts
 .codex/
 CLAUDE.md
 .superpowers/
+.impeccable/
 
 # Editor-local
 .cursor/
