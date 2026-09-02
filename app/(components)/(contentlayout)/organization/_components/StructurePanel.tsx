@@ -12,7 +12,6 @@ import {
   listOrgUnits,
   listOrgUnitsPaged,
   reactivateOrgUnit,
-  reparentOrgUnit,
   updateOrgUnit,
   type OrgCoverageSummary,
   type OrgUnitNode,
@@ -23,6 +22,7 @@ import {
 const OrgUnitModal = dynamic(() => import("./OrgUnitModal"), { ssr: false });
 const AssignHeadModal = dynamic(() => import("./AssignHeadModal"), { ssr: false });
 const AssignToDepartmentModal = dynamic(() => import("./AssignToDepartmentModal"), { ssr: false });
+const ReparentUnitModal = dynamic(() => import("./ReparentUnitModal"), { ssr: false });
 import StructureHistoryPanel from "./StructureHistoryPanel";
 import {
   OrgEmptyState,
@@ -50,28 +50,62 @@ type ChecklistItem = {
   cta?: ChecklistCta;
 };
 
-function ChecklistCtaButton({ cta, variant }: { cta: ChecklistCta; variant: "primary" | "link" }) {
-  const cls =
-    variant === "primary"
-      ? "ti-btn ti-btn-primary-full !py-1.5 !px-3 !text-[0.75rem] inline-flex items-center gap-1 !mb-0 shrink-0"
-      : "inline-flex items-center gap-1 text-[0.75rem] font-medium text-primary hover:underline shrink-0";
-  const inner = (
+const CHECKLIST_FOCUS =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40";
+const CHECKLIST_ROW_CLASS = "flex min-h-11 min-w-0 w-full items-center gap-2 text-[0.8125rem]";
+
+function ChecklistCtaButton({ cta, variant }: { cta: ChecklistCta; variant: "primary" | "icon" }) {
+  const isIcon = variant === "icon";
+  const cls = isIcon
+    ? `inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-md text-primary shrink-0 ${CHECKLIST_FOCUS}`
+    : `ti-btn ti-btn-primary-full !py-1.5 !px-3 !text-[0.75rem] inline-flex cursor-pointer items-center gap-1 whitespace-nowrap !mb-0 shrink-0 ${CHECKLIST_FOCUS}`;
+  const inner = isIcon ? (
+    <i className="ri-arrow-right-line leading-none" aria-hidden />
+  ) : (
     <>
       {cta.label}
-      <i className="ri-arrow-right-line" aria-hidden />
+      <i className="ri-arrow-right-line leading-none" aria-hidden />
     </>
   );
   if (cta.href) {
     return (
-      <Link href={cta.href} className={cls}>
+      <Link href={cta.href} className={cls} aria-label={isIcon ? cta.label : undefined}>
         {inner}
       </Link>
     );
   }
   return (
-    <button type="button" onClick={cta.onClick} className={cls}>
+    <button type="button" onClick={cta.onClick} className={cls} aria-label={isIcon ? cta.label : undefined}>
       {inner}
     </button>
+  );
+}
+
+function ChecklistRowBody({ item, title }: { item: ChecklistItem; title: string }) {
+  return (
+    <>
+      <i
+        className={
+          item.done
+            ? "ri-checkbox-circle-fill leading-none self-center text-success shrink-0"
+            : "ri-checkbox-blank-circle-line leading-none self-center text-defaulttextcolor/65 shrink-0"
+        }
+        aria-hidden
+      />
+      <span className="sr-only">{item.done ? "Done:" : "To do:"}</span>
+      {!item.done && item.cta ? <ChecklistCtaButton cta={item.cta} variant="icon" /> : null}
+      <span
+        className={`min-w-0 truncate ${item.done ? "text-defaulttextcolor" : "text-defaulttextcolor/70"}`}
+        title={title}
+      >
+        {item.label}
+      </span>
+      {!item.done && item.gap ? (
+        <span className="self-center shrink-0 rounded-full bg-warning/15 px-1.5 py-0.5 text-[0.6875rem] font-semibold tabular-nums text-warning dark:bg-warning/25">
+          {item.gap}
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -109,7 +143,7 @@ function SetupChecklist({ items }: { items: ChecklistItem[] }) {
         <button
           type="button"
           onClick={reveal}
-          className="text-[0.75rem] font-medium text-defaulttextcolor/60 hover:text-defaulttextcolor"
+          className={`inline-flex min-h-11 cursor-pointer items-center text-[0.75rem] font-medium text-defaulttextcolor/60 hover:text-defaulttextcolor ${CHECKLIST_FOCUS}`}
         >
           View checklist
         </button>
@@ -141,41 +175,23 @@ function SetupChecklist({ items }: { items: ChecklistItem[] }) {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/25 bg-primary/[0.05] px-3 py-2">
           <span className="text-[0.8125rem] text-defaulttextcolor/80">
             <span className="font-semibold text-defaulttextcolor">Next:</span> {nextItem.label}
-            {nextItem.gap ? <span className="text-defaulttextcolor/60"> — {nextItem.gap} remaining</span> : null}
+            {nextItem.gap ? <span className="text-defaulttextcolor/60"> · {nextItem.gap} remaining</span> : null}
           </span>
           {nextItem.cta ? <ChecklistCtaButton cta={nextItem.cta} variant="primary" /> : null}
         </div>
       ) : null}
 
-      <ul className="mb-0 grid gap-2 sm:grid-cols-2">
-        {items.map((item) => (
-          <li
-            key={item.key}
-            className="flex items-center justify-between gap-2 text-[0.8125rem]"
-            title={item.why}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <i
-                className={
-                  item.done
-                    ? "ri-checkbox-circle-fill text-success shrink-0"
-                    : "ri-checkbox-blank-circle-line text-defaulttextcolor/45 shrink-0"
-                }
-                aria-hidden
-              />
-              <span className="sr-only">{item.done ? "Done:" : "To do:"}</span>
-              <span className={`truncate ${item.done ? "text-defaulttextcolor" : "text-defaulttextcolor/70"}`}>
-                {item.label}
-              </span>
-              {!item.done && item.gap ? (
-                <span className="shrink-0 rounded-full bg-warning/15 px-1.5 py-0.5 text-[0.6875rem] font-semibold text-warning">
-                  {item.gap}
-                </span>
-              ) : null}
-            </span>
-            {!item.done && item.cta ? <ChecklistCtaButton cta={item.cta} variant="link" /> : null}
-          </li>
-        ))}
+      <ul className="mb-0 grid items-center gap-2 sm:grid-cols-2">
+        {items.map((item) => {
+          const whyTitle = `${item.label}. ${item.why}`;
+          return (
+            <li key={item.key} className="flex min-h-11 min-w-0 items-center">
+              <div className={CHECKLIST_ROW_CLASS}>
+                <ChecklistRowBody item={item} title={whyTitle} />
+              </div>
+            </li>
+          );
+        })}
       </ul>
 
       {allDone ? (
@@ -183,7 +199,7 @@ function SetupChecklist({ items }: { items: ChecklistItem[] }) {
           <button
             type="button"
             onClick={dismiss}
-            className="text-[0.75rem] font-medium text-defaulttextcolor/55 hover:text-defaulttextcolor"
+            className={`inline-flex min-h-11 cursor-pointer items-center text-[0.75rem] font-medium text-defaulttextcolor/55 hover:text-defaulttextcolor ${CHECKLIST_FOCUS}`}
           >
             Dismiss checklist
           </button>
@@ -215,6 +231,7 @@ export default function StructurePanel() {
   const [coverage, setCoverage] = useState<OrgCoverageSummary | null>(null);
   const [unassigned, setUnassigned] = useState<{ id: string; fullName: string }[]>([]);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [reparentUnit, setReparentUnit] = useState<OrgUnitNode | null>(null);
 
   // Debounce the search box so we don't fire a request per keystroke.
   useEffect(() => {
@@ -316,30 +333,6 @@ export default function StructurePanel() {
     return unitsById.get(unit.parentId)?.name ?? "— (inactive)";
   };
 
-  // All descendant ids of a unit, so reparent can't offer an illegal (cycle) target.
-  const descendantIds = useCallback(
-    (unitId: string) => {
-      const childrenOf = new Map<string, OrgUnitNode[]>();
-      for (const u of allUnits) {
-        const key = u.parentId ?? "__root__";
-        if (!childrenOf.has(key)) childrenOf.set(key, []);
-        childrenOf.get(key)!.push(u);
-      }
-      const out = new Set<string>();
-      const walk = (id: string) => {
-        for (const child of childrenOf.get(id) ?? []) {
-          if (!out.has(child.id)) {
-            out.add(child.id);
-            walk(child.id);
-          }
-        }
-      };
-      walk(unitId);
-      return out;
-    },
-    [allUnits]
-  );
-
   const openCreate = () => {
     setEditing(null);
     setInitialType(undefined);
@@ -364,40 +357,8 @@ export default function StructurePanel() {
     setUnitModalOpen(true);
   };
 
-  const handleReparent = async (row: OrgUnitNode) => {
-    const blocked = descendantIds(row.id);
-    const { value: parentId } = await Swal.fire({
-      title: `Reparent "${row.name}"`,
-      input: "select",
-      inputOptions: Object.fromEntries([
-        ["", "None (root)"],
-        ...allUnits
-          .filter((u) => u.id !== row.id && !blocked.has(u.id))
-          .map((u) => [u.id, `${u.name} (${u.type})`]),
-      ]),
-      inputValue: row.parentId ?? "",
-      showCancelButton: true,
-      confirmButtonText: "Move unit",
-      cancelButtonText: "Cancel",
-    });
-    if (parentId === undefined) return;
-    try {
-      await reparentOrgUnit(row.id, parentId || null);
-      await refreshAfterMutation();
-      await Swal.fire({
-        icon: "success",
-        title: "Unit moved",
-        text: `"${row.name}" was reparented successfully.`,
-        toast: true,
-        position: "top-end",
-        timer: 2500,
-        showConfirmButton: false,
-      });
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Reparent failed";
-      await Swal.fire({ icon: "error", title: "Cannot reparent", text: msg });
-    }
+  const handleReparent = (row: OrgUnitNode) => {
+    setReparentUnit(row);
   };
 
   const handleDeactivate = async (row: OrgUnitNode) => {
@@ -889,6 +850,15 @@ export default function StructurePanel() {
           employees={unassigned}
           onClose={() => setAssignOpen(false)}
           onAssigned={refreshAfterMutation}
+        />
+      ) : null}
+      {reparentUnit ? (
+        <ReparentUnitModal
+          open
+          unit={reparentUnit}
+          units={allUnits}
+          onClose={() => setReparentUnit(null)}
+          onSaved={refreshAfterMutation}
         />
       ) : null}
         </>
