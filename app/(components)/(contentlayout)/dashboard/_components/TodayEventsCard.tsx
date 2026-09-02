@@ -121,7 +121,8 @@ function EventRow({
       {/* basis-40 lets the row wrap to two lines on a narrow phone instead of clipping. */}
       <div className="min-w-0 flex-1 basis-40">
         <div className="flex items-center gap-2">
-          <span className={`badge shrink-0 text-[0.6rem] ${meta.badge}`}>{meta.label}</span>
+          {/* 9.6px -> 12px. "Interview" vs "Meeting" is the row's type label, not trim. */}
+          <span className={`badge shrink-0 text-[0.75rem] ${meta.badge}`}>{meta.label}</span>
           <p className="mb-0 truncate text-[0.8125rem] font-semibold" title={event.title}>
             {event.title}
           </p>
@@ -177,7 +178,7 @@ export default function TodayEventsCard({
     <div className="box h-full flex flex-col overflow-hidden">
       <div className="box-header justify-between flex-shrink-0">
         <div>
-          <div className="box-title mb-0">Highlight of Today</div>
+          <h2 className="box-title !mb-0">Highlight of Today</h2>
           <p className="mb-0 text-[0.7rem] text-[#8c9097] dark:text-white/50">
             Today&apos;s Interviews / Meetings
           </p>

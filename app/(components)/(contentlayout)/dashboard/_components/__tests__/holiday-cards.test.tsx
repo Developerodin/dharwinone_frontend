@@ -53,32 +53,40 @@ describe("UpcomingHolidaysCard — scope decides the heading", () => {
 });
 
 /*
- * The tablet/desktop split is a CSS breakpoint (`md` = 768px), which jsdom cannot
- * evaluate — both renderings are in the DOM here. These assert that the right markup
- * carries the right breakpoint classes, so neither rendering can leak into the other.
- * Which one is actually visible at 375 / 768 / 1440px is a browser check.
+ * The company card used to ship TWO renderings — a phone list and a `hidden md:block`
+ * one-row pane — and these tests asserted neither leaked into the other. It now ships
+ * ONE list that sizes itself to whatever height is left in the cell, so the number of
+ * holidays on screen follows the available space instead of a breakpoint: several in a
+ * tall cell, one when On Leave Today grows or the viewport is short.
+ *
+ * jsdom has no layout, so the actual row count is a browser check. What is asserted here
+ * is the mechanism — a single list, holding every holiday, sized by flex rather than by
+ * a fixed cap — and that the personal card the employee dashboard renders is untouched.
  */
-describe("UpcomingHolidaysCard — company card previews one holiday from md up", () => {
-  const phoneList = (c: HTMLElement) => c.querySelector('ul[class*="md:hidden"]');
-  const desktopPane = (c: HTMLElement) => c.querySelector('div[class*="md:block"][class*="hidden"]');
+describe("UpcomingHolidaysCard — company card fills its cell with one list", () => {
+  const cardList = (c: HTMLElement) => c.querySelector("ul") as HTMLElement;
 
-  it("keeps the full scrolling list for phones", () => {
+  it("renders one list holding every holiday, not a per-breakpoint split", () => {
     const { container } = render(<UpcomingHolidaysCard holidays={holidays} scope="company" />);
-    const list = phoneList(container);
-    expect(list).not.toBeNull();
-    expect(list!.className).toContain("overflow-y-auto");
-    expect(list!.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelectorAll("ul")).toHaveLength(1);
+    const list = cardList(container);
+    expect(list.querySelectorAll("li")).toHaveLength(2);
+    expect(list.textContent).toContain("Independence Day");
+    expect(list.textContent).toContain("Diwali");
+    // The md:hidden / hidden md:block pair is gone; nothing is duplicated per breakpoint.
+    expect(container.querySelector('[class*="md:hidden"]')).toBeNull();
   });
 
-  it("shows only the next holiday from md up", () => {
+  it("sizes that list from the space left in the cell rather than a fixed cap", () => {
     const { container } = render(<UpcomingHolidaysCard holidays={holidays} scope="company" />);
-    const pane = desktopPane(container);
-    expect(pane).not.toBeNull();
-    expect(pane!.querySelectorAll("li")).toHaveLength(1);
-    expect(pane!.textContent).toContain("Independence Day");
-    expect(pane!.textContent).not.toContain("Diwali");
-    // No scroll container on the desktop pane — that was the bug being fixed.
-    expect(pane!.querySelector('[class*="overflow-y-auto"]')).toBeNull();
+    const list = cardList(container);
+    expect(list.className).toContain("flex-1");
+    expect(list.className).toContain("min-h-0");
+    expect(list.className).toContain("overflow-y-auto");
+    // A max-height would pin the row count regardless of how tall the cell actually is.
+    expect(list.className).not.toMatch(/max-h-/);
+    // flex-1 only resolves against a flex column — that column is the card body.
+    expect(list.parentElement!.className).toContain("flex-col");
   });
 
   it("puts View All in the header beside Manage, hidden below md", () => {
@@ -101,11 +109,14 @@ describe("UpcomingHolidaysCard — company card previews one holiday from md up"
     expect(screen.queryByRole("button", { name: /view all/i })).not.toBeInTheDocument();
   });
 
-  it("leaves the personal card as a single scrolling list at every width", () => {
-    // EmployeeDashboard was out of scope: no breakpoint split, no View All.
+  it("leaves the personal card as a single capped scrolling list at every width", () => {
+    // EmployeeDashboard is out of scope: it keeps the fixed max-height list it always
+    // had, does not stretch to a cell it does not own, and gets no View All.
     const { container } = render(<UpcomingHolidaysCard holidays={holidays} scope="personal" />);
-    expect(phoneList(container)).toBeNull();
-    expect(desktopPane(container)).toBeNull();
+    const list = cardList(container);
+    expect(container.querySelectorAll("ul")).toHaveLength(1);
+    expect(list.className).toContain("max-h-[19rem]");
+    expect(list.className).not.toContain("flex-1");
     expect(container.querySelectorAll("li")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /view all/i })).not.toBeInTheDocument();
   });
@@ -233,18 +244,28 @@ describe("OnLeaveTodayCard — always rendered, empty state included", () => {
 describe("holiday cards are theme-aware", () => {
   const rootOf = (el: HTMLElement) => el.closest(".box") as HTMLElement;
 
-  it("UpcomingHolidaysCard carries dark variants and no hardcoded background", () => {
+  /* These used to assert a `dark:` utility on the card ROOT. That held only because both
+     cards painted their own gradient wrapper — which is exactly what made them read as a
+     different product from the rest of the dashboard. The wrapper is now the shared
+     `.box` surface, whose light/dark pair lives in the SCSS, so the root legitimately
+     carries no `dark:` utility of its own. The guard these assertions exist for is
+     unchanged: no literal and no light-only background baked onto the card. */
+  it("UpcomingHolidaysCard uses the shared themed surface, no hardcoded background", () => {
     render(<UpcomingHolidaysCard holidays={holidays} scope="company" />);
     const root = rootOf(screen.getByText("Upcoming Company Holidays"));
-    expect(root.className).toContain("dark:");
+    expect(root.className).toContain("box");
     expect(root.getAttribute("style")).toBeNull();
     expect(root.className).not.toMatch(/bg-\[#/);
+    expect(root.className).not.toMatch(/\bbg-white\b/);
   });
 
-  it("OnLeaveTodayCard empty state carries dark variants", () => {
+  it("OnLeaveTodayCard empty state uses the shared themed surface and dark-aware text", () => {
     render(<OnLeaveTodayCard items={[]} />);
     const root = rootOf(screen.getByText("On Leave Today"));
-    expect(root.className).toContain("dark:");
+    expect(root.className).toContain("box");
+    expect(root.getAttribute("style")).toBeNull();
+    expect(root.className).not.toMatch(/bg-\[#/);
+    expect(root.className).not.toMatch(/\bbg-white\b/);
     expect(screen.getByText("Everyone is scheduled to be in.").className).toContain("dark:");
   });
 });

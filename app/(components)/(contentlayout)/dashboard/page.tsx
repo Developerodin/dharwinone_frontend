@@ -12,10 +12,6 @@ import {
   type StatusCount,
 } from "@/shared/lib/api/atsAnalytics";
 import {
-  listCandidates,
-  type CandidateListItem,
-} from "@/shared/lib/api/candidates";
-import {
   getTaskId,
   listTasks,
   updateTaskStatus,
@@ -82,10 +78,6 @@ import {
    and every window focus without ever being displayed. */
 import { getUnreadCount } from "@/shared/lib/api/notifications";
 import {
-  getTrainingAnalytics,
-  type TrainingAnalyticsResponse,
-} from "@/shared/lib/api/analytics";
-import {
   ATTENDANCE_PERMISSION_PREFIX,
   hasPermissionForPath,
 } from "@/shared/lib/route-permissions";
@@ -97,8 +89,8 @@ import EmployeeDashboard from "./_components/EmployeeDashboard";
 import UpcomingHolidaysCard from "./_components/UpcomingHolidaysCard";
 import OnLeaveTodayCard from "./_components/OnLeaveTodayCard";
 import { usePageCapabilities } from "@/shared/hooks/use-page-capabilities";
+import { useModalBehavior } from "@/shared/hooks/useModalBehavior";
 import type { ApexOptions } from "apexcharts";
-import * as Projectdata from "@/shared/data/dashboards/projectsdata";
 
 const ReactApexChart = dynamic(() => import("react-apexcharts"), {
   ssr: false,
@@ -288,12 +280,18 @@ const DASHBOARD_RECENT_JOBS_DISPLAY_LIMIT = 6;
 const FILL_CARD =
   "flex-1 min-h-0 [&>.box]:h-full [&>.box>.box-body]:flex-1 [&>.box>.box-body]:min-h-0 [&>.box>.box-body]:overflow-y-auto";
 
+/* `summary` is the chart's text equivalent. ApexCharts renders an SVG with no
+   accessible name, so a screen reader otherwise reaches an unlabelled graphic and the
+   numbers are unreachable. role="img" + aria-label collapses it to one readable
+   sentence carrying the same counts the bars encode. */
 function FunnelChartFill({
   options,
   series,
+  summary,
 }: {
   options: ApexOptions;
   series: ApexAxisChartSeries;
+  summary: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chartHeight, setChartHeight] = useState(272);
@@ -312,8 +310,20 @@ function FunnelChartFill({
   }, []);
 
   return (
-    <div ref={containerRef} className="relative w-full flex-1 min-h-[15rem]">
-      <div className="absolute inset-0 overflow-hidden">
+    <div
+      ref={containerRef}
+      role="img"
+      aria-label={summary}
+      className="relative w-full flex-1 min-h-[15rem]"
+    >
+      {/* No aria-hidden here: role="img" above is already a leaf role, so the SVG's
+          internals are not exposed.
+          No overflow-hidden either. ApexCharts appends its tooltip inside the chart
+          container and positions it above the hovered bar, so clipping this box cut the
+          tooltip's header off for the topmost bar. The chart is sized to this container
+          by the ResizeObserver, so there is nothing else here that needs clipping — and
+          the parent .box still clips at the card edge. */}
+      <div className="absolute inset-0">
         <ReactApexChart
           options={options}
           series={series}
@@ -380,7 +390,12 @@ function buildFunnelChart(funnel: StatusCount[]): {
         ),
       },
       grid: {
-        padding: { top: 0, right: 8, bottom: 0, left: 0 },
+        /* No `left` here on purpose. ApexCharts' default left padding (12px) is the
+           gutter the y-axis category column is measured into; forcing it to 0 drew the
+           widest label ("Screening") ~5px left of the SVG origin, and .apexcharts-svg
+           is overflow:hidden, so its first glyph was clipped off. Apex widens the
+           column on its own for longer stage names, so no yaxis width config is needed. */
+        padding: { top: 0, right: 8, bottom: 0 },
       },
       legend: { show: false },
       tooltip: {
@@ -429,6 +444,226 @@ function describeRequestError(err: unknown): string {
 const PROJECT_SUMMARY_FETCH_LIMIT = 200;
 
 /* ------------------------------------------------------------------ */
+/*  Modals                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Shared chrome for the two dashboard dialogs.
+ *
+ * Both used to be inline JSX with a bare backdrop onClick: no ESC, no focus trap, no
+ * focus restore to the trigger, and no background scroll lock, so a keyboard user who
+ * opened one could tab straight out behind it and had no way to close it. `useModalBehavior`
+ * is the hook the ATS, Organization and Upcoming-Holidays dialogs already use; it is
+ * called here rather than in the page body because the dialogs render conditionally and
+ * a hook cannot.
+ */
+function DashboardModal({
+  titleId,
+  title,
+  onClose,
+  children,
+  footer,
+}: {
+  titleId: string;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  const { containerRef, backdropProps, requestClose } = useModalBehavior({
+    isOpen: true,
+    onClose,
+  });
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      {...backdropProps}
+    >
+      <div
+        ref={containerRef}
+        className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-bodybg"
+      >
+        <div className="flex flex-shrink-0 items-start justify-between gap-2 border-b border-gray-200 p-4 dark:border-white/10">
+          {/* h2: the page h1 is the greeting, and a dialog title one level under it keeps
+              the outline flat rather than jumping to h3. */}
+          <h2
+            id={titleId}
+            className="min-w-0 flex-1 truncate self-center text-lg font-semibold text-gray-900 dark:text-white"
+            title={title}
+          >
+            {title}
+          </h2>
+          {/* Was a 14px "×" text glyph with no real hit area. */}
+          <button
+            type="button"
+            className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:text-white/70 dark:hover:bg-white/10"
+            onClick={requestClose}
+            aria-label="Close"
+          >
+            <i className="ti ti-x text-[1.125rem]" aria-hidden />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+        {footer && (
+          <div className="flex-shrink-0 border-t border-gray-200 p-4 dark:border-white/10">
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function JobDetailModal({
+  job,
+  applicantCount,
+  onClose,
+}: {
+  job: Job;
+  applicantCount: number;
+  onClose: () => void;
+}) {
+  const jobId = String(job._id ?? job.id ?? "");
+  const createdByName =
+    typeof job.createdBy === "object" && job.createdBy !== null
+      ? (job.createdBy as { name?: string }).name
+      : null;
+  return (
+    <DashboardModal
+      titleId="dashboard-job-detail-title"
+      title={job.title ?? "—"}
+      onClose={onClose}
+      footer={
+        <Link
+          href={`/ats/jobs?view=${jobId}`}
+          className="inline-flex min-h-[2.75rem] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-[0.8125rem] font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          onClick={onClose}
+        >
+          <i className="ri-external-link-line text-[1rem]" aria-hidden /> View full job
+        </Link>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        {job.organisation?.name && (
+          <div>
+            <span className="block text-xs font-medium text-[#8c9097] dark:text-white/50">Organisation</span>
+            <span className="text-gray-900 dark:text-white">{job.organisation.name}</span>
+            {job.organisation.website && (
+              /* The one genuinely external destination on this page — stays target=_blank. */
+              <a
+                href={job.organisation.website.startsWith("http") ? job.organisation.website : `https://${job.organisation.website}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block truncate text-primary hover:underline"
+              >
+                {job.organisation.website}
+              </a>
+            )}
+            {job.organisation.email && (
+              <span className="block text-[#8c9097] dark:text-white/50">{job.organisation.email}</span>
+            )}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {job.status && (
+            <span className={`badge ${(job.status ?? "").toLowerCase() === "active" ? "bg-success/10 text-success" : "bg-secondary/10 text-secondary"}`}>
+              {job.status}
+            </span>
+          )}
+          {job.jobType && <span className="badge bg-primary/10 text-primary">{job.jobType}</span>}
+          <span className="badge bg-info/10 text-info">
+            {applicantCount} applicant{applicantCount !== 1 ? "s" : ""}
+          </span>
+        </div>
+        {job.location && (
+          <div>
+            <span className="block text-xs font-medium text-[#8c9097] dark:text-white/50">Location</span>
+            <span className="text-gray-900 dark:text-white">{job.location}</span>
+          </div>
+        )}
+        {job.experienceLevel && (
+          <div>
+            <span className="block text-xs font-medium text-[#8c9097] dark:text-white/50">Experience</span>
+            <span className="text-gray-900 dark:text-white">{job.experienceLevel}</span>
+          </div>
+        )}
+        {job.jobDescription && (
+          <div>
+            <span className="block text-xs font-medium text-[#8c9097] dark:text-white/50">Description</span>
+            <p className="line-clamp-4 text-gray-900 dark:text-white">{stripHtml(job.jobDescription)}</p>
+          </div>
+        )}
+        {createdByName && (
+          <div>
+            <span className="block text-xs font-medium text-[#8c9097] dark:text-white/50">Created by</span>
+            <span className="text-gray-900 dark:text-white">{createdByName}</span>
+          </div>
+        )}
+      </div>
+    </DashboardModal>
+  );
+}
+
+function ApplicantsModal({
+  jobTitle,
+  applicants,
+  loading,
+  onClose,
+}: {
+  jobTitle: string;
+  applicants: JobApplication[] | null;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <DashboardModal
+      titleId="dashboard-applicants-title"
+      title={`Applicants – ${jobTitle}`}
+      onClose={onClose}
+    >
+      {loading ? (
+        /* Was the word "Loading…". Skeleton rows keep the panel's shape so it does not
+           read as a broken, nearly-empty dialog. */
+        <div className="space-y-3" aria-busy="true" aria-live="polite">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-16 animate-pulse rounded-lg bg-black/5 dark:bg-white/10" />
+          ))}
+        </div>
+      ) : applicants === null ? null : applicants.length === 0 ? (
+        <p className="text-sm text-[#8c9097] dark:text-white/50">No applicants yet.</p>
+      ) : (
+        <ul className="list-none space-y-3">
+          {applicants.map((app) => {
+            const c = app.candidate;
+            const name = (c?.fullName ?? c?.email ?? "—").trim() || "—";
+            const email = c?.email ?? "";
+            return (
+              <li key={app._id} className="flex items-start gap-3 rounded-lg bg-gray-50 p-3 dark:bg-white/5">
+                <span className="avatar avatar-sm avatar-rounded flex flex-shrink-0 items-center justify-center bg-primary/10 text-xs font-semibold text-primary">
+                  {name.charAt(0).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <span className="block truncate font-medium text-gray-900 dark:text-white">{name}</span>
+                  {email && (
+                    <span className="block truncate text-[0.6875rem] text-[#8c9097] dark:text-white/50">{email}</span>
+                  )}
+                  {app.status && (
+                    <span className="badge mt-1 inline-block bg-primary/10 text-[0.75rem] text-primary">{app.status}</span>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </DashboardModal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Page component                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -449,8 +684,6 @@ export default function DashboardPage() {
 
   /* ---- State ---- */
   const [atsData, setAtsData] = useState<AtsAnalyticsResponse | null>(null);
-  const [trainingData, setTrainingData] =
-    useState<TrainingAnalyticsResponse | null>(null);
   /** Recent ATS pipeline applicants (NOT employees). Derived from `/job-applications` so the widget shows
       true candidate records — applied, screening, interview, offered, hired, rejected — instead of
       onboarded staff that would appear if we pulled `/employees`. */
@@ -461,13 +694,6 @@ export default function DashboardPage() {
   const [applicantsModal, setApplicantsModal] = useState<{ jobId: string; jobTitle: string } | null>(null);
   const [applicantsList, setApplicantsList] = useState<JobApplication[] | null>(null);
   const [applicantsLoading, setApplicantsLoading] = useState(false);
-  const [statBoxModal, setStatBoxModal] = useState<
-    "activeJobs" | "candidates" | null
-  >(null);
-  const [statBoxList, setStatBoxList] = useState<
-    Job[] | CandidateListItem[] | JobApplication[] | null
-  >(null);
-  const [statBoxLoading, setStatBoxLoading] = useState(false);
   const [applicantCountByJob, setApplicantCountByJob] = useState<
     Record<string, number>
   >({});
@@ -508,9 +734,28 @@ export default function DashboardPage() {
 
   const [onLeaveToday, setOnLeaveToday] = useState<OnLeaveTodayItem[]>([]);
   const [onLeaveScope, setOnLeaveScope] = useState<OnLeaveScope>("self");
+  const [onLeaveLoading, setOnLeaveLoading] = useState(true);
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * Per-panel load failures, short reason or null.
+   *
+   * Every panel here is fed by one branch of a Promise.allSettled, so a failure is
+   * already isolated to its own panel — but a rejected branch used to land in the same
+   * empty array as a genuinely empty result, and the panel then said "No jobs yet."
+   * for an outage. Keyed per panel so one failure never blanks the others, and so the
+   * empty state can tell "nothing here" from "could not load".
+   *
+   * A panel the viewer has no permission for is NOT an error: those branches resolve
+   * with an empty result and stay null, so the honest empty state is what shows.
+   */
+  const [loadErrors, setLoadErrors] = useState<{
+    analytics: string | null;
+    jobs: string | null;
+    candidates: string | null;
+    projects: string | null;
+    tasks: string | null;
+  }>({ analytics: null, jobs: null, candidates: null, projects: null, tasks: null });
 
   /* Show punch in/out in welcome header for non-admin users who have attendance permission (candidate, student, agent, etc.) */
   const showAttendancePunch =
@@ -563,8 +808,6 @@ export default function DashboardPage() {
   /* GET /internal-meetings is auth()-only by design — internalMeetingScope returns
      own/hosted/invited rows for anyone, so employees see their Communication invites
      without holding communication.meetings. No client-side gate; the server scopes it. */
-  const hasTrainingAnalyticsAccess =
-    permissionsLoaded && hasPermissionForPath(permissions ?? [], "training.analytics:");
 
   /* ---- Data fetching ---- */
   const fetchDashboard = useCallback(async () => {
@@ -577,7 +820,6 @@ export default function DashboardPage() {
       return;
     }
     setLoading(true);
-    setError(null);
 
     const emptyApplications = {
       results: [] as JobApplication[],
@@ -589,7 +831,6 @@ export default function DashboardPage() {
 
     const [
       atsRes,
-      trainingRes,
       tasksRes,
       jobsRes,
       applicationsRes,
@@ -599,9 +840,6 @@ export default function DashboardPage() {
       studentRes,
     ] = await Promise.allSettled([
       hasAtsJobsAccess ? getAtsAnalytics() : Promise.resolve(null as AtsAnalyticsResponse | null),
-      hasTrainingAnalyticsAccess
-        ? getTrainingAnalytics()
-        : Promise.resolve(null as TrainingAnalyticsResponse | null),
       /* Open, dated, assigned-to-me tasks, ordered and limited by the SERVER. Was
          limit:50 unsorted, then sliced in JS — which made "the first 6" mean whatever
          Mongo happened to return. */
@@ -631,7 +869,6 @@ export default function DashboardPage() {
     ]);
 
     if (atsRes.status === "fulfilled") setAtsData(atsRes.value);
-    if (trainingRes.status === "fulfilled") setTrainingData(trainingRes.value);
     if (tasksRes.status === "fulfilled")
       setMyTasks(tasksRes.value.results ?? []);
     if (jobsRes.status === "fulfilled")
@@ -655,6 +892,17 @@ export default function DashboardPage() {
       setProjects(projectsRes.value.results ?? []);
     if (unreadRes.status === "fulfilled") setUnreadCount(unreadRes.value);
 
+    setLoadErrors({
+      analytics: atsRes.status === "rejected" ? describeRequestError(atsRes.reason) : null,
+      jobs: jobsRes.status === "rejected" ? describeRequestError(jobsRes.reason) : null,
+      candidates:
+        applicationsRes.status === "rejected"
+          ? describeRequestError(applicationsRes.reason)
+          : null,
+      projects: projectsRes.status === "rejected" ? describeRequestError(projectsRes.reason) : null,
+      tasks: tasksRes.status === "rejected" ? describeRequestError(tasksRes.reason) : null,
+    });
+
     if (studentRes.status === "fulfilled" && studentRes.value) {
       const identity = studentRes.value as { id: string; type?: "user" | "student"; user: { id: string; name: string; email: string } };
       setAttendanceStudent(identity);
@@ -673,7 +921,6 @@ export default function DashboardPage() {
   }, [
     hasAtsJobsAccess,
     hasProjectsAccess,
-    hasTrainingAnalyticsAccess,
     isSalesAgentOnly,
     permissionsLoaded,
   ]);
@@ -745,13 +992,17 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!permissionsLoaded) return;
     let active = true;
+    setOnLeaveLoading(true);
     getEmployeesOnLeaveToday()
       .then((res) => {
         if (!active) return;
         setOnLeaveToday(res.results);
         setOnLeaveScope(res.scope);
       })
-      .catch(() => active && setOnLeaveToday([]));
+      .catch(() => active && setOnLeaveToday([]))
+      .finally(() => {
+        if (active) setOnLeaveLoading(false);
+      });
     return () => {
       active = false;
     };
@@ -939,35 +1190,6 @@ export default function DashboardPage() {
     };
   }, [applicantsModal]);
 
-  /* Fetch stat box list when modal is opened */
-  useEffect(() => {
-    if (!statBoxModal) {
-      setStatBoxList(null);
-      return;
-    }
-    let cancelled = false;
-    setStatBoxLoading(true);
-    const fetchList = async () => {
-      try {
-        if (statBoxModal === "activeJobs") {
-          const res = await listJobs({ status: "Active", limit: 100 });
-          if (!cancelled) setStatBoxList(res.results ?? []);
-        } else if (statBoxModal === "candidates") {
-          const res = await listCandidates({ limit: 100, sortBy: "createdAt:desc" });
-          if (!cancelled) setStatBoxList(res.results ?? []);
-        }
-      } catch {
-        if (!cancelled) setStatBoxList([]);
-      } finally {
-        if (!cancelled) setStatBoxLoading(false);
-      }
-    };
-    fetchList();
-    return () => {
-      cancelled = true;
-    };
-  }, [statBoxModal]);
-
   /* Refetch Recent Jobs when user returns to the tab (only if user has ATS access) */
   useEffect(() => {
     if (!hasAtsJobsAccess || isSalesAgentOnly) return;
@@ -1059,12 +1281,26 @@ export default function DashboardPage() {
         : null,
     [atsData]
   );
+  /* Text equivalent of the funnel bars, for the chart's aria-label. Same numbers,
+     read in the same order the bars are drawn. */
+  const funnelSummary = useMemo(() => {
+    const rows = atsData?.applicationFunnel ?? [];
+    if (rows.length === 0) return "";
+    const parts = rows.map(
+      (r) => `${r.status.charAt(0).toUpperCase()}${r.status.slice(1)} ${r.count}`
+    );
+    return `Application funnel by stage: ${parts.join(", ")}.`;
+  }, [atsData]);
 
   const totals = atsData?.totals;
+  /* `totals` is null both when the analytics call failed and when the viewer has no ATS
+     permission for it. Either way the honest KPI is "—", not a hard 0 that reads as a
+     real count of nothing. */
+  const totalsUnavailable = !loading && !totals;
   /** Prefer listing API totalResults so Applications stat matches Applications modal rows. */
   const applicationsStatCount =
     applicationsListingTotal != null ? applicationsListingTotal : totals?.totalApplications ?? 0;
-  const projectCount = projects.length;
+  const applicationsUnavailable = !loading && applicationsListingTotal == null && !totals;
   const filteredProjects = useMemo(
     () => filterAndSortProjects(projects, projectSearch, projectSort),
     [projects, projectSearch, projectSort]
@@ -1087,8 +1323,6 @@ export default function DashboardPage() {
       ),
     [filteredProjects, projectSummaryPagination.page]
   );
-  const studentCount = trainingData?.totalStudents ?? 0;
-
   useEffect(() => {
     if (!projectSortMenuOpen) return;
     const onDocClick = (e: MouseEvent) => {
@@ -1162,20 +1396,18 @@ export default function DashboardPage() {
           redirected to the dashboard.
         </div>
       )}
-      {error && (
-        <div className="mb-4 p-4 bg-danger/10 border border-danger/30 text-danger rounded-md text-sm">
-          {error}
-        </div>
-      )}
 
       {/* ========== WELCOME BAR ========== */}
       <div className="box mb-4">
         <div className="box-body flex flex-wrap items-center justify-between gap-3 sm:gap-4 !py-2.5 sm:!py-3">
           <div className="min-w-0">
-            <h4 className="font-semibold text-[1rem] sm:text-[1.125rem] mb-0">
+            {/* The page's only h1. Was an h4, which left the document with no top-level
+                heading and a level jump straight to the card titles below. The three
+                sibling dashboards already put their greeting in an h1. */}
+            <h1 className="font-semibold text-[1rem] sm:text-[1.125rem] mb-0">
               {getGreeting()},{" "}
               <span className="text-primary">{(user?.name || "there").replace(/\b\w/g, (c) => c.toUpperCase())}</span>
-            </h4>
+            </h1>
             <span className="text-[#8c9097] dark:text-white/50 text-[0.8125rem]">
               {getTodayDisplay()}
             </span>
@@ -1256,10 +1488,15 @@ export default function DashboardPage() {
 
         {/* ROW 1 - STATUS */}
         <div className="col-span-12 sm:col-span-6 xl:col-span-3">
+          {/* Trend badges ("1.5%", "0.8%", "0.5%") used to sit here. They were literals in
+              the markup, not deltas — GET /ats/analytics only returns previousPeriod when
+              a `range` is passed, this page passes none, and even with a range the server
+              computes a previous period for applications and hires ONLY, never for jobs or
+              headcount. There is no real number to show for these, so the badges are gone
+              rather than dressed up. The caption under each value now states the window
+              the number actually covers. */}
           <Link
             href="/ats/jobs"
-            target="_blank"
-            rel="noopener noreferrer"
             className="block w-full text-left border-0 bg-transparent p-0 cursor-pointer hover:opacity-90 rounded-lg no-underline text-inherit"
           >
             <div className="box">
@@ -1269,10 +1506,13 @@ export default function DashboardPage() {
                 {loading ? (
                   <Skeleton className="h-7 w-16 mb-1" />
                 ) : (
-                  <h4 className="font-semibold mb-1 text-[1.25rem] sm:text-[1.5rem]">{totals?.totalJobs ?? 0}</h4>
+                  /* Data, not a section heading — an h4 here skipped straight from the
+                     page h1. */
+                  <p className="font-semibold mb-1 text-[1.25rem] sm:text-[1.5rem]">
+                    {totalsUnavailable ? "—" : totals?.totalJobs ?? 0}
+                  </p>
                 )}
-                <span className="badge bg-success/10 text-success">1.5% <i className="ti ti-trending-up ms-1"></i></span>
-                <span className="text-[#8c9097] dark:text-white/50 text-[0.6875rem] ms-1">this month</span>
+                <span className="text-[#8c9097] dark:text-white/50 text-[0.75rem]">All time</span>
               </div>
               <span className="avatar avatar-md bg-primary text-white p-2">
                 <i className="ti ti-briefcase text-[1.25rem] text-white opacity-[0.7]"></i>
@@ -1284,8 +1524,6 @@ export default function DashboardPage() {
         <div className="col-span-12 sm:col-span-6 xl:col-span-3">
           <Link
             href="/ats/jobs?status=active"
-            target="_blank"
-            rel="noopener noreferrer"
             className="block w-full text-left border-0 bg-transparent p-0 cursor-pointer hover:opacity-90 rounded-lg no-underline text-inherit"
           >
             <div className="box">
@@ -1295,10 +1533,11 @@ export default function DashboardPage() {
                 {loading ? (
                   <Skeleton className="h-7 w-16 mb-1" />
                 ) : (
-                  <h4 className="font-semibold mb-1 text-[1.25rem] sm:text-[1.5rem]">{totals?.activeJobs ?? 0}</h4>
+                  <p className="font-semibold mb-1 text-[1.25rem] sm:text-[1.5rem]">
+                    {totalsUnavailable ? "—" : totals?.activeJobs ?? 0}
+                  </p>
                 )}
-                <span className="badge bg-danger/10 text-danger">0.8% <i className="ti ti-trending-down ms-1"></i></span>
-                <span className="text-[#8c9097] dark:text-white/50 text-[0.6875rem] ms-1">open</span>
+                <span className="text-[#8c9097] dark:text-white/50 text-[0.75rem]">Open now</span>
               </div>
               <span className="avatar avatar-md bg-secondary text-white p-2">
                 <i className="ti ti-clipboard-list text-[1.25rem] opacity-[0.7]"></i>
@@ -1308,10 +1547,19 @@ export default function DashboardPage() {
           </Link>
         </div>
         <div className="col-span-12 sm:col-span-6 xl:col-span-3">
+          {/* `totals.totalCandidates` is a legacy FIELD NAME, not a description of what it
+              counts. The server resolves it through queryCandidates with employmentStatus
+              "current" and the default ownerUserRole "employee" — Employee-role profiles
+              with no past resign date. That is exactly the default view of /ats/employees,
+              which the sidebar and the page title both call "Employees". Label, number and
+              destination already agree, so this stays "Total Employees"; renaming it to
+              "Candidates" would break that agreement rather than fix it.
+              Caveat, and it lives in the backend: for a viewer holding the Recruiter role
+              the analytics service takes its OTHER branch (assignedRecruiter, with no
+              owner-role scope) and returns assigned candidate profiles instead. Correcting
+              that means changing atsAnalytics.service.js, not this label. */}
           <Link
             href="/ats/employees"
-            target="_blank"
-            rel="noopener noreferrer"
             className="block w-full text-left border-0 bg-transparent p-0 cursor-pointer hover:opacity-90 rounded-lg no-underline text-inherit"
           >
             <div className="box">
@@ -1321,10 +1569,11 @@ export default function DashboardPage() {
                 {loading ? (
                   <Skeleton className="h-7 w-16 mb-1" />
                 ) : (
-                  <h4 className="font-semibold mb-1 text-[1.25rem] sm:text-[1.5rem]">{totals?.totalCandidates ?? 0}</h4>
+                  <p className="font-semibold mb-1 text-[1.25rem] sm:text-[1.5rem]">
+                    {totalsUnavailable ? "—" : totals?.totalCandidates ?? 0}
+                  </p>
                 )}
-                <span className="badge bg-success/10 text-success">0.5% <i className="ti ti-trending-up ms-1"></i></span>
-                <span className="text-[#8c9097] dark:text-white/50 text-[0.6875rem] ms-1">ATS</span>
+                <span className="text-[#8c9097] dark:text-white/50 text-[0.75rem]">Currently employed</span>
               </div>
               <span className="avatar avatar-md bg-success text-white p-2">
                 <i className="ti ti-users text-[1.25rem] opacity-[0.7]"></i>
@@ -1334,9 +1583,12 @@ export default function DashboardPage() {
           </Link>
         </div>
         <div className="col-span-12 sm:col-span-6 xl:col-span-3">
+          {/* aria-label "Manage all applications" was removed: it replaced the visible text
+              with words that label does not contain, so speech control could not activate
+              the card by what it reads (WCAG 2.5.3 Label in Name). The card's own content
+              names it. */}
           <Link
             href="/ats/applications"
-            aria-label="Manage all applications"
             className="block w-full text-left rounded-lg hover:opacity-90"
           >
             <div className="box">
@@ -1346,10 +1598,14 @@ export default function DashboardPage() {
                 {loading ? (
                   <Skeleton className="h-7 w-16 mb-1" />
                 ) : (
-                  <h4 className="font-semibold mb-1 text-[1.25rem] sm:text-[1.5rem]">{applicationsStatCount}</h4>
+                  <p className="font-semibold mb-1 text-[1.25rem] sm:text-[1.5rem]">
+                    {applicationsUnavailable ? "—" : applicationsStatCount}
+                  </p>
                 )}
-                <span className="badge bg-success/10 text-success">0.5% <i className="ti ti-trending-up ms-1"></i></span>
-                <span className="text-[#8c9097] dark:text-white/50 text-[0.6875rem] ms-1">All time</span>
+                {/* Counted by listJobApplications({ activeJobsOnly: true }), so this is
+                    applications to ACTIVE jobs — not every application ever, which is what
+                    the old "All time" caption claimed. */}
+                <span className="text-[#8c9097] dark:text-white/50 text-[0.75rem]">On active jobs</span>
               </div>
               <span className="avatar avatar-md bg-warning text-white p-2">
                 <i className="ti ti-file-description text-[1.25rem] opacity-[0.7]"></i>
@@ -1364,16 +1620,23 @@ export default function DashboardPage() {
         <div className="col-span-12 md:col-span-6 xxl:col-span-8 md:h-[26rem]">
           <div className="box h-full flex flex-col overflow-hidden">
               <div className="box-header justify-between">
-                <div className="box-title">Candidate List</div>
-                <Link href="/ats/referral-leads" className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-[#8c9097] dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-primary" title="View referral leads" aria-label="View referral leads">
-                  <i className="ri-external-link-line text-[1rem]" />
+                <h2 className="box-title !mb-0">Candidate List</h2>
+                {/* Was 32px. -me-2 pulls the larger target back so the 44px hit area does
+                    not widen the header padding. */}
+                <Link href="/ats/referral-leads" className="-me-2 inline-flex h-11 w-11 items-center justify-center rounded-lg text-[#8c9097] dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40" title="View referral leads" aria-label="View referral leads">
+                  <i className="ri-external-link-line text-[1rem]" aria-hidden />
                 </Link>
               </div>
               <div className="box-body flex-1 min-h-0 overflow-y-auto">
                 {loading ? (
-                  <ul className="list-none mb-0 space-y-1" aria-busy="true" aria-live="polite">
+                  /* Same divider rhythm and row height as the loaded list, so the panel
+                     does not shift when the data lands. */
+                  <ul className="list-none mb-0" aria-busy="true" aria-live="polite">
                     {[...Array(5)].map((_, i) => (
-                      <li key={i} className="flex items-center gap-3 p-2 sm:p-3">
+                      <li
+                        key={i}
+                        className="flex min-h-[3.75rem] items-center gap-3 border-b border-black/5 p-2 last:border-b-0 dark:border-white/[0.08] sm:p-3"
+                      >
                         <Skeleton className="h-9 w-9 rounded-md shrink-0" />
                         <div className="flex-1 min-w-0 space-y-2">
                           <Skeleton className="h-3 w-2/5" />
@@ -1383,24 +1646,49 @@ export default function DashboardPage() {
                       </li>
                     ))}
                   </ul>
+                ) : loadErrors.candidates ? (
+                  /* A rejected request used to land in the same empty array as a genuinely
+                     empty pipeline, so an outage read as "No recent candidates". */
+                  <div className="flex flex-col items-center justify-center py-8 text-center" role="alert">
+                    <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-danger/10 text-danger">
+                      <i className="ri-error-warning-line text-[1.25rem]" aria-hidden />
+                    </span>
+                    <p className="mb-1 text-sm font-semibold">Couldn&apos;t load candidates</p>
+                    <p className="mb-3 text-[0.75rem] text-[#8c9097] dark:text-white/50">
+                      {loadErrors.candidates}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void fetchDashboard()}
+                      className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border border-primary/30 px-4 text-[0.8125rem] font-medium text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    >
+                      <i className="ri-refresh-line" aria-hidden /> Try again
+                    </button>
+                  </div>
                 ) : recentApplications.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-8 text-center">
                     <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary/5 text-primary mb-3">
-                      <i className="ri-user-search-line text-[1.25rem]" />
+                      <i className="ri-user-search-line text-[1.25rem]" aria-hidden />
                     </span>
                     <p className="font-semibold text-sm mb-1">No recent candidates</p>
-                    <p className="text-[0.6875rem] text-[#8c9097] dark:text-white/50 mb-3">
+                    <p className="text-[0.75rem] text-[#8c9097] dark:text-white/50 mb-3">
                       New applicants will appear here.
                     </p>
                     <Link
                       href="/ats/jobs"
-                      className="text-[0.75rem] text-primary hover:underline inline-flex items-center gap-1"
+                      className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border border-primary/30 px-4 text-[0.8125rem] font-medium text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                     >
-                      <i className="ri-briefcase-line" /> View open jobs
+                      <i className="ri-briefcase-line" aria-hidden /> View open jobs
                     </Link>
                   </div>
                 ) : (
-                  <ul className="list-none team-members-card mb-0 space-y-1">
+                  /* Divider rhythm, not gaps. `space-y-1` left a 4px gap between rows
+                     whose own padding was 12px, so the join between two rows read as a
+                     smaller break than the space inside one — and against the card's 20px
+                     body padding the first gap looked bigger again. Hairline dividers with
+                     a fixed row height give one even rhythm, and match the My Tasks list
+                     in the row below. */
+                  <ul className="list-none team-members-card mb-0">
                     {recentApplications.map((app) => {
                       const c = app.candidate ?? {};
                       const appId = String(app._id ?? app.id ?? "");
@@ -1430,12 +1718,15 @@ export default function DashboardPage() {
                           }).toString()}`
                         : "/ats/interviews";
                       return (
-                        <li key={appId || candidateId}>
+                        <li
+                          key={appId || candidateId}
+                          className="border-b border-black/5 last:border-b-0 dark:border-white/[0.08]"
+                        >
                           <div className="relative group">
                             <Link
                               href={profileHref}
                               aria-label={`View candidate ${name}`}
-                              className="w-full flex items-center justify-between gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-colors"
+                              className="flex min-h-[3.75rem] w-full items-center justify-between gap-3 rounded-lg p-2 transition-colors hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:hover:bg-white/5 sm:p-3"
                             >
                               <div className="flex items-center gap-3 min-w-0 flex-1">
                                 <span className="avatar avatar-sm bg-primary/10 text-primary rounded-md leading-none flex items-center justify-center text-xs font-semibold shrink-0">
@@ -1445,29 +1736,43 @@ export default function DashboardPage() {
                                   <span className="font-semibold block truncate group-hover:text-primary transition-colors">
                                     {name}
                                   </span>
-                                  <span className="block truncate text-[0.6875rem] text-[#8c9097] dark:text-white/50 mt-1">
-                                    <span className="truncate">{jobTitle}</span>
+                                  {/* "Updated …" used to be its own third line, rendered
+                                      only when the application carried a usable date. That
+                                      made a row with one two lines tall and a row without
+                                      it three, so the list had two different row heights
+                                      depending on the data. Folded into this line, every
+                                      row is exactly two lines whatever the data says. */}
+                                  <span className="mt-1 block truncate text-[0.75rem] text-[#8c9097] dark:text-white/50">
+                                    {jobTitle}
                                     <span className="mx-1.5 opacity-60">•</span>
-                                    <span className="truncate">{status}</span>
+                                    {status}
+                                    {relTime && (
+                                      <>
+                                        <span className="mx-1.5 opacity-60">•</span>
+                                        <span className="opacity-80">{relTime}</span>
+                                      </>
+                                    )}
                                   </span>
-                                  {relTime && (
-                                    <span className="block truncate text-[0.625rem] text-[#8c9097]/80 dark:text-white/40 mt-0.5">
-                                      Updated {relTime}
-                                    </span>
-                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
+                                {/* 10px -> 12px. This is a pipeline stage a recruiter reads
+                                    at a glance, not decoration. */}
                                 <span
-                                  className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold leading-none transition-opacity group-hover:opacity-0 ${statusStyles}`}
+                                  className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[0.75rem] font-semibold leading-none transition-opacity group-hover:opacity-0 ${statusStyles}`}
                                   aria-label={`Stage: ${status}`}
                                 >
                                   {status}
                                 </span>
                               </div>
                             </Link>
+                            {/* Targets were 28px. At 44px the tray is wide enough to sit over
+                                the row text, so it now carries its own opaque background —
+                                which also fixes the icons previously floating over the
+                                candidate name. Labels name the candidate so three rows of
+                                "View profile" are distinguishable to a screen reader. */}
                             <div
-                              className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
+                              className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2 hidden sm:flex items-center gap-0.5 rounded-lg bg-white/95 px-1 shadow-sm ring-1 ring-black/5 dark:bg-bodybg/95 dark:ring-white/10 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
                               role="group"
                               aria-label={`Quick actions for ${name}`}
                             >
@@ -1475,28 +1780,29 @@ export default function DashboardPage() {
                                 href={profileHref}
                                 onClick={(e) => e.stopPropagation()}
                                 title="View profile"
-                                aria-label="View profile"
-                                className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[#8c9097] dark:text-white/60 hover:bg-primary/10 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                                aria-label={`View profile of ${name}`}
+                                className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[#8c9097] dark:text-white/60 hover:bg-primary/10 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                               >
-                                <i className="ri-user-3-line text-[0.875rem]" />
+                                <i className="ri-user-3-line text-[1rem]" aria-hidden />
                               </Link>
                               <a
                                 href={c.email ? `mailto:${c.email}` : "#"}
                                 onClick={(e) => e.stopPropagation()}
                                 title="Message"
-                                aria-label="Message candidate"
-                                className={`inline-flex items-center justify-center w-7 h-7 rounded-md text-[#8c9097] dark:text-white/60 hover:bg-primary/10 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${c.email ? "" : "pointer-events-none opacity-50"}`}
+                                aria-label={`Email ${name}`}
+                                aria-disabled={c.email ? undefined : true}
+                                className={`inline-flex h-11 w-11 items-center justify-center rounded-md text-[#8c9097] dark:text-white/60 hover:bg-primary/10 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${c.email ? "" : "pointer-events-none opacity-50"}`}
                               >
-                                <i className="ri-mail-line text-[0.875rem]" />
+                                <i className="ri-mail-line text-[1rem]" aria-hidden />
                               </a>
                               <Link
                                 href={scheduleHref}
                                 onClick={(e) => e.stopPropagation()}
                                 title="Schedule interview"
-                                aria-label="Schedule interview"
-                                className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[#8c9097] dark:text-white/60 hover:bg-primary/10 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                                aria-label={`Schedule interview with ${name}`}
+                                className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[#8c9097] dark:text-white/60 hover:bg-primary/10 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                               >
-                                <i className="ri-calendar-event-line text-[0.875rem]" />
+                                <i className="ri-calendar-event-line text-[1rem]" aria-hidden />
                               </Link>
                             </div>
                           </div>
@@ -1525,7 +1831,11 @@ export default function DashboardPage() {
               away column and pushed Candidate List to full width. When Holidays is
               absent this card takes the stack's height instead of leaving a gap. */}
           <div className={showUpcomingHolidays ? "shrink-0" : FILL_CARD}>
-            <OnLeaveTodayCard items={onLeaveToday} selfView={onLeaveScope === "self"} />
+            <OnLeaveTodayCard
+              items={onLeaveToday}
+              selfView={onLeaveScope === "self"}
+              loading={onLeaveLoading}
+            />
           </div>
         </div>
 
@@ -1533,9 +1843,13 @@ export default function DashboardPage() {
         <div className="col-span-12 md:col-span-6 md:h-[24rem] xxl:col-span-5">
           <div className="box h-full flex flex-col min-h-0 overflow-hidden">
             <div className="box-header justify-between flex-shrink-0">
-              <div className="box-title">Application Analytics</div>
+              <h2 className="box-title !mb-0">Application Analytics</h2>
               <Link href="/ats/analytics" className="px-2 font-normal text-[0.75rem] text-[#8c9097] dark:text-white/50">View All <i className="ri-arrow-down-s-line align-middle ms-1 inline-block"></i></Link>
             </div>
+            {/* When the real funnel was empty this used to render ProjectAnalysis from
+                shared/data/dashboards/projectsdata — a template demo series. A viewer had
+                no way to tell that curve from their own hiring data. An empty funnel now
+                says so, and a failed one says that instead of showing nothing. */}
             <div className="box-body flex-1 min-h-0 flex flex-col">
               {loading ? (
                 <Skeleton className="h-full min-h-[220px] w-full" />
@@ -1543,16 +1857,40 @@ export default function DashboardPage() {
                 <FunnelChartFill
                   options={funnelChart.options}
                   series={funnelChart.series}
+                  summary={funnelSummary}
                 />
+              ) : loadErrors.analytics ? (
+                <div className="flex flex-1 flex-col items-center justify-center py-8 text-center" role="alert">
+                  <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-danger/10 text-danger">
+                    <i className="ri-error-warning-line text-[1.25rem]" aria-hidden />
+                  </span>
+                  <p className="mb-1 text-[0.8125rem] font-semibold">Couldn&apos;t load application analytics</p>
+                  <p className="mb-3 text-[0.75rem] text-[#8c9097] dark:text-white/50">
+                    {loadErrors.analytics}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void fetchDashboard()}
+                    className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border border-primary/30 px-4 text-[0.8125rem] font-medium text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  >
+                    <i className="ri-refresh-line" aria-hidden /> Try again
+                  </button>
+                </div>
               ) : (
-                <div id="projectAnalysis">
-                  <ReactApexChart
-                    options={Projectdata.ProjectAnalysis.options as ApexOptions}
-                    series={Projectdata.ProjectAnalysis.series as ApexAxisChartSeries}
-                    type="line"
-                    width="100%"
-                    height={315}
-                  />
+                <div className="flex flex-1 flex-col items-center justify-center py-8 text-center">
+                  <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary/5 text-primary">
+                    <i className="ri-bar-chart-grouped-line text-[1.25rem]" aria-hidden />
+                  </span>
+                  <p className="mb-1 text-[0.8125rem] font-semibold">No application funnel yet</p>
+                  <p className="mb-3 text-[0.75rem] text-[#8c9097] dark:text-white/50">
+                    Stages fill in as candidates move through your open roles.
+                  </p>
+                  <Link
+                    href="/ats/analytics"
+                    className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border border-primary/30 px-4 text-[0.8125rem] font-medium text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  >
+                    <i className="ri-line-chart-line" aria-hidden /> Open ATS analytics
+                  </Link>
                 </div>
               )}
             </div>
@@ -1565,8 +1903,8 @@ export default function DashboardPage() {
           <div className="box h-full flex flex-col min-h-0 overflow-hidden">
             <div className="box-header justify-between flex-shrink-0">
               <div>
-                <div className="box-title mb-0">My Tasks</div>
-                <p className="mb-0 text-[0.7rem] text-[#8c9097] dark:text-white/50">
+                <h2 className="box-title !mb-0">My Tasks</h2>
+                <p className="mb-0 text-[0.75rem] text-[#8c9097] dark:text-white/50">
                   Overdue and upcoming, soonest first
                 </p>
               </div>
@@ -1575,13 +1913,30 @@ export default function DashboardPage() {
             <div className="box-body flex-1 min-h-0 overflow-y-auto">
               {loading ? (
                 <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-11 w-full" />)}</div>
+              ) : loadErrors.tasks ? (
+                /* "Nothing due" is a reassuring message and was shown for a failed request
+                   too, which is the worst possible way to be wrong about someone's tasks. */
+                <div className="flex flex-col items-center justify-center py-8 text-center" role="alert">
+                  <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-danger/10 text-danger">
+                    <i className="ri-error-warning-line text-[1.25rem]" aria-hidden />
+                  </span>
+                  <p className="mb-1 text-[0.8125rem] font-semibold">Couldn&apos;t load your tasks</p>
+                  <p className="mb-3 text-[0.75rem] text-[#8c9097] dark:text-white/50">{loadErrors.tasks}</p>
+                  <button
+                    type="button"
+                    onClick={() => void fetchDashboard()}
+                    className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border border-primary/30 px-4 text-[0.8125rem] font-medium text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  >
+                    <i className="ri-refresh-line" aria-hidden /> Try again
+                  </button>
+                </div>
               ) : dashboardTasks.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
                   <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-success/10 text-success">
-                    <i className="ri-check-double-line text-[1.25rem]" />
+                    <i className="ri-check-double-line text-[1.25rem]" aria-hidden />
                   </span>
                   <p className="mb-1 text-[0.8125rem] font-semibold">Nothing due</p>
-                  <p className="mb-0 text-[0.72rem] text-[#8c9097] dark:text-white/50">
+                  <p className="mb-0 text-[0.75rem] text-[#8c9097] dark:text-white/50">
                     Dated tasks assigned to you appear here.
                   </p>
                 </div>
@@ -1615,14 +1970,16 @@ export default function DashboardPage() {
                           <span className="min-w-0 flex-1 truncate text-[0.8125rem]" title={t.title}>
                             {t.title}
                           </span>
+                          {/* Due-state chips were 9.6px and the date 10.4px. These are the
+                              row's only urgency signal, so they read at 12px now. */}
                           {bucket === "overdue" ? (
-                            <span className="badge shrink-0 bg-danger/10 text-danger text-[0.6rem]">
+                            <span className="badge shrink-0 bg-danger/10 text-danger text-[0.75rem]">
                               {late}d late
                             </span>
                           ) : bucket === "today" ? (
-                            <span className="badge shrink-0 bg-warning/10 text-warning text-[0.6rem]">Today</span>
+                            <span className="badge shrink-0 bg-warning/10 text-warning text-[0.75rem]">Today</span>
                           ) : (
-                            <span className="shrink-0 text-[0.65rem] tabular-nums text-[#8c9097] dark:text-white/50">
+                            <span className="shrink-0 text-[0.75rem] tabular-nums text-[#8c9097] dark:text-white/50">
                               {formatDate(t.dueDate)}
                             </span>
                           )}
@@ -1654,14 +2011,45 @@ export default function DashboardPage() {
         <div className="col-span-12 md:col-span-6 xxl:col-span-4 md:h-[24rem]">
           <div className="box h-full overflow-hidden flex flex-col">
             <div className="box-header justify-between flex-shrink-0">
-              <div className="box-title">Recent Jobs</div>
+              <h2 className="box-title !mb-0">Recent Jobs</h2>
               <Link href="/ats/jobs" className="px-2 font-normal text-[0.75rem] text-[#8c9097] dark:text-white/50">View All <i className="ri-arrow-down-s-line align-middle ms-1 inline-block"></i></Link>
             </div>
             <div className="box-body flex-1 min-h-0 overflow-y-auto [&_.project-transactions-card_li]:!mb-3">
               {loading ? (
-                <div className="space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                <div className="space-y-3" aria-busy="true" aria-live="polite">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+              ) : loadErrors.jobs ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center" role="alert">
+                  <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-danger/10 text-danger">
+                    <i className="ri-error-warning-line text-[1.25rem]" aria-hidden />
+                  </span>
+                  <p className="mb-1 text-[0.8125rem] font-semibold">Couldn&apos;t load jobs</p>
+                  <p className="mb-3 text-[0.75rem] text-[#8c9097] dark:text-white/50">{loadErrors.jobs}</p>
+                  <button
+                    type="button"
+                    onClick={() => void fetchDashboard()}
+                    className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border border-primary/30 px-4 text-[0.8125rem] font-medium text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  >
+                    <i className="ri-refresh-line" aria-hidden /> Try again
+                  </button>
+                </div>
               ) : recentJobs.length === 0 ? (
-                <p className="text-[#8c9097] dark:text-white/50 text-sm">No jobs yet.</p>
+                /* Was a bare sentence, which read as a rendering failure beside the
+                    illustrated empty states in the same row. */
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary/5 text-primary">
+                    <i className="ri-briefcase-line text-[1.25rem]" aria-hidden />
+                  </span>
+                  <p className="mb-1 text-[0.8125rem] font-semibold">No active jobs</p>
+                  <p className="mb-3 text-[0.75rem] text-[#8c9097] dark:text-white/50">
+                    Roles you post appear here.
+                  </p>
+                  <Link
+                    href="/ats/jobs"
+                    className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border border-primary/30 px-4 text-[0.8125rem] font-medium text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  >
+                    <i className="ri-add-line" aria-hidden /> Go to Jobs
+                  </Link>
+                </div>
               ) : (
                 <ul className="list-none project-transactions-card">
                   {recentJobs.slice(0, DASHBOARD_RECENT_JOBS_DISPLAY_LIMIT).map((job) => {
@@ -1679,13 +2067,13 @@ export default function DashboardPage() {
                         <div className="flex items-start gap-3 min-w-0 rounded-lg p-2 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
                           <button
                             type="button"
-                            className="shrink-0 cursor-pointer hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-full"
+                            className="shrink-0 cursor-pointer hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-full"
                             onClick={(e) => {
                               e.stopPropagation();
                               setApplicantsModal({ jobId, jobTitle: job.title ?? "—" });
                             }}
                             title="View applicants"
-                            aria-label={`View ${count} applicant(s)`}
+                            aria-label={`View ${count} applicant${count !== 1 ? "s" : ""} for ${job.title ?? "this job"}`}
                           >
                             <span className="avatar avatar-rounded font-bold avatar-md !text-primary bg-primary/10">{count}</span>
                           </button>
@@ -1699,7 +2087,7 @@ export default function DashboardPage() {
                               {job.organisation?.name ?? "—"} &bull; {count} applicant{count !== 1 ? "s" : ""}
                             </span>
                             {job.status && (
-                              <span className={`inline-block mt-1 text-[0.625rem] ${statusCls}`}>{job.status}</span>
+                              <span className={`inline-block mt-1 text-[0.75rem] ${statusCls}`}>{job.status}</span>
                             )}
                           </button>
                         </div>
@@ -1721,7 +2109,7 @@ export default function DashboardPage() {
                 Sort By and View All wrap onto the next one. Same controls, same state —
                 only the flex direction is breakpoint-dependent. */}
             <div className="box-header justify-between flex-col items-start gap-2 min-[1024px]:flex-row min-[1024px]:flex-wrap min-[1024px]:items-center">
-              <div className="box-title">Projects Summary</div>
+              <h2 className="box-title !mb-0">Projects Summary</h2>
               <div className="flex w-full flex-wrap items-center gap-2 min-[1024px]:w-auto">
                 <input
                   className="ti-form-control form-control-sm !rounded-sm !w-full min-[1024px]:!w-auto min-[1024px]:min-w-[140px]"
@@ -1782,10 +2170,25 @@ export default function DashboardPage() {
             </div>
             <div className="box-body">
               {loading ? (
-                <div className="space-y-3">
+                <div className="space-y-3" aria-busy="true" aria-live="polite">
                   {[...Array(4)].map((_, i) => (
                     <Skeleton key={i} className="h-10 w-full" />
                   ))}
+                </div>
+              ) : loadErrors.projects ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center" role="alert">
+                  <span className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full bg-danger/10 text-danger">
+                    <i className="ri-error-warning-line text-[1.25rem]" aria-hidden />
+                  </span>
+                  <p className="mb-1 text-[0.8125rem] font-semibold">Couldn&apos;t load projects</p>
+                  <p className="mb-3 text-[0.75rem] text-[#8c9097] dark:text-white/50">{loadErrors.projects}</p>
+                  <button
+                    type="button"
+                    onClick={() => void fetchDashboard()}
+                    className="inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border border-primary/30 px-4 text-[0.8125rem] font-medium text-primary hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  >
+                    <i className="ri-refresh-line" aria-hidden /> Try again
+                  </button>
                 </div>
               ) : projects.length === 0 ? (
                 <p className="text-[#8c9097] dark:text-white/50 text-sm">
@@ -2139,240 +2542,27 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent Job detail modal */}
-      {selectedJobDetail && (() => {
-        const j = selectedJobDetail;
-        const jobId = String(j._id ?? j.id ?? "");
-        const applicantCount = applicantCountByJob[jobId] ?? 0;
-        const createdByName = typeof j.createdBy === "object" && j.createdBy !== null ? (j.createdBy as { name?: string }).name : null;
-        const jobDescription = j.jobDescription ?? "";
-        return (
-          <div
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
-            onClick={() => setSelectedJobDetail(null)}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Job details"
-          >
-            <div
-              className="bg-white dark:bg-bodybg rounded-lg shadow-xl max-w-md w-full max-h-[85vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="p-4 border-b border-gray-200 dark:border-white/10 flex items-start justify-between gap-2">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate flex-1">{j.title ?? "—"}</h3>
-                <button
-                  type="button"
-                  className="flex-shrink-0 text-gray-500 hover:text-gray-700 dark:text-white/70"
-                  onClick={() => setSelectedJobDetail(null)}
-                  aria-label="Close"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="p-4 space-y-3 text-sm">
-                {j.organisation?.name && (
-                  <div>
-                    <span className="text-[#8c9097] dark:text-white/50 block text-xs font-medium">Organisation</span>
-                    <span className="text-gray-900 dark:text-white">{j.organisation.name}</span>
-                    {j.organisation.website && (
-                      <a href={j.organisation.website.startsWith("http") ? j.organisation.website : `https://${j.organisation.website}`} target="_blank" rel="noopener noreferrer" className="block text-primary hover:underline truncate">{j.organisation.website}</a>
-                    )}
-                    {j.organisation.email && <span className="block text-[#8c9097] dark:text-white/50">{j.organisation.email}</span>}
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  {j.status && (
-                    <span className={`badge ${(j.status ?? "").toLowerCase() === "active" ? "bg-success/10 text-success" : "bg-secondary/10 text-secondary"}`}>{j.status}</span>
-                  )}
-                  {j.jobType && <span className="badge bg-primary/10 text-primary">{j.jobType}</span>}
-                  {applicantCount !== undefined && <span className="badge bg-info/10 text-info">{applicantCount} applicant{applicantCount !== 1 ? "s" : ""}</span>}
-                </div>
-                {j.location && (
-                  <div>
-                    <span className="text-[#8c9097] dark:text-white/50 block text-xs font-medium">Location</span>
-                    <span className="text-gray-900 dark:text-white">{j.location}</span>
-                  </div>
-                )}
-                {j.experienceLevel && (
-                  <div>
-                    <span className="text-[#8c9097] dark:text-white/50 block text-xs font-medium">Experience</span>
-                    <span className="text-gray-900 dark:text-white">{j.experienceLevel}</span>
-                  </div>
-                )}
-                {j.jobDescription && (
-                  <div>
-                    <span className="text-[#8c9097] dark:text-white/50 block text-xs font-medium">Description</span>
-                    <p className="text-gray-900 dark:text-white line-clamp-4">{stripHtml(jobDescription)}</p>
-                  </div>
-                )}
-                {createdByName && (
-                  <div>
-                    <span className="text-[#8c9097] dark:text-white/50 block text-xs font-medium">Created by</span>
-                    <span className="text-gray-900 dark:text-white">{createdByName}</span>
-                  </div>
-                )}
-              </div>
-              <div className="p-4 border-t border-gray-200 dark:border-white/10 flex justify-center">
-                <Link
-                  href={`/ats/jobs?view=${jobId}`}
-                  className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-primary text-white hover:opacity-90"
-                  onClick={() => setSelectedJobDetail(null)}
-                  title="View full job"
-                  aria-label="View full job"
-                >
-                  <i className="ri-external-link-line text-[1.25rem]" />
-                </Link>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* Recent Job detail modal. The dead "stat box" modal that used to follow these two
+          was removed: setStatBoxModal was only ever called with null, so no KPI card, row
+          or control could open it — the state, its fetch effect and ~90 lines of markup
+          were unreachable. */}
+      {selectedJobDetail && (
+        <JobDetailModal
+          job={selectedJobDetail}
+          applicantCount={applicantCountByJob[String(selectedJobDetail._id ?? selectedJobDetail.id ?? "")] ?? 0}
+          onClose={() => setSelectedJobDetail(null)}
+        />
+      )}
 
-      {/* Applicants modal (when clicking job applicant count) */}
+      {/* Applicants modal (opened from a job's applicant count) */}
       {applicantsModal && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
-          onClick={() => setApplicantsModal(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Applicants"
-        >
-          <div
-            className="bg-white dark:bg-bodybg rounded-lg shadow-xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 border-b border-gray-200 dark:border-white/10 flex items-start justify-between gap-2 flex-shrink-0">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate flex-1">
-                Applicants – {applicantsModal.jobTitle}
-              </h3>
-              <button
-                type="button"
-                className="flex-shrink-0 text-gray-500 hover:text-gray-700 dark:text-white/70"
-                onClick={() => setApplicantsModal(null)}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="p-4 overflow-y-auto flex-1 min-h-0">
-              {applicantsLoading ? (
-                <p className="text-[#8c9097] dark:text-white/50 text-sm">Loading…</p>
-              ) : applicantsList === null ? null : applicantsList.length === 0 ? (
-                <p className="text-[#8c9097] dark:text-white/50 text-sm">No applicants yet.</p>
-              ) : (
-                <ul className="list-none space-y-3">
-                  {applicantsList.map((app) => {
-                    const c = app.candidate;
-                    const name = (c?.fullName ?? c?.email ?? "—").trim() || "—";
-                    const email = c?.email ?? "";
-                    return (
-                      <li key={app._id} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-white/5">
-                        <span className="avatar avatar-sm avatar-rounded bg-primary/10 text-primary flex-shrink-0 flex items-center justify-center text-xs font-semibold">
-                          {name.charAt(0).toUpperCase()}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <span className="block font-medium text-gray-900 dark:text-white truncate">{name}</span>
-                          {email && <span className="block text-[#8c9097] dark:text-white/50 text-[0.6875rem] truncate">{email}</span>}
-                          {app.status && (
-                            <span className="inline-block mt-1 badge bg-primary/10 text-primary text-[0.625rem]">{app.status}</span>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
+        <ApplicantsModal
+          jobTitle={applicantsModal.jobTitle}
+          applicants={applicantsList}
+          loading={applicantsLoading}
+          onClose={() => setApplicantsModal(null)}
+        />
       )}
-
-      {/* Stat box modal (Active Jobs, Candidates, Applications) */}
-      {statBoxModal && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
-          onClick={() => setStatBoxModal(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label={statBoxModal === "activeJobs" ? "Active Jobs" : "Total Candidates"}
-        >
-          <div
-            className="bg-white dark:bg-bodybg rounded-lg shadow-xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 border-b border-gray-200 dark:border-white/10 flex items-start justify-between gap-2 flex-shrink-0">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate flex-1">
-                {statBoxModal === "activeJobs" ? "Active Jobs" : "Total Candidates"}
-              </h3>
-              <button
-                type="button"
-                className="flex-shrink-0 text-gray-500 hover:text-gray-700 dark:text-white/70"
-                onClick={() => setStatBoxModal(null)}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="p-4 overflow-y-auto flex-1 min-h-0">
-              {statBoxLoading ? (
-                <p className="text-[#8c9097] dark:text-white/50 text-sm">Loading…</p>
-              ) : statBoxList === null ? null : statBoxList.length === 0 ? (
-                <p className="text-[#8c9097] dark:text-white/50 text-sm">
-                  {statBoxModal === "activeJobs" ? "No jobs yet." : "No candidates yet."}
-                </p>
-              ) : statBoxModal === "activeJobs" ? (
-                <ul className="list-none space-y-3">
-                  {(statBoxList as Job[]).map((job) => {
-                    const jobId = String(job._id ?? job.id ?? "");
-                    const status = (job.status ?? "").toLowerCase();
-                    const statusCls = status === "active" ? "badge bg-success/10 text-success" : "badge bg-secondary/10 text-secondary";
-                    return (
-                      <li key={jobId} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-white/5">
-                        <div className="min-w-0 flex-1">
-                          <span className="block font-medium text-gray-900 dark:text-white truncate">{job.title ?? "—"}</span>
-                          <span className="block text-[#8c9097] dark:text-white/50 text-[0.6875rem] truncate">{job.organisation?.name ?? "—"}</span>
-                          {job.status && <span className={`inline-block mt-1 badge text-[0.625rem] ${statusCls}`}>{job.status}</span>}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <ul className="list-none space-y-3">
-                  {(statBoxList as CandidateListItem[]).map((c) => {
-                    const id = String(c._id ?? c.id ?? "");
-                    const name = (c.fullName ?? c.email ?? "—").trim() || "—";
-                    return (
-                      <li key={id} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-white/5">
-                        <span className="avatar avatar-sm avatar-rounded bg-primary/10 text-primary flex-shrink-0 flex items-center justify-center text-xs font-semibold">
-                          {name.charAt(0).toUpperCase()}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <span className="block font-medium text-gray-900 dark:text-white truncate">{name}</span>
-                          {c.email && <span className="block text-[#8c9097] dark:text-white/50 text-[0.6875rem] truncate">{c.email}</span>}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-            <div className="p-4 border-t border-gray-200 dark:border-white/10 flex justify-center">
-              <Link
-                href={statBoxModal === "candidates" ? "/ats/employees" : "/ats/jobs"}
-                className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-primary text-white hover:opacity-90"
-                onClick={() => setStatBoxModal(null)}
-                title="View All"
-                aria-label="View All"
-              >
-                <i className="ri-external-link-line text-[1.25rem]" />
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Candidate detail modal */}
     </Fragment>
   );
 }

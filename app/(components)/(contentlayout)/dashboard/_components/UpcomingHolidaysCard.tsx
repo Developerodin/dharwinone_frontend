@@ -63,7 +63,11 @@ function HolidayRow({ item }: { item: AssignedHolidayItem }) {
       className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
         isToday
           ? "bg-warning/10 border border-warning/25"
-          : "bg-white/60 dark:bg-white/5 border border-black/5 dark:border-white/10"
+          : /* Was bg-white/60, which only registered against the gradient this card used
+               to carry; on a plain white .box it was an invisible fill inside a visible
+               outline. Same row, same three placements (phone list, desktop preview,
+               View All overlay). */
+            "bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/10"
       }`}
     >
       <div
@@ -180,29 +184,27 @@ export default function UpcomingHolidaysCard({
   const [viewAllOpen, setViewAllOpen] = useState(false);
 
   /**
-   * Only the company card gets the tablet/desktop single-item preview. The employee
-   * dashboard renders this same component in "personal" scope, in a different column
-   * with its own height rules, and was not part of this change — it keeps the
+   * Only the company card fills its cell and offers "View All". The employee dashboard
+   * renders this same component in "personal" scope, in a different column with its own
+   * height rules, and is not part of this change — it keeps the fixed max-height
    * scrolling list at every width.
+   *
+   * `next` lived here to feed a desktop-only single-row preview. The list now sizes
+   * itself to the cell instead, so there is nothing left that needs just the first item.
    */
   const previewOnDesktop = scope === "company";
 
-  /* holidays arrives chronologically sorted: upcomingCompanyHolidays sorts locally by
-     local calendar day, independent of what the server returns. That guarantee is what
-     makes [0] the NEXT holiday rather than an arbitrary one. */
-  const next = holidays[0];
-
   return (
-    <div className="box overflow-hidden border-0 shadow-sm bg-gradient-to-br from-primary/5 via-transparent to-warning/5 dark:from-primary/10 dark:to-warning/10">
-      <div className="box-header justify-between flex-shrink-0 border-b border-black/5 dark:border-white/10 !pb-3">
-        <div className="flex items-center gap-2">
-          <span className="avatar avatar-sm avatar-rounded bg-primary/15 text-primary">
-            <i className="ti ti-calendar-event text-[1rem]" aria-hidden />
-          </span>
-          <div>
-            <div className="box-title mb-0">{copy.title}</div>
-            <p className="text-[0.7rem] text-[#8c9097] dark:text-white/50 mb-0">{copy.subtitle}</p>
-          </div>
+    /* Card chrome matches every other dashboard widget: a plain .box with a .box-header
+       and a .box-title. It used to opt out of that system — a gradient background,
+       border-0 + shadow-sm, an avatar icon before the title and a second header border on
+       top of the one .box-header already draws — which made this and On Leave Today read
+       as a pair of cards from a different product. */
+    <div className="box h-full flex flex-col overflow-hidden">
+      <div className="box-header justify-between flex-shrink-0">
+        <div>
+          <h2 className="box-title !mb-0">{copy.title}</h2>
+          <p className="mb-0 text-[0.75rem] text-[#8c9097] dark:text-white/50">{copy.subtitle}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {/* View All sits with Manage rather than under the list: the card cell is a
@@ -229,10 +231,12 @@ export default function UpcomingHolidaysCard({
           )}
         </div>
       </div>
-      <div className="box-body !pt-3">
+      {/* Company card: a flex column, so the list below can claim whatever height is left
+          after the banner and fill the cell. Personal card keeps the plain body it had. */}
+      <div className={`box-body ${previewOnDesktop ? "flex min-h-0 flex-1 flex-col" : ""}`}>
         {todayIsHoliday && (
           <div
-            className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[0.8125rem] text-warning"
+            className="mb-3 shrink-0 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[0.8125rem] text-warning"
             role="status"
           >
             <span className="font-semibold">Today is a holiday</span>
@@ -258,31 +262,29 @@ export default function UpcomingHolidaysCard({
         ) : holidays.length === 0 ? (
           <p className="text-[#8c9097] dark:text-white/50 text-sm mb-0">{copy.empty}</p>
         ) : (
-          <>
-            {/* Phone (below md = 768px): the original scrolling list, untouched. On the
-                personal card this stays the only rendering, at every width. */}
-            <ul
-              className={`list-none space-y-2 mb-0 max-h-[19rem] overflow-y-auto pe-1 ${
-                previewOnDesktop ? "md:hidden" : ""
-              }`}
-            >
-              {holidays.map((h) => (
-                <HolidayRow key={h.id} item={h} />
-              ))}
-            </ul>
-
-            {/* Tablet + desktop: the next holiday only, so the card can never outgrow
-                its fixed cell height and sprout an inner scrollbar. The rest of the
-                list lives behind View All. Both renderings ship in the HTML and the
-                breakpoint picks one — no JS width check, so SSR and hydration agree. */}
-            {previewOnDesktop && next && (
-              <div className="hidden md:block">
-                <ul className="list-none mb-0">
-                  <HolidayRow item={next} />
-                </ul>
-              </div>
-            )}
-          </>
+          /* One list at every width.
+             The company card used to render exactly ONE row from md up — a deliberate
+             guard so it could not outgrow the fixed cell it shares with On Leave Today.
+             That guard cost more than it saved: with On Leave Today's empty state now
+             compact, the cell has room for two or three holidays and showed one, leaving
+             the card mostly blank.
+             `flex-1 min-h-0` lets the list take exactly the height left in the cell and
+             scroll past it, so the number of rows on screen follows the space available —
+             three in a tall cell, one when On Leave Today fills up or the viewport is
+             short — with no breakpoint table and no measuring in JS. Below md the card has
+             no fixed height, so flex-1 resolves to content and every row renders, exactly
+             as before. The full list stays one click away behind View All. */
+          <ul
+            className={`list-none space-y-2 mb-0 pe-1 ${
+              previewOnDesktop
+                ? "min-h-0 flex-1 overflow-y-auto"
+                : "max-h-[19rem] overflow-y-auto"
+            }`}
+          >
+            {holidays.map((h) => (
+              <HolidayRow key={h.id} item={h} />
+            ))}
+          </ul>
         )}
       </div>
 
