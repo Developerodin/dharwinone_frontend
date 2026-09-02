@@ -214,9 +214,26 @@ export async function getStudentFilterOptions(
   return data;
 }
 
+function normalizeStudentNote(raw: StudentNote & { _id?: string }): StudentNote {
+  const studentVal = raw.student as unknown;
+  const student =
+    studentVal && typeof studentVal === "object"
+      ? String(
+          (studentVal as { id?: string; _id?: string }).id ??
+            (studentVal as { _id?: string })._id ??
+            ""
+        )
+      : String(studentVal ?? "");
+  return {
+    ...raw,
+    id: String(raw.id ?? raw._id ?? ""),
+    student,
+  };
+}
+
 export async function listStudentNotes(studentId: string): Promise<{ results: StudentNote[] }> {
   const { data } = await apiClient.get<{ results: StudentNote[] }>(`/training/students/${studentId}/notes`);
-  return data;
+  return { results: (data.results ?? []).map(normalizeStudentNote) };
 }
 
 export async function createStudentNote(
@@ -224,7 +241,7 @@ export async function createStudentNote(
   payload: { note: string; visibility: "public" | "private" }
 ): Promise<StudentNote> {
   const { data } = await apiClient.post<StudentNote>(`/training/students/${studentId}/notes`, payload);
-  return data;
+  return normalizeStudentNote(data);
 }
 
 export async function deleteStudentNote(noteId: string): Promise<void> {

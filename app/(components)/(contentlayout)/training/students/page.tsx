@@ -295,7 +295,7 @@ const Students = () => {
   // Get notes for a specific student
   const getStudentNotes = (studentId: string) => {
     return studentNotes
-      .filter((note) => note.student === studentId)
+      .filter((note) => String(note.student) === String(studentId))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   }
 
