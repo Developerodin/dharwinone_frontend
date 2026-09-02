@@ -10,6 +10,31 @@ export interface StudentSidebarFilters {
   experience: [number, number];
 }
 
+export type StudentHeaderFilterKey = "name" | "skills" | "education";
+
+export type StudentInfoHeaderFacet = "name" | "email";
+
+/** Column ids that open an in-header facet filter. Bio/actions/select do not. */
+export function studentHeaderFilterKey(
+  columnId: string
+): StudentHeaderFilterKey | null {
+  if (columnId === "studentInfo") return "name";
+  if (columnId === "skills") return "skills";
+  if (columnId === "education") return "education";
+  return null;
+}
+
+/** Student Info packs name + email; the header popover must show both. */
+export function studentInfoHeaderFacets(): readonly StudentInfoHeaderFacet[] {
+  return ["name", "email"];
+}
+
+export function filterStudentFacetOptions(options: string[], query: string): string[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return options;
+  return options.filter((option) => option.toLowerCase().includes(q));
+}
+
 export interface StudentListQueryInput {
   page: number;
   limit: number;
@@ -18,6 +43,8 @@ export interface StudentListQueryInput {
   statusFilter: StudentStatusFilter;
   filters: StudentSidebarFilters;
   experienceBounds: { min: number; max: number };
+  /** Limit list/export to users who hold the Student RBAC role. */
+  studentRoleOnly?: boolean;
 }
 
 export function isExperienceFilterActive(
@@ -53,6 +80,9 @@ export function buildStudentListParams(input: StudentListQueryInput): ListStuden
   if (isExperienceFilterActive(input.filters, input.experienceBounds)) {
     params.experienceMin = input.filters.experience[0];
     params.experienceMax = input.filters.experience[1];
+  }
+  if (input.studentRoleOnly && input.statusFilter !== 'inactive') {
+    params.studentRoleOnly = true;
   }
 
   return params;

@@ -20,6 +20,7 @@ export async function exportStudentsExcel(
   if (params.email) query.email = params.email;
   if (params.experienceMin != null) query.experienceMin = params.experienceMin;
   if (params.experienceMax != null) query.experienceMax = params.experienceMax;
+  if (params.studentRoleOnly != null) query.studentRoleOnly = params.studentRoleOnly;
 
   const res = await apiClient.get<Blob>("/training/students/export", {
     params: query,
@@ -45,6 +46,7 @@ export interface StudentUser {
   roleIds: string[];
   status: string;
   isEmailVerified: boolean;
+  phoneNumber?: string | null;
 }
 
 export interface StudentAddress {
@@ -58,6 +60,7 @@ export interface StudentAddress {
 export interface StudentEducation {
   degree?: string;
   institution?: string;
+  institute?: string;
   fieldOfStudy?: string;
   startDate?: string;
   endDate?: string | null;
@@ -91,9 +94,12 @@ export interface Student {
   address?: StudentAddress | null;
   education?: StudentEducation[];
   experience?: StudentExperience[];
-  skills?: string[];
+  /** String names, or person-profile objects `{ name, level }`. */
+  skills?: Array<string | { name?: string; level?: string }>;
   documents?: StudentDocument[];
   bio?: string | null;
+  /** Candidate/Employee short bio, present when list/get overlays person profile. */
+  shortBio?: string | null;
   profileImageUrl?: string | null;
   status: string;
   /** First day attendance applies (aligned with candidate joining; used in attendance UI). */
@@ -148,12 +154,15 @@ export interface ListStudentsParams {
   employeeRoleOnly?: boolean | "true" | "false" | "1" | "0";
   /** Exclude owners linked to resigned employee records. */
   excludeResignedEmployed?: boolean | "true" | "false" | "1" | "0";
+  /** Only users with the Student RBAC role (Training students list). */
+  studentRoleOnly?: boolean | "true" | "false" | "1" | "0";
 }
 
 export interface StudentFilterOptions {
   names: string[];
   skills: string[];
   education: string[];
+  emails?: string[];
   experience: { min: number; max: number };
 }
 
@@ -185,6 +194,7 @@ function serializeListParams(params?: ListStudentsParams): Record<string, string
   if (params.education?.length) query.education = params.education.join(",");
   if (params.employeeRoleOnly != null) query.employeeRoleOnly = params.employeeRoleOnly;
   if (params.excludeResignedEmployed != null) query.excludeResignedEmployed = params.excludeResignedEmployed;
+  if (params.studentRoleOnly != null) query.studentRoleOnly = params.studentRoleOnly;
   return query;
 }
 
@@ -195,7 +205,9 @@ export async function listStudents(params?: ListStudentsParams): Promise<Student
   return data;
 }
 
-export async function getStudentFilterOptions(params?: Pick<ListStudentsParams, "status" | "search">): Promise<StudentFilterOptions> {
+export async function getStudentFilterOptions(
+  params?: Pick<ListStudentsParams, "status" | "search" | "studentRoleOnly">
+): Promise<StudentFilterOptions> {
   const { data } = await apiClient.get<StudentFilterOptions>("/training/students/filter-options", {
     params: serializeListParams(params),
   });

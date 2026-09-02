@@ -1,7 +1,8 @@
 "use client"
 
-import React from 'react'
-import { Range, getTrackBackground } from 'react-range'
+import React, { useEffect, useMemo, useState } from 'react'
+import type { StudentStatusFilter } from '@/shared/lib/training/student-list-filters'
+import { filterStudentFacetOptions } from '@/shared/lib/training/student-list-filters'
 
 export interface StudentFiltersFilterState {
   name: string[]
@@ -14,9 +15,11 @@ export interface StudentFiltersFilterState {
 export interface StudentFiltersProps {
   filters: StudentFiltersFilterState
   setFilters: React.Dispatch<React.SetStateAction<StudentFiltersFilterState>>
+  onClose: () => void
   allNames: string[]
   allSkills: string[]
   allEducation: string[]
+  allEmails: string[]
   filteredNames: string[]
   filteredSkills: string[]
   filteredEducation: string[]
@@ -26,18 +29,35 @@ export interface StudentFiltersProps {
   setSearchSkills: (v: string) => void
   searchEducation: string
   setSearchEducation: (v: string) => void
-  experienceRanges: { min: number; max: number }
+  statusFilter: StudentStatusFilter
+  setStatusFilter: (v: StudentStatusFilter) => void
   handleMultiSelectChange: (key: 'name' | 'skills' | 'education', value: string) => void
   handleRemoveFilter: (key: 'name' | 'skills' | 'education', value: string) => void
-  handleExperienceRangeChange: (values: number[]) => void
   handleResetFilters: () => void
+}
+
+const FACET_LIST_BOX =
+  'h-36 max-h-36 overflow-y-auto overscroll-contain rounded-lg bg-white dark:bg-black/20 p-2 shadow-sm [scrollbar-width:thin]'
+
+function scrollFilterBodyIfListEdge(event: React.WheelEvent<HTMLDivElement>) {
+  const list = event.currentTarget
+  const atTop = list.scrollTop <= 0 && event.deltaY < 0
+  const atBottom =
+    list.scrollTop + list.clientHeight >= list.scrollHeight - 1 && event.deltaY > 0
+  if (!atTop && !atBottom) return
+  const body = list.closest('[data-student-filter-body]')
+  if (!(body instanceof HTMLElement)) return
+  body.scrollTop += event.deltaY
 }
 
 export default function StudentFilters({
   filters,
+  setFilters,
+  onClose,
   allNames,
   allSkills,
   allEducation,
+  allEmails,
   filteredNames,
   filteredSkills,
   filteredEducation,
@@ -47,15 +67,30 @@ export default function StudentFilters({
   setSearchSkills,
   searchEducation,
   setSearchEducation,
-  experienceRanges,
+  statusFilter,
+  setStatusFilter,
   handleMultiSelectChange,
   handleRemoveFilter,
-  handleExperienceRangeChange,
   handleResetFilters,
 }: StudentFiltersProps) {
+  const [searchEmail, setSearchEmail] = useState('')
+  const filteredEmails = useMemo(
+    () => filterStudentFacetOptions(allEmails, searchEmail),
+    [allEmails, searchEmail]
+  )
+
+  useEffect(() => {
+    if (filters.email === '') setSearchEmail('')
+  }, [filters.email])
+
   return (
-    <div id="students-filter-panel" className="hs-overlay hidden ti-offcanvas ti-offcanvas-right !z-[105]" tabIndex={-1}>
-      <div className="ti-offcanvas-header bg-gray-50 dark:bg-black/20 !py-2.5">
+    <div
+      id="students-filter-panel"
+      className="hs-overlay hidden ti-offcanvas ti-offcanvas-right !z-[105]"
+      tabIndex={-1}
+    >
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="ti-offcanvas-header bg-gray-50 dark:bg-black/20 !py-2.5 shrink-0">
         <h6 className="ti-offcanvas-title text-base font-semibold flex items-center gap-2">
           <i className="ri-search-line text-primary text-base"></i>
           Search Students
@@ -68,23 +103,46 @@ export default function StudentFilters({
           <i className="ri-refresh-line me-1.5"></i>Reset
         </button>
       </div>
-      <div className="ti-offcanvas-body !p-4">
-        <div className="space-y-5">
+      <div
+        data-student-filter-body
+        className="ti-offcanvas-body !h-auto !max-h-none min-h-0 flex-1 overflow-y-auto !px-4 !pt-4 !pb-4"
+      >
+        <div className="space-y-5 pb-2">
           <div className="pb-4 border-b border-gray-200 dark:border-defaultborder/10">
-            <label className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
+            <label htmlFor="student-filter-status" className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
+              <i className="ri-toggle-line text-primary text-base"></i>
+              Status
+            </label>
+            <select
+              id="student-filter-status"
+              className="form-control !py-1.5 !text-sm"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StudentStatusFilter)}
+              aria-label="Filter by status"
+            >
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div className="pb-4 border-b border-gray-200 dark:border-defaultborder/10">
+            <label htmlFor="student-filter-name-search" className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
               <i className="ri-user-line text-primary text-base"></i>
               Name
               <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({allNames.length})</span>
             </label>
             <div className="space-y-2">
               <input
+                id="student-filter-name-search"
                 type="text"
                 className="form-control !py-1.5 !text-sm mb-1.5"
-                placeholder="Search names..."
+                placeholder="Search students..."
                 value={searchName}
                 onChange={(e) => setSearchName(e.target.value)}
+                aria-label="Search students"
               />
-              <div className="max-h-40 overflow-y-auto rounded-lg bg-white dark:bg-black/20 p-2 shadow-sm">
+              <div className={FACET_LIST_BOX} onWheel={scrollFilterBodyIfListEdge}>
                 <div className="space-y-1">
                   {filteredNames.length > 0 ? (
                     filteredNames.map((name) => (
@@ -120,6 +178,7 @@ export default function StudentFilters({
                         type="button"
                         onClick={() => handleRemoveFilter('name', name)}
                         className="hover:text-primary-hover hover:bg-primary/20 rounded-full p-0.5 transition-colors"
+                        aria-label={`Remove name filter ${name}`}
                       >
                         <i className="ri-close-line text-xs"></i>
                       </button>
@@ -131,20 +190,90 @@ export default function StudentFilters({
           </div>
 
           <div className="pb-4 border-b border-gray-200 dark:border-defaultborder/10">
-            <label className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
+            <label htmlFor="student-filter-email-search" className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
+              <i className="ri-mail-line text-warning text-base"></i>
+              Email
+              <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({allEmails.length})</span>
+            </label>
+            <div className="space-y-2">
+              <input
+                id="student-filter-email-search"
+                type="search"
+                className="form-control !py-1.5 !text-sm mb-1.5 min-h-11"
+                placeholder="Search emails..."
+                value={searchEmail}
+                onChange={(e) => setSearchEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && searchEmail.trim()) {
+                    setFilters((prev) => ({ ...prev, email: searchEmail.trim() }))
+                  }
+                }}
+                autoComplete="off"
+                aria-label="Search emails"
+              />
+              <div className={FACET_LIST_BOX} onWheel={scrollFilterBodyIfListEdge}>
+                <div className="space-y-1">
+                  {filteredEmails.length > 0 ? (
+                    filteredEmails.map((email) => (
+                      <label
+                        key={email}
+                        className="flex items-center gap-2 cursor-pointer hover:bg-warning/5 dark:hover:bg-warning/10 min-h-11 p-1.5 rounded-md transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          className="form-check-input !w-3.5 !h-3.5"
+                          checked={filters.email === email}
+                          onChange={() =>
+                            setFilters((prev) => ({
+                              ...prev,
+                              email: prev.email === email ? '' : email,
+                            }))
+                          }
+                        />
+                        <span className="text-xs text-gray-700 dark:text-gray-300 font-medium break-all">{email}</span>
+                      </label>
+                    ))
+                  ) : (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-3">
+                      No emails found
+                    </div>
+                  )}
+                </div>
+              </div>
+              {filters.email !== '' && (
+                <div className="flex flex-wrap gap-1.5 pt-1.5">
+                  <span className="badge bg-warning/10 text-warning border border-warning/30 px-2 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium shadow-sm">
+                    {filters.email}
+                    <button
+                      type="button"
+                      onClick={() => setFilters((prev) => ({ ...prev, email: '' }))}
+                      className="hover:bg-warning/20 rounded-full p-0.5 transition-colors"
+                      aria-label={`Remove email filter ${filters.email}`}
+                    >
+                      <i className="ri-close-line text-xs"></i>
+                    </button>
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="pb-4 border-b border-gray-200 dark:border-defaultborder/10">
+            <label htmlFor="student-filter-skills-search" className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
               <i className="ri-code-s-slash-line text-success text-base"></i>
               Skills
               <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({allSkills.length})</span>
             </label>
             <div className="space-y-2">
               <input
+                id="student-filter-skills-search"
                 type="text"
                 className="form-control !py-1.5 !text-sm mb-1.5"
                 placeholder="Search skills..."
                 value={searchSkills}
                 onChange={(e) => setSearchSkills(e.target.value)}
               />
-              <div className="max-h-40 overflow-y-auto rounded-lg bg-white dark:bg-black/20 p-2 shadow-sm">
+              <div className={FACET_LIST_BOX} onWheel={scrollFilterBodyIfListEdge}>
                 <div className="space-y-1">
                   {filteredSkills.length > 0 ? (
                     filteredSkills.map((skill) => (
@@ -180,6 +309,7 @@ export default function StudentFilters({
                         type="button"
                         onClick={() => handleRemoveFilter('skills', skill)}
                         className="hover:text-success-hover hover:bg-success/20 rounded-full p-0.5 transition-colors"
+                        aria-label={`Remove skill filter ${skill}`}
                       >
                         <i className="ri-close-line text-xs"></i>
                       </button>
@@ -191,20 +321,21 @@ export default function StudentFilters({
           </div>
 
           <div className="pb-4 border-b border-gray-200 dark:border-defaultborder/10">
-            <label className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
+            <label htmlFor="student-filter-education-search" className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
               <i className="ri-graduation-cap-line text-info text-base"></i>
               Education
               <span className="text-xs font-normal text-gray-500 dark:text-gray-400">({allEducation.length})</span>
             </label>
             <div className="space-y-2">
               <input
+                id="student-filter-education-search"
                 type="text"
                 className="form-control !py-1.5 !text-sm mb-1.5"
                 placeholder="Search education..."
                 value={searchEducation}
                 onChange={(e) => setSearchEducation(e.target.value)}
               />
-              <div className="max-h-40 overflow-y-auto rounded-lg bg-white dark:bg-black/20 p-2 shadow-sm">
+              <div className={FACET_LIST_BOX} onWheel={scrollFilterBodyIfListEdge}>
                 <div className="space-y-1">
                   {filteredEducation.length > 0 ? (
                     filteredEducation.map((edu) => (
@@ -240,6 +371,7 @@ export default function StudentFilters({
                         type="button"
                         onClick={() => handleRemoveFilter('education', edu)}
                         className="hover:text-info-hover hover:bg-info/20 rounded-full p-0.5 transition-colors"
+                        aria-label={`Remove education filter ${edu}`}
                       >
                         <i className="ri-close-line text-xs"></i>
                       </button>
@@ -249,126 +381,24 @@ export default function StudentFilters({
               )}
             </div>
           </div>
-
-          <div className="pb-4">
-            <label className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center gap-2">
-              <i className="ri-mail-line text-warning text-base"></i>
-              Email
-            </label>
-            <input
-              type="text"
-              className="form-control border-gray-200 dark:border-defaultborder/10 focus:ring-2 focus:ring-primary/20 !py-1.5 !text-sm"
-              placeholder="Search by email..."
-              value={filters.email}
-              onChange={(e) => setFilters(prev => ({ ...prev, email: e.target.value }))}
-            />
-          </div>
-
-          <div className="pb-4">
-            <label className="form-label mb-2.5 block font-semibold text-sm text-gray-800 dark:text-white flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <i className="ri-time-line text-info text-base"></i>
-                Work Experience (Years)
-              </span>
-              <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
-                {filters.experience[0]} - {filters.experience[1]} years
-              </span>
-            </label>
-            <div className="px-2 py-4 bg-gray-50 dark:bg-black/20 rounded-lg">
-              <Range
-                values={filters.experience}
-                step={1}
-                min={experienceRanges.min}
-                max={experienceRanges.max}
-                onChange={handleExperienceRangeChange}
-                renderTrack={({ props, children }) => (
-                  <div
-                    onMouseDown={props.onMouseDown}
-                    onTouchStart={props.onTouchStart}
-                    style={{
-                      ...props.style,
-                      height: '36px',
-                      display: 'flex',
-                      width: '100%',
-                    }}
-                  >
-                    <div
-                      ref={props.ref}
-                      style={{
-                        height: '8px',
-                        width: '100%',
-                        borderRadius: '6px',
-                        background: getTrackBackground({
-                          values: filters.experience,
-                          colors: ['#e2e8f0', '#845adf', '#e2e8f0'],
-                          min: experienceRanges.min,
-                          max: experienceRanges.max,
-                        }),
-                        alignSelf: 'center',
-                      }}
-                    >
-                      {children}
-                    </div>
-                  </div>
-                )}
-                renderThumb={({ index, props, isDragged }) => {
-                  const { key, ...restProps } = props
-                  return (
-                    <div
-                      key={key}
-                      {...restProps}
-                      style={{
-                        ...restProps.style,
-                        height: '20px',
-                        width: '20px',
-                        borderRadius: '50%',
-                        backgroundColor: '#fff',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        boxShadow: isDragged ? '0px 2px 8px rgba(132, 90, 223, 0.4)' : '0px 2px 6px #AAA',
-                        border: '2px solid rgb(132, 90, 223)',
-                      }}
-                    >
-                      <div
-                        style={{
-                          position: 'absolute',
-                          top: '-28px',
-                          color: '#fff',
-                          fontWeight: '600',
-                          fontSize: '12px',
-                          fontFamily: 'inherit',
-                          padding: '4px 8px',
-                          borderRadius: '4px',
-                          backgroundColor: 'rgb(132, 90, 223)',
-                        }}
-                      >
-                        {filters.experience[index]} {filters.experience[index] === 1 ? 'year' : 'years'}
-                      </div>
-                    </div>
-                  )
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="flex gap-2 pt-4 border-t border-gray-200 dark:border-defaultborder/10">
-            <button
-              type="button"
-              className="ti-btn ti-btn-primary flex-1 font-medium shadow-sm hover:shadow-md transition-shadow !py-1.5 !text-sm"
-              onClick={handleResetFilters}
-            >
-              <i className="ri-refresh-line me-1.5"></i>Reset
-            </button>
-            <button
-              type="button"
-              className="ti-btn ti-btn-light font-medium shadow-sm hover:shadow-md transition-shadow !py-1.5 !text-sm"
-              data-hs-overlay="#students-filter-panel"
-            >
-              <i className="ri-close-line me-1.5"></i>Close
-            </button>
-          </div>
         </div>
+      </div>
+      <div className="ti-offcanvas-footer !relative !bottom-auto shrink-0 px-4 py-3 flex gap-2">
+        <button
+          type="button"
+          className="ti-btn ti-btn-primary flex-1 font-medium shadow-sm hover:shadow-md transition-shadow !py-1.5 !text-sm min-h-11"
+          onClick={handleResetFilters}
+        >
+          <i className="ri-refresh-line me-1.5"></i>Reset
+        </button>
+        <button
+          type="button"
+          className="ti-btn ti-btn-light font-medium shadow-sm hover:shadow-md transition-shadow !py-1.5 !text-sm min-h-11"
+          onClick={onClose}
+        >
+          <i className="ri-close-line me-1.5"></i>Close
+        </button>
+      </div>
       </div>
     </div>
   )

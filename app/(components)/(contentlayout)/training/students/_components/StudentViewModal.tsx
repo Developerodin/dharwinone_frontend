@@ -1,8 +1,36 @@
 "use client"
 
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { Student } from '@/shared/lib/api/students'
+import { getInitials } from '@/shared/lib/initials'
+import {
+  MISSING_PROFILE_VALUE,
+  formatStudentEducation,
+  normalizeStudentSkillNames,
+} from '@/shared/lib/training/student-list-row'
+
+function StudentModalAvatar({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
+  const [imgFailed, setImgFailed] = useState(false)
+  const showImg = Boolean(imageUrl) && !imgFailed
+
+  if (showImg) {
+    return (
+      <img
+        src={imageUrl!}
+        alt={name}
+        className="w-20 h-20 rounded-full object-cover border-2 border-primary/30 flex-shrink-0"
+        onError={() => setImgFailed(true)}
+      />
+    )
+  }
+
+  return (
+    <span className="flex w-20 h-20 items-center justify-center rounded-full bg-primary/10 text-primary text-2xl font-semibold border-2 border-primary/30 flex-shrink-0 ring-1 ring-primary/15">
+      {getInitials(name)}
+    </span>
+  )
+}
 
 export interface StudentViewModalProps {
   student: Student | null
@@ -15,10 +43,28 @@ export default function StudentViewModal({
   isLoading,
   onClose,
 }: StudentViewModalProps) {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        const modalEl = document.querySelector('#view-student-modal')
+        const HSOverlay = (window as { HSOverlay?: { close: (target: Element | string) => void } }).HSOverlay
+        if (modalEl && HSOverlay?.close) {
+          HSOverlay.close(modalEl)
+        } else if (HSOverlay?.close) {
+          HSOverlay.close('#view-student-modal')
+        }
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
   return (
     <div
       id="view-student-modal"
       className="hs-overlay hidden ti-modal"
+      aria-busy={isLoading}
     >
       <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out lg:!max-w-4xl lg:w-full m-3 lg:!mx-auto">
         <div className="ti-modal-content">
@@ -48,27 +94,21 @@ export default function StudentViewModal({
             ) : student ? (
               <div className="space-y-6">
                 <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 dark:border-primary/30 rounded-lg">
-                  <img
-                    src={student.profileImageUrl || '/assets/images/faces/1.jpg'}
-                    alt={student.user?.name || 'Student'}
-                    className="w-20 h-20 rounded-full object-cover border-2 border-primary/30"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = '/assets/images/faces/1.jpg'
-                    }}
+                  <StudentModalAvatar
+                    name={student.user?.name || 'Student'}
+                    imageUrl={student.profileImageUrl}
                   />
                   <div className="flex-1">
                     <h6 className="font-bold text-gray-800 dark:text-white text-xl mb-1">{student.user?.name || 'Unknown'}</h6>
                     <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                       <span className="flex items-center gap-1">
-                        <i className="ri-mail-line"></i>
-                        {student.user?.email || 'N/A'}
+                        <i className="ri-mail-line" aria-hidden="true"></i>
+                        {student.user?.email || MISSING_PROFILE_VALUE}
                       </span>
-                      {student.phone && (
-                        <span className="flex items-center gap-1">
-                          <i className="ri-phone-line"></i>
-                          {student.phone}
-                        </span>
-                      )}
+                      <span className="flex items-center gap-1">
+                        <i className="ri-phone-line" aria-hidden="true"></i>
+                        {student.phone?.trim() || student.user?.phoneNumber?.trim() || MISSING_PROFILE_VALUE}
+                      </span>
                       <span className="flex items-center gap-1">
                         <i className="ri-user-settings-line"></i>
                         Status: <span className="font-semibold capitalize">{student.status}</span>
@@ -112,17 +152,17 @@ export default function StudentViewModal({
                   </div>
                 )}
 
-                {student.education && student.education.length > 0 && (
-                  <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
+                <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
                     <h6 className="font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
-                      <i className="ri-graduation-cap-line text-primary"></i>
+                      <i className="ri-graduation-cap-line text-primary" aria-hidden="true"></i>
                       Education
                     </h6>
+                    {student.education && student.education.length > 0 && formatStudentEducation(student.education) ? (
                     <div className="space-y-3">
                       {student.education.map((edu, index) => (
                         <div key={index} className="p-3 bg-gray-50 dark:bg-black/20 rounded-lg">
                           <div className="font-semibold text-gray-800 dark:text-white">
-                            {edu.degree || 'N/A'} {edu.institution && `- ${edu.institution}`}
+                            {edu.degree || 'N/A'} {(edu.institution || edu.institute) && `- ${edu.institution || edu.institute}`}
                           </div>
                           {edu.fieldOfStudy && (
                             <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">Field: {edu.fieldOfStudy}</div>
@@ -137,8 +177,10 @@ export default function StudentViewModal({
                         </div>
                       ))}
                     </div>
+                    ) : (
+                      <p className="text-sm text-gray-600 dark:text-gray-300">{MISSING_PROFILE_VALUE}</p>
+                    )}
                   </div>
-                )}
 
                 {student.experience && student.experience.length > 0 && (
                   <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
@@ -170,14 +212,14 @@ export default function StudentViewModal({
                   </div>
                 )}
 
-                {student.skills && student.skills.length > 0 && (
-                  <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
+                <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
                     <h6 className="font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
-                      <i className="ri-tools-line text-primary"></i>
+                      <i className="ri-tools-line text-primary" aria-hidden="true"></i>
                       Skills
                     </h6>
+                    {normalizeStudentSkillNames(student.skills).length > 0 ? (
                     <div className="flex flex-wrap gap-2">
-                      {student.skills.map((skill, index) => (
+                      {normalizeStudentSkillNames(student.skills).map((skill, index) => (
                         <span
                           key={index}
                           className="badge bg-primary/10 text-primary border border-primary/30 px-3 py-1 rounded-md text-sm font-medium"
@@ -186,8 +228,10 @@ export default function StudentViewModal({
                         </span>
                       ))}
                     </div>
+                    ) : (
+                      <p className="text-sm text-gray-600 dark:text-gray-300">{MISSING_PROFILE_VALUE}</p>
+                    )}
                   </div>
-                )}
 
                 {student.documents && student.documents.length > 0 && (
                   <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
@@ -211,8 +255,9 @@ export default function StudentViewModal({
                               target="_blank"
                               rel="noopener noreferrer"
                               className="ti-btn ti-btn-sm ti-btn-primary"
+                              aria-label={`Open document ${doc.name}`}
                             >
-                              <i className="ri-external-link-line"></i>
+                              <i className="ri-external-link-line" aria-hidden="true"></i>
                             </a>
                           )}
                         </div>
@@ -221,17 +266,15 @@ export default function StudentViewModal({
                   </div>
                 )}
 
-                {student.bio && (
-                  <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
+                <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
                     <h6 className="font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
-                      <i className="ri-file-text-line text-primary"></i>
+                      <i className="ri-file-text-line text-primary" aria-hidden="true"></i>
                       Bio
                     </h6>
                     <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                      {student.bio}
+                      {student.bio?.trim() || student.shortBio?.trim() || MISSING_PROFILE_VALUE}
                     </p>
                   </div>
-                )}
               </div>
             ) : (
               <div className="text-center py-4 text-gray-500">No student selected</div>
