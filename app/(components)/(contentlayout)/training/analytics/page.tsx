@@ -19,7 +19,6 @@ type ConfigurableChartField =
   | 'enrollmentsOverTime'
   | 'completionsOverTime'
   | 'quizScoreOverTime'
-  | 'studentsPerModule'
 
 const RANGE_OPTIONS: { value: AnalyticsRange | ''; label: string }[] = [
   { value: '', label: 'All time' },
@@ -33,7 +32,6 @@ const CONFIGURABLE_OPTIONS: { value: ConfigurableChartField; label: string }[] =
   { value: 'enrollmentsOverTime', label: 'Enrollments over time' },
   { value: 'completionsOverTime', label: 'Completions over time' },
   { value: 'quizScoreOverTime', label: 'Quiz score over time' },
-  { value: 'studentsPerModule', label: 'Students per module' },
 ]
 
 const HORIZONTAL_BAR_ROW_HEIGHT = 40
@@ -696,14 +694,6 @@ const TrainingAnalytics = () => {
 
   const configurableChartData = useMemo(() => {
     if (!data) return { series: [], categories: [], type: 'line' as const }
-    if (configurableField === 'studentsPerModule') {
-      const byModule = data.enrollmentsByModule || []
-      return {
-        type: 'bar' as const,
-        categories: byModule.map((m) => m.moduleName),
-        series: [{ name: 'Students', data: byModule.map((m) => m.enrolledCount) }],
-      }
-    }
     let buckets: TimeBucket[] = []
     let seriesName = ''
     if (configurableField === 'enrollmentsOverTime') {
@@ -1011,18 +1001,7 @@ const TrainingAnalytics = () => {
                 </div>
                 <div className={ANALYTICS_TWIN_BODY_CLASS}>
                   <div className={ANALYTICS_TWIN_CONTENT_CLASS}>
-                    {configurableChartData.type === 'bar' && moduleEnrollmentItems.length > 0 ? (
-                      <HorizontalBarChart
-                        items={moduleEnrollmentItems}
-                        nameColumnLabel="Module"
-                        valueColumnLabel="Students"
-                        ariaLabel={`Students per module trend. ${moduleEnrollmentItems.length} modules.`}
-                        barColor="#0d9488"
-                        labelColumnClassName={MODULE_BAR_LABEL_COLUMN_CLASS}
-                        labelAlign="start"
-                        wrapLabels
-                      />
-                    ) : configurableChartData.categories.length > 0 ? (
+                    {configurableChartData.categories.length > 0 ? (
                       <div className="h-full min-h-0 w-full">
                         <ReactApexChart
                           type={configurableChartData.type}
