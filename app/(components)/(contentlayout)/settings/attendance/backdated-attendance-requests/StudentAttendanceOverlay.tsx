@@ -280,7 +280,7 @@ export default function StudentAttendanceOverlay({
           studentError =
             (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
             (e as Error)?.message ??
-            "Could not load student attendance";
+            "Could not load employee attendance";
         }
       }
 
@@ -592,7 +592,7 @@ export default function StudentAttendanceOverlay({
         <div className="overflow-y-auto flex-1 px-4 py-4 sm:px-6 sm:py-5">
           {!canLoadAttendance && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-              Missing student, user, or candidate id. Close and open the row again.
+              Missing employee, user, or candidate id. Close and open the row again.
             </div>
           )}
 

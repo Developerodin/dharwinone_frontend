@@ -506,7 +506,7 @@ export default function CandidateAttendanceOverlay({
       await Swal.fire({
         icon: "warning",
         title: "Training profile required",
-        text: "This employee has no linked training profile. Link a student profile before adding backdated attendance.",
+        text: "This employee has no linked training profile. Link a training profile before adding backdated attendance.",
         confirmButtonText: "OK",
       });
       return;

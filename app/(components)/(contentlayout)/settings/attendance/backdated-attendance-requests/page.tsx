@@ -425,7 +425,7 @@ export default function SettingsAttendanceBackdatedPage() {
       title: "Approve Backdated Attendance Request",
       html: `
         <div class="text-left mb-4">
-          <p><strong>Student:</strong> ${getStudentName(request)}</p>
+          <p><strong>Employee:</strong> ${getStudentName(request)}</p>
           ${entriesHtml}
         </div>
         <textarea id="adminComment" class="swal2-textarea" placeholder="Add a comment (optional)" maxlength="1000"></textarea>
@@ -464,7 +464,7 @@ export default function SettingsAttendanceBackdatedPage() {
       title: "Reject Backdated Attendance Request",
       html: `
         <div class="text-left mb-4">
-          <p><strong>Student:</strong> ${getStudentName(request)}</p>
+          <p><strong>Employee:</strong> ${getStudentName(request)}</p>
           ${datesHtml}
         </div>
         <textarea id="adminComment" class="swal2-textarea" placeholder="Reason for rejection (optional)" maxlength="1000"></textarea>
@@ -509,7 +509,7 @@ export default function SettingsAttendanceBackdatedPage() {
     const { value: form } = await Swal.fire({
       title: "Update Backdated Attendance Request",
       html: `
-        <div class="text-left mb-2"><p><strong>Student:</strong> ${getStudentName(request)}</p></div>
+        <div class="text-left mb-2"><p><strong>Employee:</strong> ${getStudentName(request)}</p></div>
         <div class="text-left text-xs text-gray-500 mb-2">Punch In/Out apply to every working day in the range (weekends excluded).</div>
         <label class="swal2-input-label">From</label>
         <input id="fromDate" type="date" value="${fromStr}" class="swal2-input" max="${todayStr}">
@@ -668,8 +668,8 @@ export default function SettingsAttendanceBackdatedPage() {
     if (!studentId && !userId && !candidateId) {
       Swal.fire({
         icon: "warning",
-        title: "Student not found",
-        text: "This request is not linked to a student, user, or ATS candidate (by email).",
+        title: "Employee not found",
+        text: "This request is not linked to an employee, user, or ATS candidate (by email).",
         confirmButtonText: "OK",
       });
       return;
@@ -1169,7 +1169,7 @@ return (
                                 <p className="text-sm font-semibold text-defaulttextcolor tracking-tight">
                                   {getStudentName(request)}
                                 </p>
-                                <p className="text-xs text-defaulttextcolor/60 mt-0.5">Student</p>
+                                <p className="text-xs text-defaulttextcolor/60 mt-0.5">Employee</p>
                               </div>
 
                               {/* Date entries: compact definition list */}
@@ -1369,7 +1369,7 @@ return (
                 <ul className="mt-4 space-y-3 text-sm text-defaulttextcolor/85 dark:text-white/80">
                   <li className="flex items-start gap-3">
                     <i className="ri-checkbox-circle-fill mt-0.5 text-emerald-500/90 shrink-0 text-base" />
-                    <span>Students submit backdated attendance requests for past dates.</span>
+                    <span>Employees submit backdated attendance requests for past dates.</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <i className="ri-edit-fill mt-0.5 text-primary shrink-0 text-base" />
@@ -1377,7 +1377,7 @@ return (
                   </li>
                   <li className="flex items-start gap-3">
                     <i className="ri-check-double-line mt-0.5 text-emerald-600 dark:text-emerald-400 shrink-0 text-base" />
-                    <span><strong className="text-defaulttextcolor">Approve:</strong> Creates or updates attendance records in the student&apos;s calendar.</span>
+                    <span><strong className="text-defaulttextcolor">Approve:</strong> Creates or updates attendance records in the employee&apos;s calendar.</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <i className="ri-close-circle-fill mt-0.5 text-rose-500/90 shrink-0 text-base" />
