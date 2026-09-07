@@ -12,7 +12,8 @@ import {
 } from "@/shared/lib/attendance-assign-people-options";
 import { assignLeavesToStudents } from "@/shared/lib/api/attendance";
 import { YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
-import { getReferralLeadsDateRangeError } from "@/shared/lib/ymd-filter-date-input.util";
+import { getReferralLeadsDateRangeError, getYmdDateRangeIncompleteError } from "@/shared/lib/ymd-filter-date-input.util";
+import { alertYmdDateRangeIncomplete } from "@/shared/lib/ymd-filter-date-range-alert";
 import Seo from "@/shared/layout-components/seo/seo";
 import Swal from "sweetalert2";
 import dynamic from "next/dynamic";
@@ -226,6 +227,12 @@ function AssignLeaveDateRangeFieldset({
   assigning,
   hasPeople,
 }: AssignLeaveDateRangeFieldsetProps) {
+  const [datesExpanded, setDatesExpanded] = useState(false);
+
+  useEffect(() => {
+    setDatesExpanded(false);
+  }, [selectedDates, viewDatesOpen]);
+
   const maxStartDate = toDate
     ? addCalendarDaysYmd(toDate, 1 - MAX_ASSIGN_LEAVE_SPAN_DAYS) ?? undefined
     : undefined;
@@ -235,8 +242,8 @@ function AssignLeaveDateRangeFieldset({
   const fromMinDate = laterYmd(maxStartDate, joinMinDate);
   const toMaxDate = earlierYmd(maxEndDate, resignMaxDate);
   const excludedPhrase = excludedCountPhrase(excludedWeekOff, excludedHoliday);
-  const previewDates = selectedDates.slice(0, VIEW_DATES_PREVIEW);
-  const hiddenCount = selectedDates.length - previewDates.length;
+  const hiddenCount = datesExpanded ? 0 : Math.max(0, selectedDates.length - VIEW_DATES_PREVIEW);
+  const visibleDates = datesExpanded ? selectedDates : selectedDates.slice(0, VIEW_DATES_PREVIEW);
   const dateRangeError = getReferralLeadsDateRangeError(fromDate, toDate);
   const fromDateError = joinDateError ?? dateRangeError;
   const toDateError = resignDateError ?? dateRangeError;
@@ -347,7 +354,7 @@ function AssignLeaveDateRangeFieldset({
               </button>
               {viewDatesOpen && (
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {previewDates.map((d) => (
+                  {visibleDates.map((d) => (
                     <span
                       key={d}
                       className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 text-primary border border-primary/20 pl-3 text-sm font-medium dark:bg-primary/20 dark:border-primary/30"
@@ -364,9 +371,15 @@ function AssignLeaveDateRangeFieldset({
                     </span>
                   ))}
                   {hiddenCount > 0 && (
-                    <span className="inline-flex min-h-11 items-center text-sm text-defaulttextcolor/70 dark:text-white/60">
+                    <button
+                      type="button"
+                      onClick={() => setDatesExpanded(true)}
+                      aria-expanded={datesExpanded}
+                      aria-label={`Show ${hiddenCount} more selected dates`}
+                      className="inline-flex min-h-11 items-center rounded-full px-3 text-sm font-medium text-primary hover:bg-primary/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 dark:hover:bg-primary/20 cursor-pointer"
+                    >
                       and {hiddenCount} more
-                    </span>
+                    </button>
                   )}
                 </div>
               )}
@@ -519,6 +532,7 @@ export default function SettingsAttendanceAssignLeavePage() {
 
   const onToDateChange = (next: string) => {
     setToDate(next);
+    void alertYmdDateRangeIncomplete("From", "To", fromDate, next);
     if (next) {
       const violations = findResignDateViolations(next, chosenPeople);
       if (violations.length > 0) {
@@ -538,6 +552,7 @@ export default function SettingsAttendanceAssignLeavePage() {
 
   const onFromDateChange = (next: string) => {
     setFromDate(next);
+    void alertYmdDateRangeIncomplete("From", "To", next, toDate);
     if (next) {
       const violations = findJoinDateViolations(next, chosenPeople);
       if (violations.length > 0) {
@@ -561,7 +576,12 @@ export default function SettingsAttendanceAssignLeavePage() {
       return;
     }
     if (!fromDate || !toDate) {
-      await warn("Date range required", "Select a start date and end date.");
+      const incompleteMsg = getYmdDateRangeIncompleteError("From", "To", fromDate, toDate);
+      if (incompleteMsg) {
+        await alertYmdDateRangeIncomplete("From", "To", fromDate, toDate);
+        return;
+      }
+      await warn("Date range required", "Select a From date and To date.");
       return;
     }
     const joinViolations = findJoinDateViolations(fromDate, chosenPeople);
@@ -727,7 +747,7 @@ export default function SettingsAttendanceAssignLeavePage() {
               <>
                 <div>
                   <label className="block text-sm font-semibold text-defaulttextcolor mb-2">Select people <span className="text-danger">*</span></label>
-                  <div className="rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all duration-150">
+                  <div className="rounded-xl border border-defaultborder/80 bg-white dark:border-white/10 dark:bg-white/5 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all duration-150">
                     <Select
                       isMulti
                       options={personOptions}
@@ -840,21 +860,6 @@ export default function SettingsAttendanceAssignLeavePage() {
           </div>
         </section>
       </div>
-      <style jsx>{`
-        .assign-leave-select :global(.react-select__control) {
-          border: none;
-          min-height: 2.75rem;
-          background: transparent;
-          box-shadow: none;
-        }
-        .assign-leave-select :global(.react-select__control--is-focused) {
-          box-shadow: none;
-        }
-        .assign-leave-select :global(.react-select__placeholder),
-        .assign-leave-select :global(.react-select__input-container) {
-          color: inherit;
-        }
-      `}</style>
     </>
   );
 }

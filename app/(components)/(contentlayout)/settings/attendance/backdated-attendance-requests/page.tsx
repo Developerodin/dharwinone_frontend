@@ -899,7 +899,7 @@ return (
               <div>
                 <label className="block text-sm font-semibold text-defaulttextcolor mb-2">Select people <span className="text-danger">*</span></label>
                 <p className="text-xs text-defaulttextcolor/60 mb-2">Search by name, email, or employee ID (same as other Attendance assign screens).</p>
-                <div className="rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all duration-150">
+                <div className="rounded-xl border border-defaultborder/80 bg-white dark:border-white/10 dark:bg-white/5 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all duration-150">
                   <Select
                     options={people}
                     value={addPersonValue ? people.find((p) => p.value === addPersonValue) ?? null : null}
@@ -1134,7 +1134,7 @@ return (
               </div>
               <div className="min-w-[220px] w-full sm:w-[min(360px,100%)] sm:ml-auto">
                 <label className="sr-only">Filter by person</label>
-                <div className="rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all duration-150">
+                <div className="rounded-xl border border-defaultborder/80 bg-white dark:border-white/10 dark:bg-white/5 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all duration-150">
                   <Select
                     options={listFilterOptions as { value: string; label: string }[]}
                     value={listFilterValue as { value: string; label: string }}
@@ -1483,25 +1483,6 @@ return (
         </section>
       </div>
 
-      <style jsx>{`
-        .backdated-add-person-select :global(.react-select__control),
-        .backdated-filter-person-select :global(.react-select__control) {
-          border: none;
-          min-height: 2.75rem;
-          background: transparent;
-          box-shadow: none;
-        }
-        .backdated-add-person-select :global(.react-select__control--is-focused),
-        .backdated-filter-person-select :global(.react-select__control--is-focused) {
-          box-shadow: none;
-        }
-        .backdated-add-person-select :global(.react-select__placeholder),
-        .backdated-add-person-select :global(.react-select__input-container),
-        .backdated-filter-person-select :global(.react-select__placeholder),
-        .backdated-filter-person-select :global(.react-select__input-container) {
-          color: inherit;
-        }
-      `}</style>
 
       <AttendanceConflictOverlay
         key={addConflicts ? addConflicts.conflicts.map((c) => c.date).join(",") : "closed"}

@@ -682,3 +682,54 @@ html.swal2-shown {
   overflow: hidden;
   grid-template-rows: minmax(0, 1fr);
 }
+
+/*
+   react-select controls in dark mode.
+
+   Vendor style.css pins `.react-select__control` to `border-defaultborder !important`, but the
+   `.dark` token block never redefines `--default-border` — it stays `243 243 243`, so every
+   react-select control drew a near-white border on the dark surface. The `styles` prop from
+   `usePmReactSelectStyles` sets an inline borderColor, which an `!important` rule outranks.
+   Restate it here with higher specificity; light mode is untouched.
+*/
+.dark .react-select__control {
+  border-color: rgba(148, 163, 184, 0.25) !important;
+}
+.dark .react-select__control--is-focused {
+  border-color: rgb(var(--primary-rgb)) !important;
+}
+
+/*
+   Attendance "Select people/group" fields: a wrapper div owns the rounded border, focus ring and
+   background, so the react-select control inside must be completely flat — otherwise its own
+   border and square 4px corners show through the wrapper's rounded corners.
+
+   Each of these pages carried this as a styled-jsx block, which never applied: styled-jsx scopes
+   only elements rendered by the component's own JSX, and the control is rendered inside
+   react-select, so it never received the jsx- class.
+
+   Keep this block BELOW the `.dark .react-select__control` rule above — both are (0,2,0) with
+   `!important`, so source order is what makes `border: none` win in dark mode.
+*/
+.assign-leave-select,
+.assign-shift-select,
+.assign-holidays-select,
+.assign-holidays-group-select,
+.assign-holidays-group-edit-select,
+.week-off-select,
+.backdated-add-person-select,
+.backdated-filter-person-select,
+.candidate-groups-select {
+  .react-select__control {
+    min-height: 2.75rem;
+    border: none !important;
+    border-radius: inherit;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .react-select__placeholder,
+  .react-select__input-container {
+    color: inherit;
+  }
+}

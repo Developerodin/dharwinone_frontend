@@ -14,7 +14,8 @@ import Swal from "sweetalert2";
 import { useAttendanceAdminAccess } from "@/shared/hooks/use-attendance-admin-access";
 import { useDebouncedValue } from "@/app/(components)/(contentlayout)/communication/dialer/_lib/contactSearch";
 import { YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
-import { getReferralLeadsDateRangeError } from "@/shared/lib/ymd-filter-date-input.util";
+import { getReferralLeadsDateRangeError, getYmdDateRangeIncompleteError } from "@/shared/lib/ymd-filter-date-input.util";
+import { alertYmdDateRangeIncomplete } from "@/shared/lib/ymd-filter-date-range-alert";
 import ListPagination from "@/shared/components/ListPagination";
 import { effectiveIsActive, sortHolidaysByRelevance } from "@/shared/lib/holidays/effectiveHoliday";
 
@@ -59,6 +60,16 @@ export default function SettingsAttendanceHolidaysPage() {
 
   const fetchHolidays = useCallback(async () => {
     const generation = ++fetchGenerationRef.current;
+    const incompleteMsg = getYmdDateRangeIncompleteError(
+      "From",
+      "To",
+      startDateFilter,
+      endDateFilter
+    );
+    if (incompleteMsg) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -310,6 +321,7 @@ export default function SettingsAttendanceHolidaysPage() {
   const commitStartDateFilter = (sanitized: string) => {
     setStartDateFilter(sanitized);
     setCurrentPage(1);
+    void alertYmdDateRangeIncomplete("From", "To", sanitized, endDateFilter);
     if (sanitized) {
       requestAnimationFrame(() => document.getElementById(HOLIDAYS_FILTER_TO_INPUT_ID)?.focus());
     }
@@ -318,6 +330,7 @@ export default function SettingsAttendanceHolidaysPage() {
   const commitEndDateFilter = (sanitized: string) => {
     setEndDateFilter(sanitized);
     setCurrentPage(1);
+    void alertYmdDateRangeIncomplete("From", "To", startDateFilter, sanitized);
   };
 
   const isSearchDebouncing = titleFilter.trim() !== debouncedTitleFilter.trim();

@@ -192,7 +192,7 @@ export default function WeekOffDayRoster({
               setPage(1);
             }}
             placeholder="Search name, email, or ID…"
-            className="min-h-11 w-full rounded-xl border border-defaultborder/80 bg-white py-2 pl-9 pr-3 text-sm text-defaulttextcolor outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 dark:bg-white/5 dark:text-white"
+            className="min-h-11 w-full rounded-xl border border-defaultborder/80 bg-white py-2 pl-9 pr-3 text-sm text-defaulttextcolor outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-defaultborder/60 dark:bg-white/5 dark:text-white dark:focus:border-primary"
           />
         </label>
       </div>

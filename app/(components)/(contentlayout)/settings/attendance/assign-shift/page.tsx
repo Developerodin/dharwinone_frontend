@@ -542,7 +542,7 @@ export default function SettingsAttendanceAssignShiftPage() {
                   >
                     Select people <span className="text-danger">*</span>
                   </label>
-                  <div className="overflow-hidden rounded-xl border border-defaultborder/80 bg-white transition-all duration-150 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 dark:bg-white/5">
+                  <div className="overflow-hidden rounded-xl border border-defaultborder/80 bg-white transition-all duration-150 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 dark:border-white/10 dark:bg-white/5">
                     <AsyncSelect
                       key={peopleRetry}
                       inputId="assign-shift-people"
@@ -602,21 +602,6 @@ export default function SettingsAttendanceAssignShiftPage() {
           </div>
         </section>
       </div>
-      <style jsx>{`
-        .assign-shift-select :global(.react-select__control) {
-          border: none;
-          min-height: 2.75rem;
-          background: transparent;
-          box-shadow: none;
-        }
-        .assign-shift-select :global(.react-select__control--is-focused) {
-          box-shadow: none;
-        }
-        .assign-shift-select :global(.react-select__placeholder),
-        .assign-shift-select :global(.react-select__input-container) {
-          color: inherit;
-        }
-      `}</style>
     </>
   );
 }

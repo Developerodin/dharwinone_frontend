@@ -41,7 +41,10 @@ const Select = dynamic(() => import("react-select"), { ssr: false });
 
 const VALID_DAYS_SET = new Set<string>(WEEK_OFF_DAYS);
 const STATUS_CAP = 10;
-const PEOPLE_SEARCH_LIMIT = 20;
+// Search stays server-side. The empty-query fetch is what fills the dropdown before the user
+// types, so the limit is also the size of that default page — 20 was small enough that a partial
+// name often returned a slice that excluded the person being looked for.
+const PEOPLE_SEARCH_LIMIT = 50;
 const PEOPLE_SEARCH_DEBOUNCE_MS = 300;
 
 type ViewMode = "assign" | "review";
@@ -96,7 +99,7 @@ export default function SettingsAttendanceWeekOffPage() {
   const [people, setPeople] = useState<AssignPersonRow[]>([]);
   const [selectedPeople, setSelectedPeople] = useState<AssignPersonRow[]>([]);
   const [peopleQuery, setPeopleQuery] = useState("");
-  const [peopleSearching, setPeopleSearching] = useState(false);
+  const [peopleSearching, setPeopleSearching] = useState(true);
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
   const [updating, setUpdating] = useState(false);
   const [loadingWeekOff, setLoadingWeekOff] = useState(false);
@@ -144,49 +147,52 @@ export default function SettingsAttendanceWeekOffPage() {
 
   useEffect(() => {
     const needle = peopleQuery.trim();
-    if (!needle) {
-      setPeople(selectedPeopleRef.current);
-      setPeopleSearching(false);
-      return;
-    }
     let cancelled = false;
     setPeopleSearching(true);
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const looksLikeEmail = needle.includes("@");
-          const [stuRes, candRes] = await Promise.all([
-            listStudents({ limit: PEOPLE_SEARCH_LIMIT, search: needle, sortBy: "user.name:asc" }),
-            listCandidates({
-              limit: PEOPLE_SEARCH_LIMIT,
-              search: needle,
-              ...(looksLikeEmail ? { email: needle } : {}),
-              employmentStatus: "all",
-              sortBy: "fullName:asc",
-            }),
-          ]);
-          if (cancelled) return;
-          const hits = buildMergedAssignPeopleOptions(stuRes.results ?? [], candRes.results ?? []);
-          setPeople(mergePeople(selectedPeopleRef.current, hits));
-        } catch (err: unknown) {
-          if (cancelled) return;
-          const msg = (err as { message?: string })?.message ?? "Failed to search people";
-          setError(msg);
-        } finally {
-          if (!cancelled) setPeopleSearching(false);
-        }
-      })();
-    }, PEOPLE_SEARCH_DEBOUNCE_MS);
+    // No query still queries: the first page doubles as the default list to scroll.
+    const timer = window.setTimeout(
+      () => {
+        void (async () => {
+          try {
+            const looksLikeEmail = needle.includes("@");
+            const [stuRes, candRes] = await Promise.all([
+              listStudents({
+                limit: PEOPLE_SEARCH_LIMIT,
+                ...(needle ? { search: needle } : {}),
+                sortBy: "user.name:asc",
+              }),
+              listCandidates({
+                limit: PEOPLE_SEARCH_LIMIT,
+                ...(needle ? { search: needle } : {}),
+                ...(looksLikeEmail ? { email: needle } : {}),
+                employmentStatus: "all",
+                sortBy: "fullName:asc",
+              }),
+            ]);
+            if (cancelled) return;
+            const hits = buildMergedAssignPeopleOptions(stuRes.results ?? [], candRes.results ?? []);
+            setPeople(mergePeople(selectedPeopleRef.current, hits));
+          } catch (err: unknown) {
+            if (cancelled) return;
+            const msg = (err as { message?: string })?.message ?? "Failed to search people";
+            setError(msg);
+          } finally {
+            if (!cancelled) setPeopleSearching(false);
+          }
+        })();
+      },
+      needle ? PEOPLE_SEARCH_DEBOUNCE_MS : 0
+    );
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
   }, [peopleQuery]);
 
+  // Keep anything already selected (e.g. from a SOP deep link) present in the option list.
   useEffect(() => {
-    if (peopleQuery.trim()) return;
-    setPeople(selectedPeople);
-  }, [selectedPeople, peopleQuery]);
+    setPeople((prev) => mergePeople(selectedPeople, prev));
+  }, [selectedPeople]);
 
   const mergeSopPerson = useCallback((row: AssignPersonRow) => {
     setPeople((prev) => (prev.some((s) => s.value === row.value) ? prev : [row, ...prev]));
@@ -753,7 +759,7 @@ export default function SettingsAttendanceWeekOffPage() {
                   </button>
                 )}
               </div>
-              <div className="overflow-hidden rounded-xl border border-defaultborder/80 bg-white transition-all duration-150 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 dark:bg-white/5">
+              <div className="overflow-hidden rounded-xl border border-defaultborder/80 bg-white transition-all duration-150 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 dark:border-white/10 dark:bg-white/5">
                 <Select
                   isMulti
                   options={people}
@@ -771,8 +777,9 @@ export default function SettingsAttendanceWeekOffPage() {
                       ? "Searching…"
                       : inputValue.trim()
                         ? `No people match “${inputValue.trim()}”`
-                        : "Type to search the directory"
+                        : "No people found"
                   }
+                  className="react-select-container week-off-select"
                   classNamePrefix="react-select"
                   isClearable
                   isSearchable
@@ -784,7 +791,8 @@ export default function SettingsAttendanceWeekOffPage() {
                 />
               </div>
               <p className="mt-1.5 text-xs text-defaulttextcolor/60">
-                Search by name or email. No Select All — use Who&apos;s off to review everyone on a day.
+                Scroll the list, or type any part of a name, email or employee ID to search. No
+                Select All — use Who&apos;s off to review everyone on a day.
                 {selectedPeople.length > 0 ? ` ${selectedPeople.length} selected.` : ""}
               </p>
             </div>

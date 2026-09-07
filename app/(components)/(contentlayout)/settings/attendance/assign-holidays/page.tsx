@@ -301,29 +301,6 @@ export default function SettingsAttendanceAssignHolidaysPage() {
     setError(null);
   };
 
-  const holidayGroupNames = Array.from(
-    new Set(holidays.map((h) => (h.group ?? "").trim()).filter(Boolean))
-  ).sort();
-
-  // Merge every holiday in a named group into the current selection (dedup by id).
-  const selectHolidayGroup = (groupName: string) => {
-    if (!groupName) return;
-    const inGroup = holidays.filter((h) => (h.group ?? "").trim() === groupName);
-    setSelectedHolidays((prev) => {
-      const existing = new Set(prev.map((x) => x.value));
-      const additions = inGroup
-        .map((h) => {
-          const value = String(h._id ?? h.id ?? "");
-          const dateLabel = h.endDate
-            ? `${formatDate(h.date)} – ${formatDate(h.endDate)}`
-            : formatDate(h.date);
-          return { value, label: `${h.title} (${dateLabel})`, holiday: h };
-        })
-        .filter((o) => o.value && !existing.has(o.value));
-      return [...prev, ...additions];
-    });
-  };
-
   function formatDate(dateString: string) {
     try {
       return new Date(dateString).toLocaleDateString("en-US", {
@@ -446,7 +423,7 @@ export default function SettingsAttendanceAssignHolidaysPage() {
                     <span>Loading training profiles and employees…</span>
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all duration-150">
+                  <div className="rounded-xl border border-defaultborder/80 bg-white dark:border-white/10 dark:bg-white/5 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all duration-150">
                     <Select
                       isMulti
                       options={personOptionsWithSelectAll}
@@ -494,22 +471,6 @@ export default function SettingsAttendanceAssignHolidaysPage() {
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                   <label className="block text-sm font-semibold text-defaulttextcolor">Select Holidays <span className="text-danger">*</span></label>
                   <div className="flex items-center gap-3">
-                    {holidayGroupNames.length > 0 && (
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          selectHolidayGroup(e.target.value);
-                          e.target.value = "";
-                        }}
-                        className="rounded-lg border border-defaultborder/80 bg-white dark:bg-white/5 px-3 py-1.5 text-xs text-defaulttextcolor focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                        title="Add all holidays in a group"
-                      >
-                        <option value="">+ Add group…</option>
-                        {holidayGroupNames.map((g) => (
-                          <option key={g} value={g}>{g}</option>
-                        ))}
-                      </select>
-                    )}
                     {holidays.length > 0 && (
                       <button
                         type="button"
@@ -671,21 +632,6 @@ export default function SettingsAttendanceAssignHolidaysPage() {
           </div>
         </section>
       </div>
-      <style jsx>{`
-        .assign-holidays-select :global(.react-select__control) {
-          border: none;
-          min-height: 2.75rem;
-          background: transparent;
-          box-shadow: none;
-        }
-        .assign-holidays-select :global(.react-select__control--is-focused) {
-          box-shadow: none;
-        }
-        .assign-holidays-select :global(.react-select__placeholder),
-        .assign-holidays-select :global(.react-select__input-container) {
-          color: inherit;
-        }
-      `}</style>
     </>
   );
 }

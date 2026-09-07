@@ -490,8 +490,8 @@ export default function SettingsAttendanceManageShiftsPage() {
                 >
                   <option value="name:asc">Name (A–Z)</option>
                   <option value="name:desc">Name (Z–A)</option>
-                  <option value="createdAt:desc">Created (Newest)</option>
-                  <option value="createdAt:asc">Created (Oldest)</option>
+                  <option value="createdAt:desc">Newest</option>
+                  <option value="createdAt:asc">Oldest</option>
                 </select>
               </div>
               {hasActiveFilters && (

@@ -387,35 +387,11 @@ export default function EmployeeGroupHolidayAssign({ embedded = false }: { embed
     ? [{ value: SELECT_ALL, label: "Select All Employees", student: {} as Student }, ...allStudents]
     : allStudents;
 
-  const holidayGroupNames = useMemo(
-    () =>
-      Array.from(new Set(pickerHolidays.map((h) => (h.group ?? "").trim()).filter(Boolean))).sort(),
-    [pickerHolidays]
-  );
-
   const allPickerSelected =
     pickerHolidays.length > 0 &&
     pickerHolidays.every((h) =>
       selectedHolidays.some((s) => s.value === String(h._id ?? h.id ?? ""))
     );
-
-  const selectHolidayGroup = (groupName: string) => {
-    if (!groupName) return;
-    const inGroup = pickerHolidays.filter((h) => (h.group ?? "").trim() === groupName);
-    setSelectedHolidays((prev) => {
-      const existing = new Set(prev.map((x) => x.value));
-      const additions = inGroup
-        .map((h) => {
-          const value = String(h._id ?? h.id ?? "");
-          const dateLabel = h.endDate
-            ? `${formatDate(h.date)} – ${formatDate(h.endDate)}`
-            : formatDate(h.date);
-          return { value, label: `${h.title} (${dateLabel})`, holiday: h };
-        })
-        .filter((o) => o.value && !existing.has(o.value));
-      return [...prev, ...additions];
-    });
-  };
 
   const handleAssign = async () => {
     if (!selectedGroup?.value) {
@@ -671,24 +647,6 @@ export default function EmployeeGroupHolidayAssign({ embedded = false }: { embed
             Select Holidays <span className="text-danger">*</span>
           </label>
           <div className="flex items-center gap-3">
-            {holidayGroupNames.length > 0 && (
-              <select
-                value=""
-                onChange={(e) => {
-                  selectHolidayGroup(e.target.value);
-                  e.target.value = "";
-                }}
-                className="rounded-lg border border-defaultborder/80 bg-white dark:bg-white/5 px-3 py-1.5 text-xs text-defaulttextcolor focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                title="Add all holidays in a holiday group label"
-              >
-                <option value="">+ Add holiday group…</option>
-                {holidayGroupNames.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </select>
-            )}
             {pickerHolidays.length > 0 && (
               <button
                 type="button"
@@ -1025,34 +983,6 @@ export default function EmployeeGroupHolidayAssign({ embedded = false }: { embed
     return (
       <>
         {content}
-        <style jsx>{`
-          .assign-holidays-group-select :global(.react-select__control) {
-            border: none;
-            min-height: 2.75rem;
-            background: transparent;
-            box-shadow: none;
-          }
-          .assign-holidays-group-select :global(.react-select__control--is-focused) {
-            box-shadow: none;
-          }
-          .assign-holidays-group-select :global(.react-select__placeholder),
-          .assign-holidays-group-select :global(.react-select__input-container) {
-            color: inherit;
-          }
-          .assign-holidays-group-edit-select :global(.react-select__control) {
-            border: none;
-            min-height: 2.75rem;
-            background: transparent;
-            box-shadow: none;
-          }
-          .assign-holidays-group-edit-select :global(.react-select__control--is-focused) {
-            box-shadow: none;
-          }
-          .assign-holidays-group-edit-select :global(.react-select__placeholder),
-          .assign-holidays-group-edit-select :global(.react-select__input-container) {
-            color: inherit;
-          }
-        `}</style>
       </>
     );
   }
@@ -1078,34 +1008,6 @@ export default function EmployeeGroupHolidayAssign({ embedded = false }: { embed
         </div>
         {content}
       </section>
-      <style jsx>{`
-        .assign-holidays-group-select :global(.react-select__control) {
-          border: none;
-          min-height: 2.75rem;
-          background: transparent;
-          box-shadow: none;
-        }
-        .assign-holidays-group-select :global(.react-select__control--is-focused) {
-          box-shadow: none;
-        }
-        .assign-holidays-group-select :global(.react-select__placeholder),
-        .assign-holidays-group-select :global(.react-select__input-container) {
-          color: inherit;
-        }
-        .assign-holidays-group-edit-select :global(.react-select__control) {
-          border: none;
-          min-height: 2.75rem;
-          background: transparent;
-          box-shadow: none;
-        }
-        .assign-holidays-group-edit-select :global(.react-select__control--is-focused) {
-          box-shadow: none;
-        }
-        .assign-holidays-group-edit-select :global(.react-select__placeholder),
-        .assign-holidays-group-edit-select :global(.react-select__input-container) {
-          color: inherit;
-        }
-      `}</style>
     </>
   );
 }

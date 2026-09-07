@@ -465,21 +465,6 @@ export default function SettingsAttendanceStudentGroupsPage() {
           </div>
         </section>
       </div>
-      <style jsx>{`
-        .candidate-groups-select :global(.react-select__control) {
-          border: none;
-          min-height: 2.75rem;
-          background: transparent;
-          box-shadow: none;
-        }
-        .candidate-groups-select :global(.react-select__control--is-focused) {
-          box-shadow: none;
-        }
-        .candidate-groups-select :global(.react-select__placeholder),
-        .candidate-groups-select :global(.react-select__input-container) {
-          color: inherit;
-        }
-      `}</style>
     </>
   );
 }
