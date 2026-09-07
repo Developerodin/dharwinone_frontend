@@ -19,6 +19,7 @@ import {
   groupTrainingModulesIntoFolders,
 } from '@/shared/lib/training/group-modules-into-folders'
 import { type ModuleLifecycleStatus } from './_components/ModuleStatusBadge'
+import { ModulesBulkActionsBar } from './_components/ModulesBulkActionsBar'
 import { ModulesFolderList } from './_components/ModulesFolderList'
 import { ModulesListEmptyState } from './_components/ModulesListEmptyState'
 import { ModulesListToolbar } from './_components/ModulesListToolbar'
@@ -1357,81 +1358,16 @@ const TrainingModules = () => {
         </div>
       </div> 
 
-      {selectedIds.size > 0 && (
-        <div
-          className="sticky top-0 z-[60] mb-5 rounded-xl border border-primary bg-primary text-white px-4 py-3"
-          role="region"
-          aria-label="Bulk module actions"
-        >
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center justify-center w-9 h-9 rounded-lg bg-white text-primary text-sm font-semibold tabular-nums">
-                {selectedIds.size}
-              </span>
-              <div>
-                <span className="font-semibold text-[0.875rem] leading-tight block">
-                  {selectedIds.size === 1 ? '1 module' : `${selectedIds.size} modules`} selected
-                </span>
-                <button
-                  type="button"
-                  className="text-white/80 hover:text-white text-[0.75rem] underline underline-offset-2 transition-colors duration-200 leading-tight bg-transparent border-0 p-0"
-                  onClick={clearSelection}
-                >
-                  Clear selection
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                className="ti-btn ti-btn-sm !mb-0 !bg-white/15 !text-white !border !border-white/25 hover:!bg-white/25 min-h-9"
-                disabled={bulkBusy}
-                onClick={() => handleBulkStatus('published')}
-              >
-                <i className="ri-send-plane-2-line me-1 align-middle" aria-hidden />
-                Publish
-              </button>
-              <button
-                type="button"
-                className="ti-btn ti-btn-sm !mb-0 !bg-white/15 !text-white !border !border-white/25 hover:!bg-white/25 min-h-9"
-                disabled={bulkBusy}
-                onClick={() => handleBulkStatus('draft')}
-              >
-                <i className="ri-file-edit-line me-1 align-middle" aria-hidden />
-                Draft
-              </button>
-              <button
-                type="button"
-                className="ti-btn ti-btn-sm !mb-0 !bg-white/15 !text-white !border !border-white/25 hover:!bg-white/25 min-h-9"
-                disabled={bulkBusy}
-                onClick={() => handleBulkStatus('archived')}
-              >
-                <i className="ri-archive-2-line me-1 align-middle" aria-hidden />
-                Archive
-              </button>
-              <span className="w-px h-6 bg-white/25 mx-0.5" aria-hidden />
-              <button
-                type="button"
-                className="ti-btn ti-btn-sm !mb-0 !bg-white/15 !text-white !border !border-white/25 hover:!bg-white/25 min-h-9"
-                disabled={bulkBusy}
-                onClick={() => setBulkFolderOpen(true)}
-              >
-                <i className="ri-folder-transfer-line me-1 align-middle" aria-hidden />
-                Move
-              </button>
-              <button
-                type="button"
-                className="ti-btn ti-btn-sm ti-btn-danger-full !mb-0 min-h-9"
-                disabled={bulkBusy}
-                onClick={handleBulkDelete}
-              >
-                <i className="ri-delete-bin-line me-1 align-middle" aria-hidden />
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {selectedIds.size > 0 ? (
+        <ModulesBulkActionsBar
+          count={selectedIds.size}
+          busy={bulkBusy}
+          onClear={clearSelection}
+          onSetStatus={handleBulkStatus}
+          onMove={() => setBulkFolderOpen(true)}
+          onDelete={handleBulkDelete}
+        />
+      ) : null}
 
       {loading ? (
         <div className="space-y-2 px-1" aria-busy="true" aria-label="Loading modules">
