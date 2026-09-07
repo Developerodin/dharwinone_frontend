@@ -2,13 +2,31 @@
 
 import Link from 'next/link'
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type {
   TrainingModuleLifecycleCounts,
   TrainingModulesListStatus,
 } from '@/shared/lib/training/group-modules-into-folders'
-import { closeHsDropdown, toggleHsDropdown } from './ModuleRowActions'
 import { ModulesFolderExpandControls } from './ModulesFolderExpandControls'
 import { ModulesStatusFilter } from './ModulesStatusFilter'
+
+const OVERFLOW_MENU_WIDTH = 184
+
+type OverflowMenuCoords = { top: number; left: number }
+
+/**
+ * Viewport-fixed coords so the kebab is not clipped by the toolbar's overflow-x row.
+ */
+function computeOverflowMenuCoords(button: HTMLElement): OverflowMenuCoords {
+  const rect = button.getBoundingClientRect()
+  const gutter = 8
+  const gap = 4
+  const left = Math.max(
+    gutter,
+    Math.min(rect.right - OVERFLOW_MENU_WIDTH, window.innerWidth - OVERFLOW_MENU_WIDTH - gutter),
+  )
+  return { top: rect.bottom + gap, left }
+}
 
 export type ModulesSortOption = { value: string; label: string }
 
@@ -51,28 +69,69 @@ export function ModulesListToolbar({
   onToggleAll,
   onNewFolder,
 }: ModulesListToolbarProps) {
-  const moreMenuRef = useRef<HTMLDivElement | null>(null)
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null)
+  const moreMenuRef = useRef<HTMLUListElement | null>(null)
   const moreMenuId = useId()
   const [moreOpen, setMoreOpen] = useState(false)
-
-  useEffect(() => {
-    const handlePointerDown = (event: MouseEvent) => {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
-        closeHsDropdown(moreMenuRef.current)
-        setMoreOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handlePointerDown)
-    return () => document.removeEventListener('mousedown', handlePointerDown)
-  }, [])
+  const [moreCoords, setMoreCoords] = useState<OverflowMenuCoords | null>(null)
 
   /**
-   * Opens or closes the overflow kebab.
+   * Recomputes fixed position against the overflow trigger.
+   */
+  const updateMorePosition = useCallback(() => {
+    const button = moreButtonRef.current
+    if (!button) return
+    setMoreCoords(computeOverflowMenuCoords(button))
+  }, [])
+
+  useEffect(() => {
+    if (!moreOpen) return
+    updateMorePosition()
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (moreButtonRef.current?.contains(target) || moreMenuRef.current?.contains(target)) return
+      setMoreOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMoreOpen(false)
+    }
+    const handleScrollOrResize = () => {
+      const button = moreButtonRef.current
+      if (!button) {
+        setMoreOpen(false)
+        return
+      }
+      updateMorePosition()
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('scroll', handleScrollOrResize, true)
+    window.addEventListener('resize', handleScrollOrResize)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('scroll', handleScrollOrResize, true)
+      window.removeEventListener('resize', handleScrollOrResize)
+    }
+  }, [moreOpen, updateMorePosition])
+
+  /**
+   * Opens or closes the overflow kebab. Fully React-controlled — Preline's
+   * `.hs-dropdown` auto-init races the click and immediately closes the menu.
    */
   const handleMoreToggle = useCallback((e: React.MouseEvent) => {
-    toggleHsDropdown(moreMenuRef.current, e)
-    setMoreOpen((open) => !open)
-  }, [])
+    e.preventDefault()
+    e.stopPropagation()
+    if (moreOpen) {
+      setMoreOpen(false)
+      return
+    }
+    const button = moreButtonRef.current
+    if (button) setMoreCoords(computeOverflowMenuCoords(button))
+    setMoreOpen(true)
+  }, [moreOpen])
 
   /**
    * Maps native select value onto the existing sort option objects used by fetch/group.
@@ -89,7 +148,6 @@ export function ModulesListToolbar({
    * Closes overflow after a secondary action is chosen.
    */
   const handleOverflowAction = useCallback(() => {
-    closeHsDropdown(moreMenuRef.current)
     setMoreOpen(false)
   }, [])
 
@@ -154,57 +212,73 @@ export function ModulesListToolbar({
               <i className="ri-add-line me-1 font-semibold align-middle" aria-hidden />
               New module
             </Link>
-            <div className="hs-dropdown ti-dropdown relative shrink-0" ref={moreMenuRef}>
+            <div className="relative shrink-0">
               <button
+                ref={moreButtonRef}
                 type="button"
                 id={moreMenuId}
                 className="ti-btn ti-btn-light !mb-0 !px-0 !py-0 h-9 w-9 inline-flex items-center justify-center"
                 aria-expanded={moreOpen}
                 aria-haspopup="menu"
+                aria-controls={moreOpen ? `${moreMenuId}-menu` : undefined}
                 aria-label="More module actions"
                 onClick={handleMoreToggle}
               >
                 <i className="fe fe-more-vertical" aria-hidden />
               </button>
-              <ul
-                className="hs-dropdown-menu ti-dropdown-menu hidden absolute start-0 top-full mt-1 z-[100] min-w-[11.5rem] bg-bodybg border border-defaultborder rounded-md shadow-lg"
-                role="menu"
-                aria-labelledby={moreMenuId}
-              >
-                <li>
-                  <Link
-                    className="ti-dropdown-item flex items-center"
-                    href="/training/curriculum/modules/create-with-ai"
-                    role="menuitem"
-                    onClick={handleOverflowAction}
-                  >
-                    <i className="ri-magic-line me-2 align-middle" aria-hidden />
-                    Create with AI
-                  </Link>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    className="ti-dropdown-item w-full text-left flex items-center"
-                    role="menuitem"
-                    onClick={handleNewFolderFromMenu}
-                  >
-                    <i className="ri-folder-add-line me-2 align-middle" aria-hidden />
-                    New folder
-                  </button>
-                </li>
-                <li>
-                  <Link
-                    className="ti-dropdown-item flex items-center"
-                    href="/training/curriculum/categories"
-                    role="menuitem"
-                    onClick={handleOverflowAction}
-                  >
-                    <i className="ri-settings-3-line me-2 align-middle" aria-hidden />
-                    Manage folders
-                  </Link>
-                </li>
-              </ul>
+              {moreOpen && moreCoords && typeof document !== 'undefined'
+                ? createPortal(
+                    <ul
+                      ref={moreMenuRef}
+                      id={`${moreMenuId}-menu`}
+                      className="m-0 rounded-md border border-defaultborder bg-white py-1 shadow-lg dark:bg-bodybg"
+                      role="menu"
+                      aria-labelledby={moreMenuId}
+                      style={{
+                        position: 'fixed',
+                        top: moreCoords.top,
+                        left: moreCoords.left,
+                        width: OVERFLOW_MENU_WIDTH,
+                        zIndex: 200,
+                      }}
+                    >
+                      <li>
+                        <Link
+                          className="ti-dropdown-item flex items-center"
+                          href="/training/curriculum/modules/create-with-ai"
+                          role="menuitem"
+                          onClick={handleOverflowAction}
+                        >
+                          <i className="ri-magic-line me-2 align-middle" aria-hidden />
+                          Create with AI
+                        </Link>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          className="ti-dropdown-item w-full text-left flex items-center"
+                          role="menuitem"
+                          onClick={handleNewFolderFromMenu}
+                        >
+                          <i className="ri-folder-add-line me-2 align-middle" aria-hidden />
+                          New folder
+                        </button>
+                      </li>
+                      <li>
+                        <Link
+                          className="ti-dropdown-item flex items-center"
+                          href="/training/curriculum/categories"
+                          role="menuitem"
+                          onClick={handleOverflowAction}
+                        >
+                          <i className="ri-settings-3-line me-2 align-middle" aria-hidden />
+                          Manage folders
+                        </Link>
+                      </li>
+                    </ul>,
+                    document.body,
+                  )
+                : null}
             </div>
             <div className="flex-1 min-w-1" aria-hidden />
             <div className="shrink-0 ms-auto">

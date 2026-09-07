@@ -25,50 +25,6 @@ type MenuCoords = {
 }
 
 /**
- * Closes the Preline-style kebab menu attached to a toolbar / overflow root.
- */
-export function closeHsDropdown(root: HTMLDivElement | null): void {
-  if (!root) return
-  const menu = root.querySelector('.hs-dropdown-menu') as HTMLElement | null
-  const button = root.querySelector('button') as HTMLElement | null
-  if (menu) {
-    menu.classList.add('hidden')
-    menu.style.cssText =
-      'opacity: 0 !important; pointer-events: none !important; display: none !important;'
-  }
-  if (button) button.setAttribute('aria-expanded', 'false')
-}
-
-/**
- * Toggles one kebab menu and hides every other `.hs-dropdown-menu` on the page.
- */
-export function toggleHsDropdown(root: HTMLDivElement | null, e: React.MouseEvent): void {
-  e.preventDefault()
-  e.stopPropagation()
-  if (!root) return
-  const menu = root.querySelector('.hs-dropdown-menu') as HTMLElement | null
-  const button = root.querySelector('button') as HTMLElement | null
-  if (!menu || !button) return
-  const isHidden = menu.classList.contains('hidden')
-  document.querySelectorAll('.hs-dropdown-menu').forEach((otherMenu) => {
-    if (otherMenu === menu) return
-    const otherMenuEl = otherMenu as HTMLElement
-    otherMenuEl.classList.add('hidden')
-    otherMenuEl.style.cssText =
-      'opacity: 0 !important; pointer-events: none !important; display: none !important;'
-    const otherButton = otherMenuEl.closest('.hs-dropdown')?.querySelector('button')
-    if (otherButton) otherButton.setAttribute('aria-expanded', 'false')
-  })
-  if (isHidden) {
-    menu.classList.remove('hidden')
-    menu.style.cssText = 'opacity: 1 !important; pointer-events: auto !important; display: block !important;'
-    button.setAttribute('aria-expanded', 'true')
-  } else {
-    closeHsDropdown(root)
-  }
-}
-
-/**
  * Viewport-fixed coords so the kebab is not clipped by virtualized card rows.
  */
 function computeModuleRowMenuCoords(button: HTMLElement): MenuCoords {
