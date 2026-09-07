@@ -237,7 +237,9 @@ export default function InterviewsClient() {
 
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [deletingSelected, setDeletingSelected] = useState(false)
-  const [selectedSort, setSelectedSort] = useState<string>('date-asc')
+  // Latest first, matching Jobs (createdAt:desc) and Applications. An interviews list
+  // opened cold is about what just happened or is next, not the oldest row of 415.
+  const [selectedSort, setSelectedSort] = useState<string>('date-desc')
   /** Recruiter derived from the selected candidate's assigned agent (create form). */
   const [assignedAgentRecruiter, setAssignedAgentRecruiter] = useState<{ id: string; name: string; email: string } | null>(null)
   /** Pending overlap warning — holds the proceed callback so the user can override. */
