@@ -131,9 +131,6 @@ type Props = {
   onClose: () => void
   /** Persist letter fields + validation (POST generate-letter). */
   onSaveLetter: () => void
-  /** Shown after letter is saved to the server. */
-  showShareCta?: boolean
-  onShareWithCandidate?: () => void
   /** Insert above Candidate Details (e.g. load error from ?offerId= on new-offer). */
   formPanelTop?: React.ReactNode
   /** Insert after the last form section, still inside the left column (e.g. Create offer actions). */
@@ -211,8 +208,6 @@ export function OfferLetterGeneratorWorkspace({
   lastSavedLabel,
   onClose,
   onSaveLetter,
-  showShareCta = false,
-  onShareWithCandidate,
   formPanelTop,
   formPanelFooter,
   jobPostingDoc = null,
@@ -225,13 +220,15 @@ export function OfferLetterGeneratorWorkspace({
   const [weeklyHoursOther, setWeeklyHoursOther] = useState(false)
   const [rolesAiLoading, setRolesAiLoading] = useState(false)
   const [trainingAiLoading, setTrainingAiLoading] = useState(false)
+  const [inlineError, setInlineError] = useState<string | null>(null)
 
   const handleEnhanceRoles = useCallback(async () => {
     const title = letterForm.positionTitle.trim()
     if (!title) {
-      alert('Add a position / job title first so AI can target the right role.')
+      setInlineError('Add a position / job title first so AI can target the right role.')
       return
     }
+    setInlineError(null)
     setRolesAiLoading(true)
     try {
       const existing = roleResponsibilityLinesFromHtml(letterForm.rolesText).join('\n')
@@ -248,7 +245,7 @@ export function OfferLetterGeneratorWorkspace({
       }
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message
-      alert(
+      setInlineError(
         msg ||
           (e instanceof Error ? e.message : 'Could not enhance roles. Ensure OPENAI_API_KEY is set on the server.')
       )
@@ -260,9 +257,10 @@ export function OfferLetterGeneratorWorkspace({
   const handleEnhanceTraining = useCallback(async () => {
     const title = letterForm.positionTitle.trim()
     if (!title) {
-      alert('Add a position / job title first so AI can target training outcomes.')
+      setInlineError('Add a position / job title first so AI can target training outcomes.')
       return
     }
+    setInlineError(null)
     setTrainingAiLoading(true)
     try {
       const { trainingText } = await enhanceOfferLetterRoles({
@@ -281,7 +279,7 @@ export function OfferLetterGeneratorWorkspace({
       }
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message
-      alert(
+      setInlineError(
         msg ||
           (e instanceof Error
             ? e.message
@@ -643,6 +641,14 @@ export function OfferLetterGeneratorWorkspace({
       </header>
 
       <div className={styles.workspace}>
+        {inlineError ? (
+          <div
+            className="mx-4 mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100"
+            role="alert"
+          >
+            {inlineError}
+          </div>
+        ) : null}
         <aside className={`${styles.formPanel} ${styles.printHide}`}>
           {formPanelTop}
           <div className={styles.sectionCard}>

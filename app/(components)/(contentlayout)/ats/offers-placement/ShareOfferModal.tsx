@@ -7,6 +7,7 @@ import { useModalBehavior } from '@/shared/hooks/useModalBehavior';
 import ConfirmDiscardDialog from '@/shared/components/ConfirmDiscardDialog';
 
 const INITIAL_BODY = 'Please review your offer letter using the link in this email.';
+const TITLE_ID = 'share-offer-modal-title';
 
 interface ShareOfferModalProps {
   offer: Offer | null;
@@ -83,22 +84,67 @@ export default function ShareOfferModal({ offer, onClose, onSent }: ShareOfferMo
 
   return (
     <>
-      <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4" {...backdropProps}>
+      <div
+        className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={TITLE_ID}
+        {...backdropProps}
+      >
         <div ref={containerRef} className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl dark:bg-bodybg">
-          <h3 className="mb-3 text-base font-semibold text-defaulttextcolor dark:text-white">
+          <h3 id={TITLE_ID} className="mb-3 text-base font-semibold text-defaulttextcolor dark:text-white">
             Share offer with candidate
           </h3>
-          {error && <div className="mb-2 rounded bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
-          <label className="form-label">To</label>
-          <input className="form-control mb-2" value={to} onChange={(e) => setTo(e.target.value)} />
-          <label className="form-label">CC (comma-separated)</label>
-          <input className="form-control mb-2" value={ccText} onChange={(e) => setCcText(e.target.value)} />
-          <label className="form-label">BCC (comma-separated)</label>
-          <input className="form-control mb-2" value={bccText} onChange={(e) => setBccText(e.target.value)} />
-          <label className="form-label">Subject</label>
-          <input className="form-control mb-2" value={subject} onChange={(e) => setSubject(e.target.value)} />
-          <label className="form-label">Message</label>
-          <textarea className="form-control mb-3 min-h-[90px]" value={body} onChange={(e) => setBody(e.target.value)} />
+          {error ? (
+            <div className="mb-2 rounded bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
+              {error}
+            </div>
+          ) : null}
+          <label className="form-label" htmlFor="share-offer-to">
+            To
+          </label>
+          <input
+            id="share-offer-to"
+            className="form-control mb-2 !min-h-11"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+          />
+          <label className="form-label" htmlFor="share-offer-cc">
+            CC (comma-separated)
+          </label>
+          <input
+            id="share-offer-cc"
+            className="form-control mb-2 !min-h-11"
+            value={ccText}
+            onChange={(e) => setCcText(e.target.value)}
+          />
+          <label className="form-label" htmlFor="share-offer-bcc">
+            BCC (comma-separated)
+          </label>
+          <input
+            id="share-offer-bcc"
+            className="form-control mb-2 !min-h-11"
+            value={bccText}
+            onChange={(e) => setBccText(e.target.value)}
+          />
+          <label className="form-label" htmlFor="share-offer-subject">
+            Subject
+          </label>
+          <input
+            id="share-offer-subject"
+            className="form-control mb-2 !min-h-11"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+          />
+          <label className="form-label" htmlFor="share-offer-body">
+            Message
+          </label>
+          <textarea
+            id="share-offer-body"
+            className="form-control mb-3 min-h-[90px]"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+          />
           <div className="flex justify-end gap-2">
             <button type="button" className="ti-btn ti-btn-light" onClick={requestClose} disabled={submitting}>
               Cancel

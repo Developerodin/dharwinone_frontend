@@ -73,7 +73,7 @@ export function CreateOfferForm({
   });
 
   useEffect(() => {
-    Promise.all([listJobApplications({ limit: 500 }), listOffers({ limit: 500 })])
+    Promise.all([listJobApplications({ limit: 100 }), listOffers({ limit: 100 })])
       .then(([appsRes, offersRes]) => {
         const appIdsWithOffer = new Set(
           (offersRes.results ?? [])
@@ -240,8 +240,9 @@ export function CreateOfferForm({
               </p>
               <p className="text-xs leading-relaxed">
                 <strong>Next:</strong> the <strong>Offer Letter Generator</strong> opens on the list so you can edit the
-                letter. <strong>Generate PDF</strong> runs automatically; then <strong>Download</strong> (next to
-                Generate PDF) fetches the same server PDF — it enables after the first successful generate.
+                letter. After you submit, you&apos;ll return to <strong>Offers &amp; Placement</strong> with the letter
+                workspace open. Use <strong>Save letter</strong> to store fields on the server, then{' '}
+                <strong>Save as PDF</strong> for a local print/PDF copy.
               </p>
             </>
           ) : (
@@ -252,9 +253,8 @@ export function CreateOfferForm({
               </p>
               <p className="text-xs leading-relaxed">
                 <strong>Next:</strong> you&apos;ll return to <strong>Offers &amp; Placement</strong> with the same
-                full-screen <strong>Offer Letter Generator</strong> and the <strong>same PDF output</strong> (preview +
-                <strong> Generate PDF</strong> / <strong>Download</strong>) as the row &quot;Offer letter&quot; action. Fill
-                the letter, then generate when ready.
+                full-screen <strong>Offer Letter Generator</strong>. Fill the letter, use <strong>Save letter</strong>{' '}
+                to store fields on the server, then <strong>Save as PDF</strong> for a local print/PDF copy.
               </p>
             </>
           )}
@@ -463,14 +463,13 @@ export function CreateOfferForm({
       <div className="border border-gray-200 dark:border-defaultborder/10 rounded-lg p-4 space-y-4 bg-gray-50/80 dark:bg-black/20">
         <h6 className="text-base font-semibold text-gray-800 dark:text-white flex items-center gap-2">
           <i className="ri-file-pdf-2-line text-primary"></i>
-          Offer letter (PDF) — <strong>Generate PDF</strong> + <strong>Download</strong> in the top bar (same as opening
-          from an offer row)
+          Offer letter workspace
         </h6>
         <p className="text-xs text-gray-600 dark:text-gray-400">
-          Pre-filled from the selected application (name, address from profile, job title, suggested roles). After you
-          submit, you&apos;ll return to <strong>Offers &amp; Placement</strong> with the letter workspace open,{" "}
-          <strong>Generate PDF</strong> started, and <strong>Download</strong> enabled once the server PDF is stored
-          (same two buttons as when you open the letter from the table).
+          Pre-filled from the selected application (name, address, job title, suggested roles). After you submit,
+          you&apos;ll return to <strong>Offers &amp; Placement</strong> with the letter workspace open. Use{' '}
+          <strong>Save letter</strong> to store fields on the server, then <strong>Save as PDF</strong> for a local
+          print/PDF copy.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>

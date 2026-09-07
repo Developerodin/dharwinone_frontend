@@ -3,6 +3,8 @@ import Seo from '@/shared/layout-components/seo/seo'
 import React, { Fragment, useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import offersStyles from './offers-placement.module.css'
+import pipelineStyles from '../ats-pipeline-list.module.css'
+import ListPagination from '@/shared/components/ListPagination'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useTable, useSortBy, usePagination } from 'react-table'
 import Link from 'next/link'
@@ -22,7 +24,6 @@ import {
   createEmptyOfferLetterForm,
   type OfferLetterFormFields,
 } from './OfferLetterGeneratorWorkspace'
-import ShareOfferModal from './ShareOfferModal'
 import { useModalBehavior } from '@/shared/hooks/useModalBehavior'
 import ConfirmDiscardDialog from '@/shared/components/ConfirmDiscardDialog'
 import { detectEligibilityPreset } from './offer-letter-generator-data'
@@ -36,6 +37,18 @@ import { formatJoiningDateDisplay, joiningDatePresent } from '@/shared/lib/ats/j
 import { combinedJobPostingDocText, resolveOfferLetterRolesHtml, resolveOfferLetterTrainingHtml } from './job-posting-doc'
 import { roleResponsibilitiesLinesToHtml } from '@/shared/lib/ats/jobDescriptionHtml'
 import { letterDateStampYmd } from './letter-date-stamp'
+
+const DIALOG_Z = 12050
+const TOOLBAR_BTN =
+  '!mb-0 !min-h-11 !inline-flex !items-center !justify-center !rounded-md !px-3 !py-2 !text-[0.8125rem]'
+const ROW_BTN =
+  'ti-btn ti-btn-sm shrink-0 whitespace-nowrap !w-auto !min-w-fit !min-h-11 !h-11 !py-2 !px-3 !inline-flex !items-center !justify-center'
+const FILTER_CHECK_LABEL =
+  'flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-primary/5 dark:hover:bg-primary/10'
+const TH_CLASS =
+  'border-b border-slate-200/90 bg-slate-50 px-2 py-2.5 text-start align-bottom text-[0.6875rem] font-semibold uppercase tracking-wide text-slate-500 dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-400'
+const TD_CLASS = 'min-w-0 align-middle px-2 py-2.5 text-[13px] text-slate-800 dark:text-slate-100'
+const CHECKBOX_COL_CLASS = 'w-[1%] max-w-[2.25rem] whitespace-nowrap !px-1 !pl-2.5'
 
 function formatCandidateAddress(c: { address?: Offer['candidate']['address'] } | null | undefined) {
   const a = c?.address
@@ -155,8 +168,7 @@ interface FilterState {
 }
 
 const OffersPlacement = () => {
-  // Aliased: this file already uses the global window.confirm for bulk delete.
-  const { confirm: askCompensationConfirm, confirmDialog } = useConfirm()
+  const { confirm, confirmDialog } = useConfirm()
   const router = useRouter()
   const searchParams = useSearchParams()
   const { canView, canCreate, canEdit, canDelete } = useFeaturePermissions("ats.offers")
@@ -299,12 +311,13 @@ const OffersPlacement = () => {
 
   const [editOfferModal, setEditOfferModal] = useState<Offer | null>(null)
   const [editStatus, setEditStatus] = useState<Offer['status']>('Draft')
+  const [editError, setEditError] = useState<string | null>(null)
   const [viewHistoryModal, setViewHistoryModal] = useState<Offer | null>(null)
   const [editSubmitting, setEditSubmitting] = useState(false)
+  const [listNotice, setListNotice] = useState<string | null>(null)
 
   const [letterModalOffer, setLetterModalOffer] = useState<Offer | null>(null)
-  const [shareOpen, setShareOpen] = useState(false)
-  const [letterShareMessage, setLetterShareMessage] = useState<string | null>(null)
+  const [letterSaveError, setLetterSaveError] = useState<string | null>(null)
   const [letterForm, setLetterForm] = useState<OfferLetterFormFields>(() => createEmptyOfferLetterForm())
   const [letterBusy, setLetterBusy] = useState(false)
   const letterFormSnapshotRef = useRef('')
@@ -320,11 +333,13 @@ const OffersPlacement = () => {
   const openOfferLetterModal = useCallback(async (raw: Offer) => {
     const id = getOfferRecordId(raw)
     if (!id) {
-      alert(
+      setListNotice(
         'Could not open the offer letter workspace: this offer has no id yet. Use the document icon on the offer row, or try creating the offer again.'
       )
       return
     }
+    setListNotice(null)
+    setLetterSaveError(null)
     setLetterBusy(true)
     try {
       const full = await getOfferById(id)
@@ -334,7 +349,9 @@ const OffersPlacement = () => {
       }
       setLetterModalOffer(full)
     } catch (e: unknown) {
-      alert((e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load offer')
+      setListNotice(
+        (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load offer'
+      )
     } finally {
       setLetterBusy(false)
     }
@@ -453,9 +470,10 @@ const OffersPlacement = () => {
     if (!letterModalOffer) return
     const id = getOfferRecordId(letterModalOffer)
     if (!id) {
-      alert('Missing offer id. Close and reopen the offer letter from the list.')
+      setLetterSaveError('Missing offer id. Close and reopen the offer letter from the list.')
       return
     }
+    setLetterSaveError(null)
     /**
      * Same gate as the standalone letter page — this modal edits job type too, so without it the
      * user would only discover the restriction from a rejected save. `letterModalOffer` comes from
@@ -464,7 +482,7 @@ const OffersPlacement = () => {
     const { proceed, ack: compensationAck } = await confirmCompensationChange({
       gate: letterModalOffer.compensationGate,
       changing: !!letterModalOffer.jobType && letterForm.jobType !== letterModalOffer.jobType,
-      confirm: askCompensationConfirm,
+      confirm: confirm,
     })
     if (!proceed) return
 
@@ -475,10 +493,9 @@ const OffersPlacement = () => {
         ...(compensationAck ? { compensationChangeAck: true } : {}),
       })
       setLetterModalOffer(updated)
-      setLetterShareMessage('Offer letter saved. You can share it with the candidate.')
       refreshOffers()
     } catch (e: unknown) {
-      alert(formatOfferLetterSaveError(e, 'Could not save letter'))
+      setLetterSaveError(formatOfferLetterSaveError(e, 'Could not save letter'))
     } finally {
       setLetterBusy(false)
     }
@@ -510,7 +527,10 @@ const OffersPlacement = () => {
     cancelDiscard: cancelEditDiscard,
   } = useModalBehavior({
     isOpen: !!editOfferModal,
-    onClose: () => setEditOfferModal(null),
+    onClose: () => {
+      setEditOfferModal(null)
+      setEditError(null)
+    },
     isDirty: editModalDirty,
   });
 
@@ -529,15 +549,20 @@ const OffersPlacement = () => {
     isOpen: !!letterModalOffer,
     onClose: () => {
       setLetterModalOffer(null);
-      setShareOpen(false);
-      setLetterShareMessage(null);
+      setLetterSaveError(null);
       letterFormSnapshotRef.current = '';
     },
     isDirty: letterModalDirty,
   });
 
+  const historyModalBehavior = useModalBehavior({
+    isOpen: !!viewHistoryModal,
+    onClose: () => setViewHistoryModal(null),
+  })
+
   const handleUpdateStatus = async () => {
     if (!editOfferModal || !editStatus) return
+    setEditError(null)
     const current = offerStatusForEditModal(editOfferModal)
     if (editStatus === current) {
       setEditOfferModal(null)
@@ -547,9 +572,10 @@ const OffersPlacement = () => {
     try {
       await updateOffer((editOfferModal as any)._id ?? (editOfferModal as any).id ?? '', { status: editStatus as any })
       setEditOfferModal(null)
+      setEditError(null)
       refreshOffers()
     } catch (err: any) {
-      alert(err?.response?.data?.message || err?.message || 'Failed to update status')
+      setEditError(err?.response?.data?.message || err?.message || 'Failed to update status')
     } finally {
       setEditSubmitting(false)
     }
@@ -558,17 +584,23 @@ const OffersPlacement = () => {
   const handleDeleteSelected = async () => {
     if (selectedRows.size === 0) return
     const attempted = selectedRows.size
-    if (!confirm(`Delete ${attempted} selected offer(s)?`)) return
+    const ok = await confirm({
+      title: 'Delete selected offers?',
+      message: `Delete ${attempted} selected offer(s)?`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })
+    if (!ok) return
 
     const failed = await deleteOffersInBulk(selectedRows, deleteOffer)
-    // Failures stay selected so they can be retried. Clearing the whole selection would hide the
-    // failure entirely — the surviving rows would look like rows that were never picked.
     setSelectedRows(new Set(failed))
     refreshOffers()
     if (failed.length) {
-      alert(
+      setListNotice(
         `${failed.length} of ${attempted} offer(s) could not be deleted. They are still selected, so you can try again.`
       )
+    } else {
+      setListNotice(null)
     }
   }
 
@@ -582,6 +614,83 @@ const OffersPlacement = () => {
     }
     setSelectedRows(newSelected)
   }
+
+  const renderRowActions = useCallback(
+    (offer: (typeof OFFERS_PLACEMENT_DATA)[number]) => {
+      const isAccepted = offer.offerStatus === 'Accepted'
+      const inPreBoarding =
+        isAccepted &&
+        (offer.placementStatus === 'Pending' ||
+          offer.placementStatus === 'Deferred' ||
+          offer.placementStatus === 'Cancelled')
+      const inOnboarding = isAccepted && offer.placementStatus === 'Joined'
+      const raw = (offer as { _raw?: Offer })._raw
+
+      return (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {canEdit && raw ? (
+            <button
+              type="button"
+              className={`${ROW_BTN} ti-btn-light`}
+              aria-label="Open offer letter generator"
+              onClick={() => void openOfferLetterModal(raw)}
+            >
+              <i className="ri-article-line" aria-hidden />
+            </button>
+          ) : null}
+          {inPreBoarding ? (
+            <Link
+              href={
+                offer.placementId && /^[0-9a-fA-F]{24}$/.test(offer.placementId)
+                  ? `/ats/pre-boarding?placementId=${encodeURIComponent(offer.placementId)}`
+                  : '/ats/pre-boarding'
+              }
+              className={`${ROW_BTN} ti-btn-light !text-[11px]`}
+              title="Go to Pre-boarding"
+            >
+              <i className="ri-user-follow-line me-0.5" aria-hidden />
+              Pre
+            </Link>
+          ) : null}
+          {inOnboarding ? (
+            <Link
+              href="/ats/onboarding"
+              className={`${ROW_BTN} ti-btn-light !text-[11px]`}
+              title="Go to Onboarding"
+            >
+              <i className="ri-login-circle-line me-0.5" aria-hidden />
+              Join
+            </Link>
+          ) : null}
+          {raw ? (
+            <button
+              type="button"
+              className={`${ROW_BTN} ti-btn-light`}
+              aria-label="View history"
+              onClick={() => setViewHistoryModal(raw)}
+            >
+              <i className="ri-history-line" aria-hidden />
+            </button>
+          ) : null}
+          {canEdit && raw && Boolean(raw.offerLetterGeneratedAt) ? (
+            <button
+              type="button"
+              className={`${ROW_BTN} ti-btn-primary`}
+              aria-label="Update status"
+              onClick={() => {
+                setEditOfferModal(raw)
+                setEditStatus(offerStatusForEditModal(raw))
+                setEditError(null)
+              }}
+            >
+              <i className="ri-pencil-line" aria-hidden />
+            </button>
+          ) : null}
+        </div>
+      )
+    },
+    [canEdit, openOfferLetterModal]
+  )
 
   // Define columns
   const columns = useMemo(
@@ -606,8 +715,13 @@ const OffersPlacement = () => {
         Cell: ({ row }: any) => {
           const offer = row.original
           return (
-            <div className="flex min-w-0 max-w-[200px] flex-col gap-0.5">
-              <div className="text-[13px] font-medium leading-tight text-gray-900 dark:text-white">{offer.position}</div>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <div
+                className={`text-[13px] font-medium leading-tight text-gray-900 dark:text-white ${pipelineStyles.jobClamp}`}
+                title={offer.position}
+              >
+                {offer.position}
+              </div>
               <div className="inline-flex min-w-0 items-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400">
                 <i className="ri-file-text-line mt-0.5 shrink-0" aria-hidden />
                 <span className="truncate">{offer.offerId}</span>
@@ -622,7 +736,7 @@ const OffersPlacement = () => {
         Cell: ({ row }: any) => {
           const candidate = row.original.candidate
           return (
-            <div className="flex min-w-[11rem] items-center gap-2.5">
+            <div className="flex min-w-0 items-center gap-2.5">
               <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80 dark:ring-white/10">
                 <img
                   src={candidate.displayPicture || '/assets/images/faces/1.jpg'}
@@ -634,8 +748,18 @@ const OffersPlacement = () => {
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-medium text-gray-900 dark:text-white">{candidate.name}</div>
-                <div className="text-[11px] text-slate-500 dark:text-slate-400">{candidate.email}</div>
+                <div
+                  className="truncate text-[13px] font-medium text-gray-900 dark:text-white"
+                  title={candidate.name}
+                >
+                  {candidate.name}
+                </div>
+                <div
+                  className="truncate text-[11px] text-slate-500 dark:text-slate-400"
+                  title={candidate.email}
+                >
+                  {candidate.email}
+                </div>
               </div>
             </div>
           )
@@ -647,7 +771,7 @@ const OffersPlacement = () => {
         Cell: ({ row }: any) => {
           const recruiter = row.original.recruiter
           return (
-            <div className="flex min-w-[10rem] items-center gap-2.5">
+            <div className="flex min-w-0 items-center gap-2.5">
               <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80 dark:ring-white/10">
                 <img
                   src={recruiter.displayPicture || '/assets/images/faces/1.jpg'}
@@ -659,9 +783,19 @@ const OffersPlacement = () => {
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-medium text-gray-900 dark:text-white">{recruiter.name}</div>
+                <div
+                  className="truncate text-[13px] font-medium text-gray-900 dark:text-white"
+                  title={recruiter.name}
+                >
+                  {recruiter.name}
+                </div>
                 {recruiter.email ? (
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">{recruiter.email}</div>
+                  <div
+                    className="truncate text-[11px] text-slate-500 dark:text-slate-400"
+                    title={recruiter.email}
+                  >
+                    {recruiter.email}
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -730,113 +864,10 @@ const OffersPlacement = () => {
         Header: 'Actions',
         accessor: 'id',
         disableSortBy: true,
-        Cell: ({ row }: any) => {
-          const offer = row.original
-          const isAccepted = offer.offerStatus === 'Accepted'
-          // Pre-boarding shows Pending placements only; Joined placements go to Onboarding
-          const inPreBoarding =
-            isAccepted &&
-            (offer.placementStatus === 'Pending' ||
-              offer.placementStatus === 'Deferred' ||
-              offer.placementStatus === 'Cancelled')
-          const inOnboarding = isAccepted && offer.placementStatus === 'Joined'
-          const rowAct =
-            'hs-tooltip-toggle inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-[0.95rem] text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-500 dark:border-white/15 dark:bg-transparent dark:hover:bg-white/5'
-          /** Preline: parent has overflow-y-auto — scope to window + bottom placement avoids clipped / misplaced tooltips */
-          const ttWrap = 'hs-tooltip ti-main-tooltip shrink-0 [--placement:bottom] [--scope:window]'
-          return (
-          <div className="flex min-w-0 max-w-[200px] flex-wrap items-center gap-1 sm:max-w-none">
-            {canEdit && (
-              <div className={ttWrap}>
-                <button
-                  type="button"
-                  className={rowAct}
-                  aria-label="Open offer letter generator"
-                  onClick={() => {
-                    const raw = (row.original as any)._raw as Offer | undefined
-                    if (raw) void openOfferLetterModal(raw)
-                  }}
-                >
-                  <i className="ri-article-line" aria-hidden />
-                  <span
-                    className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                    role="tooltip">
-                    Offer letter
-                  </span>
-                </button>
-              </div>
-            )}
-            {inPreBoarding && (
-              <Link
-                href={
-                  offer.placementId && /^[0-9a-fA-F]{24}$/.test(offer.placementId)
-                    ? `/ats/pre-boarding?placementId=${encodeURIComponent(offer.placementId)}`
-                    : '/ats/pre-boarding'
-                }
-                className="mb-0.5 inline-flex h-7 shrink-0 items-center gap-0.5 rounded-md border border-emerald-200/90 bg-emerald-50 px-2 text-[11px] font-medium text-emerald-900 hover:bg-emerald-100/90 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
-                title="Go to Pre-boarding"
-              >
-                <i className="ri-user-follow-line" aria-hidden />
-                Pre
-              </Link>
-            )}
-            {inOnboarding && (
-              <Link
-                href="/ats/onboarding"
-                className="mb-0.5 inline-flex h-7 shrink-0 items-center gap-0.5 rounded-md border border-indigo-200/90 bg-indigo-50 px-2 text-[11px] font-medium text-indigo-900 hover:bg-indigo-100/90 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100"
-                title="Go to Onboarding"
-              >
-                <i className="ri-login-circle-line" aria-hidden />
-                Join
-              </Link>
-            )}
-            <div className={ttWrap}>
-              <button
-                type="button"
-                className={rowAct}
-                aria-label="View history"
-                onClick={() => {
-                  const raw = (row.original as any)._raw
-                  if (raw) setViewHistoryModal(raw)
-                }}
-              >
-                <i className="ri-history-line" aria-hidden />
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  View History
-                </span>
-              </button>
-            </div>
-            {canEdit && Boolean((row.original as any)._raw?.offerLetterGeneratedAt) && (
-            <div className={ttWrap}>
-              <button
-                type="button"
-                className={rowAct}
-                aria-label="Update status"
-                onClick={() => {
-                  const raw = (row.original as any)._raw
-                  if (raw) {
-                    setEditOfferModal(raw)
-                    setEditStatus(offerStatusForEditModal(raw))
-                  }
-                }}
-              >
-                <i className="ri-pencil-line" aria-hidden />
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  Update status
-                </span>
-              </button>
-            </div>
-            )}
-          </div>
-        )
+        Cell: ({ row }: any) => renderRowActions(row.original),
       },
-    },
-  ],
-  [selectedRows, canEdit, openOfferLetterModal]
+    ],
+    [selectedRows, renderRowActions]
   )
 
   // Filter data based on filter state
@@ -991,6 +1022,12 @@ const OffersPlacement = () => {
     filters.step.length
   const hasPanelFilters = panelFilterCount > 0
 
+  const filterModal = useModalBehavior({
+    isOpen: offersFilterPanelOpen,
+    onClose: () => setOffersFilterPanelOpen(false),
+    isDirty: hasPanelFilters,
+  })
+
   const tableInstance: any = useTable(
     {
       columns,
@@ -1008,11 +1045,6 @@ const OffersPlacement = () => {
     prepareRow,
     state,
     page,
-    nextPage,
-    previousPage,
-    canNextPage,
-    canPreviousPage,
-    pageOptions,
     gotoPage,
     pageCount,
     setPageSize,
@@ -1097,9 +1129,17 @@ const OffersPlacement = () => {
     <Fragment>
       {confirmDialog}
       <Seo title="Offers & Placement" />
-      <div className={`offers-page-shell mt-5 grid grid-cols-12 gap-6 min-w-0 sm:mt-6 ${offersStyles.listShell}`}>
-        <div className="col-span-12 h-full min-h-0 min-w-0 flex flex-col">
-          <div className="box h-full min-h-0 min-w-0 flex flex-col overflow-hidden">
+      {listNotice ? (
+        <div
+          className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100"
+          role="status"
+        >
+          {listNotice}
+        </div>
+      ) : null}
+      <div className={`mt-2 grid grid-cols-12 gap-6 min-w-0 pb-14 sm:mt-6 ${offersStyles.listShell}`}>
+        <div className="col-span-12 min-w-0 flex flex-col">
+          <div className="box mb-0 min-w-0 flex flex-col">
             <div className="box-header shrink-0 flex flex-col gap-3 overflow-visible sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-2">
               <span className="box-title min-w-0">
                 Offers &amp; Placement
@@ -1146,7 +1186,7 @@ const OffersPlacement = () => {
                 </label>
                 <select
                   id="offers-page-size"
-                  className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem]"
+                  className={`form-control select-show-page-size !w-auto !text-[0.8125rem] ${TOOLBAR_BTN}`}
                   value={pageSize}
                   onChange={(e) => setPageSize(Number(e.target.value))}
                 >
@@ -1159,7 +1199,7 @@ const OffersPlacement = () => {
                 {canCreate && (
                   <Link
                     href="/ats/offers-placement/offer-letter/new"
-                    className="ti-btn ti-btn-primary-full !mb-0 !w-auto !min-w-fit !py-1 !px-2 !text-[0.75rem]"
+                    className={`ti-btn ti-btn-primary-full ${TOOLBAR_BTN}`}
                   >
                     <i className="ri-add-line font-semibold align-middle" aria-hidden />
                     Create
@@ -1168,7 +1208,7 @@ const OffersPlacement = () => {
                 <div ref={offersSortDropdownRef} className="relative z-30">
                   <button
                     type="button"
-                    className="ti-btn ti-btn-light touch-manipulation !mb-0 !w-auto !min-w-fit !py-1 !px-2 !text-[0.75rem]"
+                    className={`ti-btn ti-btn-light touch-manipulation ${TOOLBAR_BTN}`}
                     id="sort-dropdown-button"
                     aria-expanded={offersSortMenuOpen}
                     aria-haspopup="menu"
@@ -1307,7 +1347,7 @@ const OffersPlacement = () => {
                   />
                   <input
                     type="search"
-                    className="form-control !w-full !py-1 !ps-7 !pe-2 !text-[0.75rem]"
+                    className="form-control !min-h-11 !w-full !rounded-md !ps-8 !text-[0.8125rem]"
                     placeholder="Search…"
                     value={listSearch}
                     onChange={(e) => setListSearch(e.target.value)}
@@ -1317,7 +1357,7 @@ const OffersPlacement = () => {
                 </div>
                 <button
                   type="button"
-                  className={`ti-btn ti-btn-light touch-manipulation !mb-0 !w-auto !min-w-fit !py-1 !px-2 !text-[0.75rem] ${offersFilterPanelOpen ? 'ring-2 ring-primary/30 bg-primary/[0.06]' : ''}`}
+                  className={`ti-btn ti-btn-light touch-manipulation ${TOOLBAR_BTN} ${offersFilterPanelOpen ? 'ring-2 ring-primary/30 bg-primary/[0.06]' : ''}`}
                   aria-expanded={offersFilterPanelOpen}
                   aria-controls="offers-filter-panel"
                   onClick={() => setOffersFilterPanelOpen((open) => !open)}
@@ -1333,8 +1373,8 @@ const OffersPlacement = () => {
                 {canDelete && selectedRows.size > 0 && (
                   <button
                     type="button"
-                    className="ti-btn ti-btn-sm ti-btn-danger !mb-0 !w-auto !min-w-fit !h-8 !whitespace-nowrap !py-1.5 !px-3"
-                    onClick={handleDeleteSelected}
+                    className={`ti-btn ti-btn-danger ${TOOLBAR_BTN}`}
+                    onClick={() => void handleDeleteSelected()}
                   >
                     <i className="ri-delete-bin-line me-1" aria-hidden />
                     Delete ({selectedRows.size})
@@ -1343,7 +1383,7 @@ const OffersPlacement = () => {
                 </div>
               </div>
             </div>
-            <div className="box-body !p-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="box-body !p-0 flex min-w-0 flex-col">
               {offersLoading ? (
                 <div
                   className="flex flex-col items-center justify-center gap-4 px-6 py-10"
@@ -1373,212 +1413,172 @@ const OffersPlacement = () => {
                   </p>
                 </div>
               ) : (
-              <div
-                className={`table-responsive min-w-0 max-w-full ${offersStyles.tableCard} ${offersStyles.tableWrap}`}
-              >
-                <table
-                  {...getTableProps()}
-                  className={`table whitespace-nowrap text-[0.8125rem] text-defaulttextcolor dark:text-white/80 ${offersStyles.tableWide}`}
-                >
-                  <thead>
-                    {headerGroups.map((headerGroup: any, i: number) => (
-                        <tr
-                          {...headerGroup.getHeaderGroupProps()}
-                          className="border-b border-slate-200/90 dark:border-white/10"
-                          key={`header-group-${i}`}
+                <div className={`min-w-0 max-w-full ${pipelineStyles.tableCard}`}>
+                  <div className="divide-y divide-slate-200/90 dark:divide-white/10 lg:hidden">
+                    {page.map((row: any, index: number) => {
+                      const offer = row.original
+                      const statusColors: Record<string, string> = {
+                        Accepted: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200',
+                        Pending: 'bg-amber-50 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200',
+                        'Under Negotiation': 'bg-sky-50 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200',
+                        Rejected: 'bg-rose-50 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200',
+                        Withdrawn: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300',
+                        Draft: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300',
+                        Active: 'bg-indigo-50 text-indigo-800 dark:bg-indigo-500/20 dark:text-indigo-200',
+                        Sent: 'bg-sky-50 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200',
+                      }
+                      return (
+                        <article
+                          key={offer.id}
+                          className={`px-3.5 py-3.5 ${offersStyles.rowIn}`}
+                          style={{ animationDelay: `${Math.min(index, 16) * 45}ms` }}
                         >
-                        {headerGroup.headers.map((column: any, i: number) => (
-                          <th
-                            {...column.getHeaderProps(column.getSortByToggleProps())}
-                            scope="col"
-                            className="sticky top-0 z-10 border-b border-slate-200/90 bg-slate-100/90 px-2 py-2 text-start align-bottom text-[0.625rem] font-semibold uppercase leading-tight tracking-tight text-slate-500 shadow-sm first:pl-2.5 last:pr-2.5 dark:border-white/10 dark:bg-slate-900/90 dark:text-slate-400 sm:px-2.5 sm:text-[0.65rem] sm:leading-snug"
-                            key={column.id || `col-${i}`}
-                            style={{ 
-                              position: 'sticky', 
-                              top: 0, 
-                              zIndex: 10,
-                              minWidth: offerColMinW[String(column.id)] ?? undefined,
-                            }}
-                          >
-                            {column.id === 'select' ? (
-                              <input
-                                className="form-check-input accent-indigo-600"
-                                type="checkbox"
-                                checked={isAllSelected}
-                                ref={(input) => {
-                                  if (input) input.indeterminate = isIndeterminate
-                                }}
-                                onChange={handleSelectAll}
-                                aria-label="Select all"
-                              />
-                            ) : (
-                              <div className="tabletitle flex min-w-0 items-start gap-1">
-                                <span className="min-w-0 break-words hyphens-auto">{column.render('Header')}</span>
-                                <span className="shrink-0 pt-0.5">
-                                {column.isSorted ? (
-                                  column.isSortedDesc ? (
-                                    <i className="ri-arrow-down-s-line text-sm opacity-80" aria-hidden />
-                                  ) : (
-                                    <i className="ri-arrow-up-s-line text-sm opacity-80" aria-hidden />
-                                  )
-                                ) : null}
+                          <div className="flex items-start gap-3">
+                            <input
+                              className="form-check-input mt-2 !h-5 !w-5 accent-indigo-600"
+                              type="checkbox"
+                              checked={selectedRows.has(offer.id)}
+                              onChange={() => handleRowSelect(offer.id)}
+                              aria-label={`Select offer ${offer.offerId}`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className={pipelineStyles.jobClamp} title={offer.position}>
+                                {offer.position}
+                              </div>
+                              <div className="mt-1 text-xs font-medium text-indigo-600">{offer.offerId}</div>
+                              <div className="mt-1 truncate text-sm font-medium" title={offer.candidate.name}>
+                                {offer.candidate.name}
+                              </div>
+                              {offer.candidate.email ? (
+                                <div className="truncate text-xs text-slate-500" title={offer.candidate.email}>
+                                  {offer.candidate.email}
+                                </div>
+                              ) : null}
+                              <div className="truncate text-xs text-slate-500" title={offer.recruiter.name}>
+                                {offer.recruiter.name}
+                              </div>
+                              <div className="mt-2">
+                                <span
+                                  className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusColors[offer.offerStatus] || 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300'}`}
+                                >
+                                  {offer.offerStatus}
                                 </span>
                               </div>
-                            )}
-                          </th>
-                        ))}
-                      </tr>
-                    ))}
-                  </thead>
-                  <tbody {...getTableBodyProps()}>
-                    {page.map((row: any, i: number) => {
-                      prepareRow(row)
-                      const rowProps = row.getRowProps({
-                        className: `border-b border-slate-200/80 transition-colors duration-150 ease-out last:border-b-0 hover:bg-slate-50/90 dark:border-white/10 dark:hover:bg-white/[0.04] ${offersStyles.rowIn}`,
-                        style: { animationDelay: `${Math.min(i, 16) * 45}ms` },
-                      })
-                      const { key: rowKey, ...trProps } = rowProps
-                      return (
-                        <tr key={rowKey} {...trProps}>
-                          {row.cells.map((cell: any, cellI: number) => {
-                            const cellProps = cell.getCellProps({
-                              className:
-                                'whitespace-nowrap align-middle px-2.5 py-2 text-[12px] text-slate-800 sm:px-3 sm:py-2.5 sm:text-[13px] dark:text-slate-100',
-                            })
-                            const { key: cellKey, ...tdProps } = cellProps
-                            return (
-                              <td
-                                key={String(cellKey ?? cell.column.id ?? `cell-${cellI}`)}
-                                {...tdProps}
-                              >
-                                {cell.render('Cell')}
-                              </td>
-                            )
-                          })}
-                        </tr>
+                              <div className="mt-1 text-xs text-slate-500">
+                                <JoiningDateTableCell value={offer.joiningDate} />
+                              </div>
+                              <div className="mt-2.5 flex flex-col gap-2">{renderRowActions(offer)}</div>
+                            </div>
+                          </div>
+                        </article>
                       )
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+
+                  <div className={`hidden min-w-0 max-w-full lg:block ${pipelineStyles.tableNoHScroll}`}>
+                    <table
+                      {...getTableProps()}
+                      className={`table mb-0 whitespace-normal border-separate border-spacing-0 text-[0.8125rem] text-defaulttextcolor dark:text-white/80 ${pipelineStyles.tableFit}`}
+                      aria-label="Offers and placement"
+                    >
+                      <caption className="sr-only">
+                        Offers and placement list. {filteredData.length} total after filters.
+                      </caption>
+                      <thead>
+                        {headerGroups.map((headerGroup: any, i: number) => (
+                          <tr
+                            {...headerGroup.getHeaderGroupProps()}
+                            className="border-b border-slate-200/90 dark:border-white/10"
+                            key={`header-group-${i}`}
+                          >
+                            {headerGroup.headers.map((column: any, colI: number) => (
+                              <th
+                                {...column.getHeaderProps(column.getSortByToggleProps())}
+                                scope="col"
+                                className={`${TH_CLASS} ${column.id === 'checkbox' ? CHECKBOX_COL_CLASS : ''}`}
+                                key={column.id || `col-${colI}`}
+                                style={{
+                                  minWidth: offerColMinW[String(column.id)] ?? undefined,
+                                }}
+                              >
+                                {column.id === 'checkbox' ? (
+                                  <input
+                                    className="form-check-input accent-indigo-600"
+                                    type="checkbox"
+                                    checked={isAllSelected}
+                                    ref={(input) => {
+                                      if (input) input.indeterminate = isIndeterminate
+                                    }}
+                                    onChange={handleSelectAll}
+                                    aria-label="Select all offers on this page"
+                                  />
+                                ) : (
+                                  <div className="tabletitle flex min-w-0 items-start gap-1">
+                                    <span className="min-w-0 break-words hyphens-auto">{column.render('Header')}</span>
+                                    <span className="shrink-0 pt-0.5">
+                                      {column.isSorted ? (
+                                        column.isSortedDesc ? (
+                                          <i className="ri-arrow-down-s-line text-sm opacity-80" aria-hidden />
+                                        ) : (
+                                          <i className="ri-arrow-up-s-line text-sm opacity-80" aria-hidden />
+                                        )
+                                      ) : null}
+                                    </span>
+                                  </div>
+                                )}
+                              </th>
+                            ))}
+                          </tr>
+                        ))}
+                      </thead>
+                      <tbody {...getTableBodyProps()}>
+                        {page.map((row: any, i: number) => {
+                          prepareRow(row)
+                          const rowProps = row.getRowProps({
+                            className: `border-b border-slate-200/80 transition-colors duration-150 ease-out last:border-b-0 hover:bg-slate-50/90 dark:border-white/10 dark:hover:bg-white/[0.04] ${offersStyles.rowIn}`,
+                            style: { animationDelay: `${Math.min(i, 16) * 45}ms` },
+                          })
+                          const { key: rowKey, ...trProps } = rowProps
+                          return (
+                            <tr key={rowKey} {...trProps}>
+                              {row.cells.map((cell: any, cellI: number) => {
+                                const cellProps = cell.getCellProps({
+                                  className: `${TD_CLASS} ${cell.column.id === 'checkbox' ? CHECKBOX_COL_CLASS : ''}`,
+                                })
+                                const { key: cellKey, ...tdProps } = cellProps
+                                return (
+                                  <td
+                                    key={String(cellKey ?? cell.column.id ?? `cell-${cellI}`)}
+                                    {...tdProps}
+                                  >
+                                    {cell.render('Cell')}
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
             </div>
-            <div className="box-footer shrink-0 border-t border-defaultborder/60 dark:border-white/5 !px-3 !py-2 sm:!px-4">
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                <div className="text-xs text-gray-600 sm:text-sm dark:text-gray-400">
-                  {filteredData.length === 0 ? (
-                    <span>0 offers</span>
-                  ) : (
-                    <>
-                      Showing {pageIndex * pageSize + 1} to {Math.min((pageIndex + 1) * pageSize, data.length)} of {data.length} entries{' '}
-                      <i className="bi bi-arrow-right ms-2 font-semibold" aria-hidden />
-                    </>
-                  )}
-                </div>
-                {filteredData.length > 0 && (
-                <div className="ms-auto">
-                  <nav aria-label="Page navigation" className="pagination-style-4">
-                    <ul className="ti-pagination mb-0">
-                      <li className={`page-item ${!canPreviousPage ? 'disabled' : ''}`}>
-                        <button
-                          className="page-link px-3 py-[0.375rem]"
-                          onClick={() => previousPage()}
-                          disabled={!canPreviousPage}
-                        >
-                          Prev
-                        </button>
-                      </li>
-                      {pageOptions.length <= 7 ? (
-                        // Show all pages if 7 or fewer
-                        pageOptions.map((page: number) => (
-                          <li
-                            key={page}
-                            className={`page-item ${pageIndex === page ? 'active' : ''}`}
-                          >
-                            <button
-                              className="page-link px-3 py-[0.375rem]"
-                              onClick={() => gotoPage(page)}
-                            >
-                              {page + 1}
-                            </button>
-                          </li>
-                        ))
-                      ) : (
-                        // Show smart pagination for more pages
-                        <>
-                          {pageIndex > 2 && (
-                            <>
-                              <li className="page-item">
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => gotoPage(0)}
-                                >
-                                  1
-                                </button>
-                              </li>
-                              {pageIndex > 3 && (
-                                <li className="page-item disabled">
-                                  <span className="page-link px-3 py-[0.375rem]">...</span>
-                                </li>
-                              )}
-                            </>
-                          )}
-                          {Array.from({ length: Math.min(5, pageCount) }, (_, i) => {
-                            let pageNum
-                            if (pageIndex < 3) {
-                              pageNum = i
-                            } else if (pageIndex > pageCount - 4) {
-                              pageNum = pageCount - 5 + i
-                            } else {
-                              pageNum = pageIndex - 2 + i
-                            }
-                            return (
-                              <li
-                                key={pageNum}
-                                className={`page-item ${pageIndex === pageNum ? 'active' : ''}`}
-                              >
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => gotoPage(pageNum)}
-                                >
-                                  {pageNum + 1}
-                                </button>
-                              </li>
-                            )
-                          })}
-                          {pageIndex < pageCount - 3 && (
-                            <>
-                              {pageIndex < pageCount - 4 && (
-                                <li className="page-item disabled">
-                                  <span className="page-link px-3 py-[0.375rem]">...</span>
-                                </li>
-                              )}
-                              <li className="page-item">
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => gotoPage(pageCount - 1)}
-                                >
-                                  {pageCount}
-                                </button>
-                              </li>
-                            </>
-                          )}
-                        </>
-                      )}
-                      <li className={`page-item ${!canNextPage ? 'disabled' : ''}`}>
-                        <button
-                          className="page-link px-3 py-[0.375rem] text-primary"
-                          onClick={() => nextPage()}
-                          disabled={!canNextPage}
-                        >
-                          Next
-                        </button>
-                      </li>
-                    </ul>
-                  </nav>
-                </div>
-                )}
-              </div>
+            <div className="box-footer relative z-[1] shrink-0 border-t border-defaultborder/60 bg-white !px-3 !py-2 dark:border-white/5 dark:bg-bodybg sm:!px-4">
+              {filteredData.length > 0 ? (
+                <ListPagination
+                  page={pageIndex + 1}
+                  totalPages={pageCount}
+                  totalResults={data.length}
+                  pageSize={pageSize}
+                  onPageChange={(p) => gotoPage(p - 1)}
+                  ariaLabel="Offers page navigation"
+                  gotoInputId="offers-goto-page"
+                  touchFriendly
+                />
+              ) : (
+                <span className="text-sm text-slate-500">0 offers</span>
+              )}
             </div>
           </div>
         </div>
@@ -1590,19 +1590,20 @@ const OffersPlacement = () => {
             <>
               <div
                 className="fixed inset-0 z-[140] bg-black/40"
-                onClick={() => setOffersFilterPanelOpen(false)}
                 aria-hidden
+                onMouseDown={filterModal.requestClose}
               />
               <div
                 id="offers-filter-panel"
+                ref={filterModal.containerRef}
                 className="ti-offcanvas ti-offcanvas-right open !z-[150] flex h-full w-full max-w-sm flex-col overflow-hidden bg-white shadow-xl dark:bg-bodybg"
                 role="dialog"
                 aria-modal="true"
-                aria-label="Offer filters"
+                aria-labelledby="offers-filter-title"
                 tabIndex={-1}
               >
         <div className="ti-offcanvas-header bg-gray-50 dark:bg-black/20 !py-2.5">
-          <h6 className="ti-offcanvas-title flex items-center gap-2 text-base font-semibold">
+          <h6 id="offers-filter-title" className="ti-offcanvas-title flex items-center gap-2 text-base font-semibold">
             <i className="ri-filter-3-line text-primary text-base" aria-hidden />
             Filters
           </h6>
@@ -1618,7 +1619,7 @@ const OffersPlacement = () => {
             <button
               type="button"
               className="ti-btn flex-shrink-0 p-0 transition-none text-gray-500 hover:text-gray-700 focus:ring-gray-400 focus:ring-offset-white dark:text-[#8c9097] dark:text-white/50 dark:hover:text-white/80 dark:focus:ring-white/10 dark:focus:ring-offset-white/10 hover:bg-gray-100 dark:hover:bg-black/40 rounded-md p-1"
-              onClick={() => setOffersFilterPanelOpen(false)}
+              onClick={filterModal.requestClose}
               aria-label="Close filters"
             >
               <i className="ri-close-line text-lg" aria-hidden />
@@ -1637,7 +1638,7 @@ const OffersPlacement = () => {
               <div className="space-y-2">
                 <input
                   type="text"
-                  className="form-control !py-1.5 !text-sm mb-1.5"
+                  className="form-control !min-h-11 mb-1.5"
                   placeholder="Search candidates..."
                   value={searchCandidate}
                   onChange={(e) => setSearchCandidate(e.target.value)}
@@ -1648,11 +1649,11 @@ const OffersPlacement = () => {
                       filteredCandidates.map((candidate) => (
                         <label
                           key={candidate}
-                          className="flex items-center gap-2 cursor-pointer hover:bg-primary/5 dark:hover:bg-primary/10 p-1.5 rounded-md transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            className="form-check-input !w-3.5 !h-3.5"
+                           className={FILTER_CHECK_LABEL}
+                         >
+                           <input
+                             type="checkbox"
+                             className="form-check-input !h-5 !w-5 shrink-0"
                             checked={filters.candidate.includes(candidate)}
                             onChange={() => handleMultiSelectChange('candidate', candidate)}
                           />
@@ -1698,7 +1699,7 @@ const OffersPlacement = () => {
               <div className="space-y-2">
                 <input
                   type="text"
-                  className="form-control !py-1.5 !text-sm mb-1.5"
+                  className="form-control !min-h-11 mb-1.5"
                   placeholder="Search recruiters..."
                   value={searchRecruiter}
                   onChange={(e) => setSearchRecruiter(e.target.value)}
@@ -1709,11 +1710,11 @@ const OffersPlacement = () => {
                       filteredRecruiters.map((recruiter) => (
                         <label
                           key={recruiter}
-                          className="flex items-center gap-2 cursor-pointer hover:bg-success/5 dark:hover:bg-success/10 p-1.5 rounded-md transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            className="form-check-input !w-3.5 !h-3.5"
+                           className={FILTER_CHECK_LABEL}
+                         >
+                           <input
+                             type="checkbox"
+                             className="form-check-input !h-5 !w-5 shrink-0"
                             checked={filters.recruiter.includes(recruiter)}
                             onChange={() => handleMultiSelectChange('recruiter', recruiter)}
                           />
@@ -1759,7 +1760,7 @@ const OffersPlacement = () => {
               <div className="space-y-2">
                 <input
                   type="text"
-                  className="form-control !py-1.5 !text-sm mb-1.5"
+                  className="form-control !min-h-11 mb-1.5"
                   placeholder="Search offer status..."
                   value={searchOfferStatus}
                   onChange={(e) => setSearchOfferStatus(e.target.value)}
@@ -1770,11 +1771,11 @@ const OffersPlacement = () => {
                       filteredOfferStatuses.map((status) => (
                         <label
                           key={status}
-                          className="flex items-center gap-2 cursor-pointer hover:bg-info/5 dark:hover:bg-info/10 p-1.5 rounded-md transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            className="form-check-input !w-3.5 !h-3.5"
+                           className={FILTER_CHECK_LABEL}
+                         >
+                           <input
+                             type="checkbox"
+                             className="form-check-input !h-5 !w-5 shrink-0"
                             checked={filters.offerStatus.includes(status)}
                             onChange={() => handleMultiSelectChange('offerStatus', status)}
                           />
@@ -1820,7 +1821,7 @@ const OffersPlacement = () => {
               <div className="space-y-2">
                 <input
                   type="text"
-                  className="form-control !py-1.5 !text-sm mb-1.5"
+                  className="form-control !min-h-11 mb-1.5"
                   placeholder="Search step..."
                   value={searchStep}
                   onChange={(e) => setSearchStep(e.target.value)}
@@ -1831,11 +1832,11 @@ const OffersPlacement = () => {
                       filteredSteps.map((step) => (
                         <label
                           key={step}
-                          className="flex items-center gap-2 cursor-pointer hover:bg-warning/5 dark:hover:bg-warning/10 p-1.5 rounded-md transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            className="form-check-input !w-3.5 !h-3.5"
+                           className={FILTER_CHECK_LABEL}
+                         >
+                           <input
+                             type="checkbox"
+                             className="form-check-input !h-5 !w-5 shrink-0"
                             checked={filters.step.includes(step)}
                             onChange={() => handleMultiSelectChange('step', step)}
                           />
@@ -1883,7 +1884,7 @@ const OffersPlacement = () => {
               <button
                 type="button"
                 className="ti-btn ti-btn-light font-medium shadow-sm hover:shadow-md transition-shadow !py-1.5 !text-sm"
-                onClick={() => setOffersFilterPanelOpen(false)}
+                onClick={filterModal.requestClose}
               >
                 <i className="ri-close-line me-1.5"></i>Close
               </button>
@@ -1891,6 +1892,11 @@ const OffersPlacement = () => {
           </div>
         </div>
               </div>
+              <ConfirmDiscardDialog
+                open={filterModal.confirmDiscardOpen}
+                onConfirm={filterModal.confirmDiscard}
+                onCancel={filterModal.cancelDiscard}
+              />
             </>,
             document.body
           )
@@ -1949,6 +1955,14 @@ const OffersPlacement = () => {
                     {offerStatusForEditModal(editOfferModal)}
                   </p>
                 </div>
+                {editError ? (
+                  <div
+                    className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100"
+                    role="alert"
+                  >
+                    {editError}
+                  </div>
+                ) : null}
                 <div>
                   <label className="form-label mb-2 text-slate-700 dark:text-slate-200" htmlFor="edit-offer-status-select">
                     New offer status
@@ -1997,38 +2011,31 @@ const OffersPlacement = () => {
           {...letterModalBackdropProps}
         >
           <div ref={letterModalContainerRef} className="flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col">
-          <OfferLetterGeneratorWorkspace
-            offerCode={letterModalOffer.offerCode || '—'}
-            jobTitle={letterModalOffer.job?.title || ''}
-            candidateName={letterModalOffer.candidate?.fullName || ''}
-            letterForm={letterForm}
-            setLetterForm={setLetterForm}
-            letterBusy={letterBusy}
-            jobPostingDoc={letterJobPostingDoc}
-            lastSavedLabel={
-              letterModalOffer.updatedAt ? new Date(letterModalOffer.updatedAt).toLocaleString() : null
-            }
-            onClose={requestCloseLetterModal}
-            onSaveLetter={() => void handleSaveOfferLetter()}
-            showShareCta={Boolean(letterModalOffer?.offerLetterGeneratedAt)}
-            onShareWithCandidate={() => setShareOpen(true)}
-          />
-          {letterShareMessage ? (
-            <p className="absolute bottom-4 left-1/2 z-[1070] -translate-x-1/2 rounded-md bg-emerald-600 px-4 py-2 text-sm text-white shadow-lg">
-              {letterShareMessage}
-            </p>
-          ) : null}
-          {shareOpen && letterModalOffer ? (
-            <ShareOfferModal
-              offer={letterModalOffer}
-              onClose={() => setShareOpen(false)}
-              onSent={(to) => {
-                setShareOpen(false)
-                setLetterShareMessage(`Offer sent to ${to}`)
-              }}
-            />
-          ) : null}
-          </div>
+           <OfferLetterGeneratorWorkspace
+             offerCode={letterModalOffer.offerCode || '—'}
+             jobTitle={letterModalOffer.job?.title || ''}
+             candidateName={letterModalOffer.candidate?.fullName || ''}
+             letterForm={letterForm}
+             setLetterForm={setLetterForm}
+             letterBusy={letterBusy}
+             jobPostingDoc={letterJobPostingDoc}
+             lastSavedLabel={
+               letterModalOffer.updatedAt ? new Date(letterModalOffer.updatedAt).toLocaleString() : null
+             }
+             onClose={requestCloseLetterModal}
+             onSaveLetter={() => void handleSaveOfferLetter()}
+             formPanelTop={
+               letterSaveError ? (
+                 <div
+                   className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100"
+                   role="alert"
+                 >
+                   {letterSaveError}
+                 </div>
+               ) : null
+             }
+           />
+           </div>
         </div>
       )}
 
@@ -2038,46 +2045,55 @@ const OffersPlacement = () => {
       {/* View History Modal */}
       {viewHistoryModal && (
         <div
-          className="hs-overlay ti-modal active overflow-y-auto !opacity-100 !pointer-events-auto [--auto-close:false]"
-          tabIndex={-1}
+          className="fixed inset-0 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-4 sm:items-center"
+          style={{ zIndex: DIALOG_Z }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="view-history-modal-title"
-          style={{ zIndex: 80 }}
+          {...historyModalBehavior.backdropProps}
         >
-          <div className="hs-overlay-backdrop ti-modal-backdrop backdrop-blur-[1px]" onClick={() => setViewHistoryModal(null)} />
-          <div className="hs-overlay-open:mt-7 ti-modal-box !max-w-[26rem]">
-            <div className="ti-modal-content overflow-hidden !rounded-lg shadow-lg ring-1 ring-slate-900/[0.06] dark:ring-white/[0.06]">
-              <div className="ti-modal-header !items-start gap-3 border-slate-200/90 !pb-3 dark:border-white/10">
-                <div className="min-w-0 flex-1">
-                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 dark:text-slate-400">
-                    Activity
-                  </p>
-                  <h4 id="view-history-modal-title" className="ti-modal-title !mb-0 break-words text-lg">
-                    Offer history · {viewHistoryModal.offerCode}
-                  </h4>
-                </div>
-                <button
-                  type="button"
-                  className="ti-modal-close-btn shrink-0"
-                  aria-label="Close"
-                  onClick={() => setViewHistoryModal(null)}
-                >
-                  <i className="ri-close-line text-lg" aria-hidden />
-                </button>
-              </div>
-              <div className="ti-modal-body !pt-2">
-                <div className={`${offersStyles.offerModalSection} !mb-3 !py-3.5`}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className={offersStyles.offerMetaLabel}>Current status</span>
-                    <span className={offerStatusPillClass(viewHistoryModal.status)}>{viewHistoryModal.status || '—'}</span>
-                  </div>
-                </div>
-                <p className="mb-0 flex gap-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                  <i className="ri-information-line mt-0.5 shrink-0 text-slate-400" aria-hidden />
-                  Detailed status history is not available yet. Future versions may show timeline events here.
+          <div
+            ref={historyModalBehavior.containerRef}
+            className="my-6 w-full max-w-md rounded-xl border bg-white p-5 shadow-xl dark:border-white/10 dark:bg-slate-950"
+          >
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 dark:text-slate-400">
+                  Activity
                 </p>
+                <h4 id="view-history-modal-title" className="mb-0 break-words text-lg font-semibold">
+                  Offer history · {viewHistoryModal.offerCode}
+                </h4>
               </div>
+              <button
+                type="button"
+                className={`${ROW_BTN} ti-btn-light`}
+                aria-label="Close"
+                onClick={historyModalBehavior.requestClose}
+              >
+                <i className="ri-close-line" aria-hidden />
+              </button>
+            </div>
+            <div className={`${offersStyles.offerModalSection} mb-3 py-3.5`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className={offersStyles.offerMetaLabel}>Current status</span>
+                <span className={offerStatusPillClass(viewHistoryModal.status)}>
+                  {viewHistoryModal.status || '—'}
+                </span>
+              </div>
+            </div>
+            <p className="mb-0 flex gap-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+              <i className="ri-information-line mt-0.5 shrink-0 text-slate-400" aria-hidden />
+              Detailed status history is not available yet. Future versions may show timeline events here.
+            </p>
+            <div className="mt-4 text-end">
+              <button
+                type="button"
+                className={`${ROW_BTN} ti-btn-light`}
+                onClick={historyModalBehavior.requestClose}
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

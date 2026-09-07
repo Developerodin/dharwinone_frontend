@@ -12,6 +12,8 @@ export type ListPaginationProps = {
   ariaLabel?: string;
   gotoInputId?: string;
   className?: string;
+  /** 44px min touch targets on pager controls (mobile-friendly lists). */
+  touchFriendly?: boolean;
 };
 
 /**
@@ -26,7 +28,11 @@ export default function ListPagination({
   ariaLabel = "Page navigation",
   gotoInputId,
   className,
+  touchFriendly = false,
 }: ListPaginationProps) {
+  const touchClass = touchFriendly
+    ? "[&_.page-link]:!min-h-11 [&_.page-link]:!min-w-11 [&_.page-link]:!inline-flex [&_.page-link]:!items-center [&_.page-link]:!justify-center [&_.ti-btn]:!min-h-11 [&_input.ti-form-control]:!min-h-11"
+    : "";
   const autoId = useId();
   const inputId = gotoInputId ?? `${autoId}-goto-page`;
   const hintId = `${inputId}-hint`;
@@ -37,7 +43,7 @@ export default function ListPagination({
   const atEnd = page >= safeTotalPages || safeTotalPages === 0;
 
   return (
-    <div className={`flex flex-wrap items-center gap-4 ${className ?? ""}`}>
+    <div className={`flex flex-wrap items-center gap-4 ${touchClass} ${className ?? ""}`}>
       <div>
         Showing {start} to {end} of {totalResults} entries{" "}
         <i className="bi bi-arrow-right ms-2 font-semibold" />

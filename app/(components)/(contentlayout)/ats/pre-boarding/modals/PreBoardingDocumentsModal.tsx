@@ -1,6 +1,8 @@
 "use client"
 
 import React, { Fragment, useCallback, useEffect, useState } from 'react'
+import { useModalBehavior } from '@/shared/hooks/useModalBehavior'
+import ConfirmDiscardDialog from '@/shared/components/ConfirmDiscardDialog'
 import {
   getCandidateDocuments,
   getDocumentDownloadUrl,
@@ -36,6 +38,10 @@ const DOC_TYPE_GROUPS: Array<{ label: string; options: string[] }> = [
   },
 ]
 
+const DIALOG_Z = 12050
+const BTN_44 =
+  '!mb-0 !min-h-11 !min-w-11 !inline-flex !items-center !justify-center !px-3 !py-2 !text-[0.8125rem]'
+
 type DocStatusItem = { status: number; adminNotes?: string }
 
 interface Props {
@@ -68,6 +74,10 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
   const [reqCustomLabel, setReqCustomLabel] = useState<string>('')
   const [reqNotes, setReqNotes] = useState<string>('')
   const [requesting, setRequesting] = useState(false)
+
+  const isDirty = Boolean(docType || customLabel || file || reqType || reqCustomLabel || reqNotes)
+  const { containerRef, backdropProps, requestClose, confirmDiscardOpen, confirmDiscard, cancelDiscard } =
+    useModalBehavior({ isOpen: true, onClose, isDirty })
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -102,14 +112,6 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
   useEffect(() => {
     refresh()
   }, [refresh])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   const handleView = async (idx: number) => {
     try {
@@ -241,19 +243,19 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto p-4 sm:p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="preb-docs-title"
-    >
-      <button
-        type="button"
-        className="absolute inset-0 bg-slate-950/50 backdrop-blur-[2px]"
-        aria-label="Close"
-        onClick={onClose}
-      />
-      <div className="relative my-6 w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-xl dark:border-white/10 dark:bg-slate-950">
+    <Fragment>
+      <div
+        className="fixed inset-0 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-[2px] sm:p-6"
+        style={{ zIndex: DIALOG_Z }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preb-docs-title"
+        {...backdropProps}
+      >
+        <div
+          ref={containerRef}
+          className="relative my-6 w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-xl dark:border-white/10 dark:bg-slate-950"
+        >
         <div className="flex items-start gap-3 border-b border-slate-200/80 px-5 py-4 dark:border-white/10">
           <span className="mt-0.5 inline-block h-9 w-0.5 shrink-0 rounded-full bg-primary" aria-hidden />
           <div className="min-w-0 flex-1">
@@ -267,8 +269,8 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
           </div>
           <button
             type="button"
-            className="ti-btn ti-btn-light ti-btn-sm !shrink-0"
-            onClick={onClose}
+            className={`ti-btn ti-btn-light ti-btn-sm !shrink-0 ${BTN_44}`}
+            onClick={requestClose}
             aria-label="Close"
           >
             <i className="ri-close-line" />
@@ -348,7 +350,7 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
               <div className="mt-3 flex justify-end gap-2">
                 <button
                   type="button"
-                  className="ti-btn ti-btn-light !mb-0"
+                  className={`ti-btn ti-btn-light ${BTN_44}`}
                   onClick={resetUploadForm}
                   disabled={uploading}
                 >
@@ -356,7 +358,7 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
                 </button>
                 <button
                   type="button"
-                  className="ti-btn ti-btn-primary !mb-0"
+                  className={`ti-btn ti-btn-primary ${BTN_44}`}
                   onClick={handleUpload}
                   disabled={uploading || !file || !docType || (docType === 'Other' && !customLabel.trim())}
                 >
@@ -432,7 +434,7 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
               <div className="mt-3 flex justify-end">
                 <button
                   type="button"
-                  className="ti-btn ti-btn-primary !mb-0"
+                  className={`ti-btn ti-btn-primary ${BTN_44}`}
                   onClick={handleRequestDocument}
                   disabled={requesting || !reqType || (reqType === 'Other' && !reqCustomLabel.trim())}
                 >
@@ -486,7 +488,7 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
                           {isPending && (
                             <button
                               type="button"
-                              className="ti-btn ti-btn-sm ti-btn-light !mb-0 !h-8 !min-w-fit !w-auto !py-1.5 !px-3"
+                              className={`ti-btn ti-btn-sm ti-btn-light ${BTN_44}`}
                               onClick={() => handleCancelRequest(r.index)}
                             >
                               Cancel
@@ -544,7 +546,7 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
                       <div className="flex shrink-0 flex-wrap items-center gap-1">
                         <button
                           type="button"
-                          className="ti-btn ti-btn-sm ti-btn-light !mb-0 !h-8 !min-w-fit !w-auto !py-1.5 !px-3"
+                          className={`ti-btn ti-btn-sm ti-btn-light ${BTN_44}`}
                           onClick={() => handleView(idx)}
                           title="Preview in new tab"
                         >
@@ -553,7 +555,7 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
                         </button>
                         <button
                           type="button"
-                          className="ti-btn ti-btn-sm ti-btn-primary !mb-0 !h-8 !min-w-fit !w-auto !py-1.5 !px-3"
+                          className={`ti-btn ti-btn-sm ti-btn-primary ${BTN_44}`}
                           onClick={() => handleDownload(idx, doc.originalName)}
                           title="Download file"
                         >
@@ -564,7 +566,7 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
                           <Fragment>
                             <button
                               type="button"
-                              className="ti-btn ti-btn-sm ti-btn-success !mb-0 !h-8 !min-w-fit !w-auto !py-1.5 !px-3"
+                              className={`ti-btn ti-btn-sm ti-btn-success ${BTN_44}`}
                               onClick={() => handleVerify(idx, 1)}
                               disabled={st?.status === 1}
                               title="Approve: mark this document as accepted. Candidate sees an Approved badge in My Applications."
@@ -573,7 +575,7 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
                             </button>
                             <button
                               type="button"
-                              className="ti-btn ti-btn-sm ti-btn-danger !mb-0 !h-8 !min-w-fit !w-auto !py-1.5 !px-3"
+                              className={`ti-btn ti-btn-sm ti-btn-danger ${BTN_44}`}
                               onClick={() => handleVerify(idx, 2)}
                               disabled={st?.status === 2}
                               title="Reject: flag this document. Candidate sees a Rejected banner in My Applications and can re-upload."
@@ -585,8 +587,9 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
                         {canDelete && (
                           <button
                             type="button"
-                            className="ti-btn ti-btn-sm !mb-0 !h-8 !min-w-fit !w-auto !py-1.5 !px-2 border border-rose-500/40 text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                            className={`ti-btn ti-btn-sm border border-rose-500/40 text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10 ${BTN_44}`}
                             onClick={() => handleDeleteDoc(idx, doc.label || doc.originalName)}
+                            aria-label={`Delete document ${doc.label || doc.originalName || `Document ${idx + 1}`}`}
                             title="Delete this document permanently"
                           >
                             <i className="ri-delete-bin-line" aria-hidden />
@@ -602,12 +605,15 @@ const PreBoardingDocumentsModal: React.FC<Props> = ({ candidateId, candidateName
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-200/80 px-5 py-3 dark:border-white/10">
-          <button type="button" className="ti-btn ti-btn-light !mb-0" onClick={onClose}>
+          <button type="button" className={`ti-btn ti-btn-light ${BTN_44}`} onClick={requestClose}>
             Close
           </button>
         </div>
+        </div>
       </div>
-    </div>
+
+      <ConfirmDiscardDialog open={confirmDiscardOpen} onConfirm={confirmDiscard} onCancel={cancelDiscard} />
+    </Fragment>
   )
 }
 

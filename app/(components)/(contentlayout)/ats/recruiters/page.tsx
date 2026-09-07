@@ -683,7 +683,6 @@ const Recruiters = () => {
               className="text-sm text-gray-800 dark:text-white" 
               style={{ 
                 maxWidth: '280px',
-                minHeight: '60px',
                 lineHeight: '1.5',
                 wordBreak: 'break-word'
               }}
@@ -749,7 +748,6 @@ const Recruiters = () => {
               className="text-sm text-gray-700 dark:text-gray-300" 
               style={{ 
                 maxWidth: '320px',
-                minHeight: '60px',
                 display: '-webkit-box',
                 WebkitLineClamp: 3,
                 WebkitBoxOrient: 'vertical',
@@ -1224,7 +1222,7 @@ const Recruiters = () => {
                           <th
                             {...column.getHeaderProps()}
                             scope="col"
-                            className="text-start sticky top-0 z-10 bg-gray-50 dark:bg-black/20"
+                            className="text-start align-middle sticky top-0 z-10 bg-gray-50 dark:bg-black/20"
                             key={column.id || `col-${i}`}
                             style={{ 
                               position: 'sticky', 
@@ -1296,7 +1294,7 @@ const Recruiters = () => {
                       displayData.map((recruiter) => (
                         <tr className="border-b border-gray-300 dark:border-gray-600" key={recruiter.id}>
                           {columns.map((col: any) => (
-                            <td key={col.id || col.accessor}>
+                            <td className="align-middle" key={col.id || col.accessor}>
                               {col.id === 'select' ? (
                                 <input
                                   className="form-check-input"

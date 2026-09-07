@@ -65,6 +65,7 @@ export default function NewOfferLetterPage() {
   const [linkedOffer, setLinkedOffer] = useState<Offer | null>(null);
   const [letterBusy, setLetterBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [jobApplications, setJobApplications] = useState<JobApplication[]>([]);
   const [applicationsLoading, setApplicationsLoading] = useState(true);
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
@@ -165,7 +166,7 @@ export default function NewOfferLetterPage() {
     if (offerIdParam) return;
     let cancelled = false;
     setApplicationsLoading(true);
-    Promise.all([listJobApplications({ limit: 500 }), listOffers({ limit: 500 })])
+    Promise.all([listJobApplications({ limit: 100 }), listOffers({ limit: 100 })])
       .then(([appsRes, offersRes]) => {
         if (cancelled) return;
         const appIdsWithOffer = new Set(
@@ -284,13 +285,14 @@ export default function NewOfferLetterPage() {
   }, [jobApplications]);
 
   const handleSaveLetter = useCallback(async () => {
+    setSaveError(null);
     const isIntern = letterForm.jobType === "INTERN_UNPAID";
     const g = Number(String(letterForm.annualGrossCtc).replace(/,/g, ""));
 
     if (linkedOffer) {
       const id = getOfferRecordId(linkedOffer);
       if (!id) {
-        alert("This offer has no id. Go back to Offers & Placement and open the letter from the list.");
+        setSaveError("This offer has no id. Go back to Offers & Placement and open the letter from the list.");
         return;
       }
 
@@ -320,7 +322,7 @@ export default function NewOfferLetterPage() {
           });
         }
       } catch (e: unknown) {
-        alert(formatOfferLetterSaveError(e, "Could not save letter"));
+        setSaveError(formatOfferLetterSaveError(e, "Could not save letter"));
       } finally {
         setLetterBusy(false);
       }
@@ -328,15 +330,15 @@ export default function NewOfferLetterPage() {
     }
 
     if (!isIntern && (!Number.isFinite(g) || g <= 0)) {
-      alert("Set annual gross in Compensation before saving a paid offer letter.");
+      setSaveError("Set annual gross in Compensation before saving a paid offer letter.");
       return;
     }
     if (!jobApplicationId) {
-      alert("Select a candidate and job applied for before saving.");
+      setSaveError("Select a candidate and job applied for before saving.");
       return;
     }
     if (!/^[0-9a-fA-F]{24}$/.test(jobApplicationId)) {
-      alert("Invalid job application selected.");
+      setSaveError("Invalid job application selected.");
       return;
     }
     const selectedApp = findJobApplicationById(jobApplications, jobApplicationId);
@@ -359,7 +361,7 @@ export default function NewOfferLetterPage() {
       setLinkedOffer(updated);
       router.replace(`/ats/offers-placement/offer-letter/new?offerId=${encodeURIComponent(id)}`, { scroll: false });
     } catch (e: unknown) {
-      alert(formatOfferLetterSaveError(e, "Could not create offer or save letter"));
+      setSaveError(formatOfferLetterSaveError(e, "Could not create offer or save letter"));
     } finally {
       setLetterBusy(false);
     }
@@ -385,6 +387,20 @@ export default function NewOfferLetterPage() {
       </div>
     ) : null;
 
+  const formPanelTop = (
+    <>
+      {formPanelLinkOffer}
+      {saveError ? (
+        <div
+          className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100"
+          role="alert"
+        >
+          {saveError}
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <Fragment>
       {confirmDialog}
@@ -403,7 +419,7 @@ export default function NewOfferLetterPage() {
           }
           onClose={() => router.push("/ats/offers-placement")}
           onSaveLetter={() => void handleSaveLetter()}
-          formPanelTop={formPanelLinkOffer}
+          formPanelTop={formPanelTop}
           applicationPicker={
             showApplicationPicker
               ? {
