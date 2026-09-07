@@ -1,12 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import React, { memo, useRef, useState } from 'react'
+import React, { memo, useState } from 'react'
 import Swal from 'sweetalert2'
 import type { TrainingModule as ApiTrainingModule } from '@/shared/lib/api/training-modules'
 import { calculateSummary, type ModuleSummary } from '../_lib/moduleSummary'
 import ModuleStatusBadge, { type ModuleLifecycleStatus } from './ModuleStatusBadge'
-import ModuleRowActions, { closeHsDropdown, toggleHsDropdown } from './ModuleRowActions'
+import ModuleRowActions from './ModuleRowActions'
 
 export type { ModuleLifecycleStatus }
 
@@ -209,7 +209,6 @@ function TrainingModuleCardInner({
   const summary = calculateSummary(m.playlist || [])
   const studentCount = m.students?.length || 0
   const coverUrl = m.coverImage?.url
-  const dropdownRef = useRef<HTMLDivElement>(null)
   const statusBusy = statusUpdatingId === m.id
   const currentStatus: ModuleLifecycleStatus = (['draft', 'published', 'archived'] as const).includes(
     m.status as ModuleLifecycleStatus
@@ -219,7 +218,6 @@ function TrainingModuleCardInner({
   const isDraft = currentStatus === 'draft'
 
   const handleDelete = async () => {
-    closeHsDropdown(dropdownRef.current)
     const result = await Swal.fire({
       title: 'Delete Module?',
       text: `Are you sure you want to delete "${m.moduleName}"? This action cannot be undone.`,
@@ -234,16 +232,14 @@ function TrainingModuleCardInner({
   }
 
   const handleView = () => {
-    closeHsDropdown(dropdownRef.current)
     onView(m.id)
   }
 
   /**
-   * Applies a lifecycle change after closing the kebab.
+   * Applies a lifecycle change (Publish / Draft / Archive).
    */
   const handleSetStatus = (next: ModuleLifecycleStatus) => {
     if (statusBusy) return
-    closeHsDropdown(dropdownRef.current)
     onSetStatus(m.id, next)
   }
 
@@ -287,19 +283,11 @@ function TrainingModuleCardInner({
             moduleName={m.moduleName}
             currentStatus={currentStatus}
             statusBusy={statusBusy}
-            dropdownRef={dropdownRef}
             onView={handleView}
-            onClone={() => {
-              closeHsDropdown(dropdownRef.current)
-              onClone(m.id)
-            }}
-            onAssignFolders={() => {
-              closeHsDropdown(dropdownRef.current)
-              onAssignFolders(m.id)
-            }}
+            onClone={() => onClone(m.id)}
+            onAssignFolders={() => onAssignFolders(m.id)}
             onSetStatus={handleSetStatus}
             onDelete={handleDelete}
-            onToggle={(e) => toggleHsDropdown(dropdownRef.current, e)}
           />
         </div>
 

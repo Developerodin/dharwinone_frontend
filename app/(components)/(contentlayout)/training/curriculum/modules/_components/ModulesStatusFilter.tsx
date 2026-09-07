@@ -67,7 +67,7 @@ export function ModulesStatusFilter({ value, counts, hrefFor, onChange }: Module
             id={`modules-status-${tab.id}`}
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
-            className={`inline-flex items-center gap-1 rounded px-2 min-h-8 text-[0.75rem] font-medium no-underline whitespace-nowrap transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+            className={`inline-flex items-center gap-1 rounded px-1.5 min-h-8 text-[0.75rem] font-medium no-underline whitespace-nowrap transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
               selected
                 ? 'bg-bodybg text-defaulttextcolor shadow-sm'
                 : 'text-[#8c9097] dark:text-white/60 hover:text-defaulttextcolor'

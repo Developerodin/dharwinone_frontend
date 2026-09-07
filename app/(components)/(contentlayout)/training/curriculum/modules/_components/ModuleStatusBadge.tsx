@@ -8,7 +8,7 @@ const STATUS_STYLES: Record<ModuleLifecycleStatus, string> = {
   published:
     'bg-success/15 text-success border-success/30 dark:bg-success/20',
   draft:
-    'bg-warning/15 text-warning border-warning/40 dark:bg-warning/20',
+    'bg-amber-800 text-white border-amber-900 ring-1 ring-black/20 dark:bg-amber-700 dark:text-white dark:border-amber-600 dark:ring-black/40',
   archived:
     'bg-black/10 text-[#6b7280] border-black/15 dark:bg-white/10 dark:text-white/60 dark:border-white/20',
 }

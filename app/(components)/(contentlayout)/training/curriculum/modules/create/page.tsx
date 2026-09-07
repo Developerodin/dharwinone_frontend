@@ -376,7 +376,7 @@ function CheckboxDropdown({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="ti-form-control form-control flex items-center justify-between text-start w-full"
+        className="ti-form-control form-control border border-solid border-defaultborder dark:border-white/10 flex items-center justify-between text-start w-full"
         aria-expanded={open}
         aria-haspopup="listbox"
       >
@@ -389,7 +389,7 @@ function CheckboxDropdown({
       </button>
       {open && (
         <div
-          className="absolute z-10 mt-1 w-full rounded-md border border-defaultborder bg-bodybg shadow-lg overflow-hidden"
+          className="absolute z-50 mt-1 w-full rounded-md border border-solid border-defaultborder dark:border-white/10 bg-white dark:bg-bodybg shadow-lg overflow-hidden"
           role="listbox"
         >
           <div className="p-2 border-b border-defaultborder/50 sticky top-0 bg-bodybg" onClick={(e) => e.stopPropagation()}>
@@ -1922,7 +1922,7 @@ const CreateModule = () => {
 
                       {/* Module Name */}
                       <div className="xl:col-span-6 col-span-12">
-                        <label htmlFor="module-name" className="form-label">
+                        <label htmlFor="module-name" className="form-label block">
                           Module Name <span className="text-danger">*</span>
                         </label>
                         <input
@@ -1938,12 +1938,12 @@ const CreateModule = () => {
 
                       {/* Visibility / publish state */}
                       <div className="xl:col-span-6 col-span-12">
-                        <label htmlFor="module-status" className="form-label">
-                          Module status
+                        <label htmlFor="module-status" className="form-label block">
+                          Module Status
                         </label>
                         <select
                           id="module-status"
-                          className="form-control"
+                          className="form-control form-control-block"
                           value={formData.status}
                           onChange={(e) =>
                             handleInputChange('status', e.target.value as ModuleFormStatus)
@@ -2043,7 +2043,7 @@ const CreateModule = () => {
                         <div className="mb-2">
                           <label className="form-label block mb-1">Filter by Position</label>
                           <select
-                            className="form-control !py-2"
+                            className="form-control form-control-block !py-2"
                             value={positionFilterId}
                             onChange={(e) => setPositionFilterId(e.target.value)}
                           >
@@ -2059,7 +2059,7 @@ const CreateModule = () => {
                         {fetchingData ? (
                           <div>
                             <label className="form-label block mb-1">Students</label>
-                            <div className="form-control flex items-center justify-center py-2">
+                            <div className="form-control border border-solid border-defaultborder dark:border-white/10 flex items-center justify-center py-2">
                               <span className="text-[#8c9097] dark:text-white/50 text-sm">Loading students...</span>
                             </div>
                           </div>
@@ -2079,7 +2079,7 @@ const CreateModule = () => {
                         {fetchingData ? (
                           <div>
                             <label className="form-label block mb-1">Mentors Assigned</label>
-                            <div className="form-control flex items-center justify-center py-2">
+                            <div className="form-control border border-solid border-defaultborder dark:border-white/10 flex items-center justify-center py-2">
                               <span className="text-[#8c9097] dark:text-white/50 text-sm">Loading mentors...</span>
                             </div>
                           </div>

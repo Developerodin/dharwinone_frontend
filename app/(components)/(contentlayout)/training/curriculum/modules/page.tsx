@@ -31,6 +31,14 @@ import {
   collectRemainingPages,
 } from './_lib/fetchPagedResults'
 import { filterModulesByLocalSearch } from './_lib/filterModulesByLocalSearch'
+import {
+  fulfilledIds,
+  patchModuleInList,
+  patchModulesInList,
+  removeModuleFromList,
+  removeModulesFromList,
+  replaceModuleInList,
+} from './_lib/mutateModulesCatalog'
 
 const Select = dynamic(() => import('react-select'), { ssr: false })
 
@@ -737,6 +745,14 @@ const TrainingModules = () => {
   }, [applyCatalogFilter])
 
   /**
+   * Writes the cached catalog and the visible (search-filtered) list in one shot.
+   */
+  const commitCatalog = useCallback((next: ApiTrainingModule[]) => {
+    allModulesRef.current = next
+    applyVisibleModules(next)
+  }, [applyVisibleModules])
+
+  /**
    * Loads the unfiltered catalog (parallel remaining pages). Search/sort stay client-side when complete.
    */
   const fetchModules = useCallback(async () => {
@@ -834,17 +850,17 @@ const TrainingModules = () => {
     if (!confirmResult.isConfirmed) return
 
     setBulkBusy(true)
+    const ids = Array.from(selectedIds)
     const results = await Promise.allSettled(
-      Array.from(selectedIds).map((id) =>
-        trainingModulesApi.updateTrainingModule(id, { status })
-      )
+      ids.map((id) => trainingModulesApi.updateTrainingModule(id, { status })),
     )
-    const success = results.filter((r) => r.status === 'fulfilled').length
+    const ok = fulfilledIds(ids, results)
+    if (ok.size > 0) commitCatalog(patchModulesInList(allModulesRef.current, ok, { status }))
+    const success = ok.size
     const fail = results.length - success
     setBulkBusy(false)
     clearSelection()
-    fetchModules()
-    await Swal.fire({
+    void Swal.fire({
       icon: fail > 0 ? 'warning' : 'success',
       title: `${success} updated${fail > 0 ? `, ${fail} failed` : ''}`,
       toast: true,
@@ -853,7 +869,7 @@ const TrainingModules = () => {
       showConfirmButton: false,
       timerProgressBar: true,
     })
-  }, [selectedIds, clearSelection, fetchModules])
+  }, [selectedIds, clearSelection, commitCatalog])
 
   const handleBulkDelete = useCallback(async () => {
     if (selectedIds.size === 0) return
@@ -868,15 +884,17 @@ const TrainingModules = () => {
     if (!confirmResult.isConfirmed) return
 
     setBulkBusy(true)
+    const ids = Array.from(selectedIds)
     const results = await Promise.allSettled(
-      Array.from(selectedIds).map((id) => trainingModulesApi.deleteTrainingModule(id))
+      ids.map((id) => trainingModulesApi.deleteTrainingModule(id)),
     )
-    const success = results.filter((r) => r.status === 'fulfilled').length
+    const ok = fulfilledIds(ids, results)
+    if (ok.size > 0) commitCatalog(removeModulesFromList(allModulesRef.current, ok))
+    const success = ok.size
     const fail = results.length - success
     setBulkBusy(false)
     clearSelection()
-    fetchModules()
-    await Swal.fire({
+    void Swal.fire({
       icon: fail > 0 ? 'warning' : 'success',
       title: `${success} deleted${fail > 0 ? `, ${fail} failed` : ''}`,
       toast: true,
@@ -885,23 +903,35 @@ const TrainingModules = () => {
       showConfirmButton: false,
       timerProgressBar: true,
     })
-  }, [selectedIds, clearSelection, fetchModules])
+  }, [selectedIds, clearSelection, commitCatalog])
 
   const handleBulkFolderSave = useCallback(async (categoryIds: string[]) => {
     if (selectedIds.size === 0) return
     setBulkBusy(true)
+    const ids = Array.from(selectedIds)
+    const cats = categoryIds.map((id) => {
+      const match = categories.find((c) => c.id === id)
+      return { id, name: match?.name ?? id }
+    })
     const results = await Promise.allSettled(
-      Array.from(selectedIds).map((id) =>
-        trainingModulesApi.setTrainingModuleFolders(id, categoryIds)
-      )
+      ids.map((id) => trainingModulesApi.setTrainingModuleFolders(id, categoryIds)),
     )
+    let next = allModulesRef.current
+    results.forEach((result, index) => {
+      const id = ids[index]
+      if (!id || result.status !== 'fulfilled') return
+      next = replaceModuleInList(next, id, {
+        ...result.value,
+        categories: result.value.categories?.length ? result.value.categories : cats,
+      })
+    })
+    if (next !== allModulesRef.current) commitCatalog(next)
     const success = results.filter((r) => r.status === 'fulfilled').length
     const fail = results.length - success
     setBulkBusy(false)
     clearSelection()
     setBulkFolderOpen(false)
-    fetchModules()
-    await Swal.fire({
+    void Swal.fire({
       icon: fail > 0 ? 'warning' : 'success',
       title: `${success} moved${fail > 0 ? `, ${fail} failed` : ''}`,
       toast: true,
@@ -910,7 +940,7 @@ const TrainingModules = () => {
       showConfirmButton: false,
       timerProgressBar: true,
     })
-  }, [selectedIds, clearSelection, fetchModules])
+  }, [selectedIds, clearSelection, commitCatalog, categories])
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -1014,10 +1044,15 @@ const TrainingModules = () => {
       setStatusUpdatingId(moduleId)
       try {
         const updated = await trainingModulesApi.updateTrainingModule(moduleId, { status })
-        setSelectedModuleDetail((prev) =>
-          prev?.id === moduleId ? { ...prev, status: updated.status } : prev,
+        commitCatalog(
+          patchModuleInList(allModulesRef.current, moduleId, {
+            status: updated.status ?? status,
+          }),
         )
-        await Swal.fire({
+        setSelectedModuleDetail((prev) =>
+          prev?.id === moduleId ? { ...prev, status: updated.status ?? status } : prev,
+        )
+        void Swal.fire({
           icon: 'success',
           title: 'Status updated',
           text: `Module is now ${status}.`,
@@ -1027,7 +1062,6 @@ const TrainingModules = () => {
           showConfirmButton: false,
           timerProgressBar: true,
         })
-        fetchModules()
       } catch (err) {
         const msg = mapTrainingModuleError(err, 'Failed to update module status.')
         await Swal.fire({
@@ -1044,13 +1078,20 @@ const TrainingModules = () => {
         setStatusUpdatingId(null)
       }
     },
-    [fetchModules],
+    [commitCatalog],
   )
 
   const handleDelete = useCallback(async (moduleId: string) => {
     try {
       await trainingModulesApi.deleteTrainingModule(moduleId)
-      await Swal.fire({
+      commitCatalog(removeModuleFromList(allModulesRef.current, moduleId))
+      setSelectedIds((prev) => {
+        if (!prev.has(moduleId)) return prev
+        const next = new Set(prev)
+        next.delete(moduleId)
+        return next
+      })
+      void Swal.fire({
         icon: 'success',
         title: 'Module deleted',
         text: 'The module has been deleted successfully.',
@@ -1060,7 +1101,6 @@ const TrainingModules = () => {
         showConfirmButton: false,
         timerProgressBar: true,
       })
-      fetchModules()
     } catch (err) {
       const msg = mapTrainingModuleError(err, 'Failed to delete module.')
       await Swal.fire({
@@ -1073,7 +1113,7 @@ const TrainingModules = () => {
         showConfirmButton: false,
       })
     }
-  }, [fetchModules])
+  }, [commitCatalog])
 
   const handleView = useCallback(async (moduleId: string) => {
     setDetailModalOpen(true)
@@ -1198,8 +1238,18 @@ const TrainingModules = () => {
     const mod = assignFoldersModule
     if (!mod) return
     try {
-      await trainingModulesApi.setTrainingModuleFolders(mod.id, categoryIds)
-      await Swal.fire({
+      const updated = await trainingModulesApi.setTrainingModuleFolders(mod.id, categoryIds)
+      const cats = categoryIds.map((id) => {
+        const match = categories.find((c) => c.id === id)
+        return { id, name: match?.name ?? id }
+      })
+      commitCatalog(
+        replaceModuleInList(allModulesRef.current, mod.id, {
+          ...updated,
+          categories: updated.categories?.length ? updated.categories : cats,
+        }),
+      )
+      void Swal.fire({
         icon: 'success',
         title: 'Folders updated',
         toast: true,
@@ -1208,7 +1258,6 @@ const TrainingModules = () => {
         showConfirmButton: false,
         timerProgressBar: true,
       })
-      fetchModules()
     } catch (err) {
       const msg = mapTrainingModuleError(err, 'Failed to update folders.')
       await Swal.fire({

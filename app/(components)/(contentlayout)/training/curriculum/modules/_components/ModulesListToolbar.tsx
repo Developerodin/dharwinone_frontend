@@ -31,7 +31,8 @@ export interface ModulesListToolbarProps {
 }
 
 /**
- * Compact two-row catalog toolbar: title + search/sort, then status + expand + primary/overflow actions.
+ * Catalog toolbar: page title sits above the box; controls stay on one row
+ * (search → sort → collapse → new module → overflow, status tabs on the right).
  */
 export function ModulesListToolbar({
   search,
@@ -101,56 +102,44 @@ export function ModulesListToolbar({
   }, [handleOverflowAction, onNewFolder])
 
   return (
-    <div className="box custom-box">
-      <div className="box-body !py-2.5 !px-3">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h1 className="text-lg font-semibold text-defaulttextcolor mb-0 shrink-0">Modules</h1>
-            <div className="flex items-center gap-2 min-w-0 flex-1 justify-end">
-              <div className="relative w-full max-w-[16rem] shrink" role="search">
-                <i
-                  className="ri-search-line absolute start-3 top-1/2 -translate-y-1/2 text-[#8c9097] dark:text-white/50 pointer-events-none"
-                  aria-hidden
-                />
-                <input
-                  className="form-control !ps-9 h-9 text-sm"
-                  type="search"
-                  placeholder="Search modules"
-                  aria-label="Search modules"
-                  value={search}
-                  onChange={onSearchChange}
-                  onKeyDown={onSearchKeyDown}
-                />
-              </div>
-              <label className="sr-only" htmlFor="modules-sort">
-                Sort modules
-              </label>
-              <select
-                id="modules-sort"
-                className="form-control h-9 text-sm w-auto min-w-[9.5rem] shrink-0"
-                value={sortValue.value}
-                onChange={handleSortSelect}
-                aria-label="Sort modules"
-              >
-                {sortOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-nowrap min-w-0">
-            <div className="shrink-0 overflow-x-auto">
-              <ModulesStatusFilter
-                value={statusFilter}
-                counts={lifecycleCounts}
-                hrefFor={hrefForStatus}
-                onChange={onStatusChange}
+    <div>
+      <h1 className="mb-3 text-[1.125rem] font-semibold tracking-tight text-defaulttextcolor dark:text-white">
+        Modules
+      </h1>
+      <div className="box custom-box">
+        <div className="box-body !py-2 !px-3">
+          <div className="flex items-center gap-1.5 flex-nowrap min-w-0 overflow-x-auto">
+            <div className="relative w-48 shrink-0" role="search">
+              <i
+                className="ri-search-line absolute start-3 top-1/2 -translate-y-1/2 text-[0.875rem] leading-none text-[#8c9097] dark:text-white/50 pointer-events-none"
+                aria-hidden
+              />
+              <input
+                className="form-control !ps-9 !pe-3 !py-0 h-9 text-sm leading-none"
+                type="search"
+                placeholder="Search modules"
+                aria-label="Search modules"
+                value={search}
+                onChange={onSearchChange}
+                onKeyDown={onSearchKeyDown}
               />
             </div>
-            <div className="flex-1 min-w-2" aria-hidden />
+            <label className="sr-only" htmlFor="modules-sort">
+              Sort modules
+            </label>
+            <select
+              id="modules-sort"
+              className="form-control h-9 !py-0 text-sm w-auto shrink-0"
+              value={sortValue.value}
+              onChange={handleSortSelect}
+              aria-label="Sort modules"
+            >
+              {sortOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
             {showFolderHeaders ? (
               <ModulesFolderExpandControls
                 allCollapsed={allCollapsed}
@@ -178,7 +167,7 @@ export function ModulesListToolbar({
                 <i className="fe fe-more-vertical" aria-hidden />
               </button>
               <ul
-                className="hs-dropdown-menu ti-dropdown-menu hidden absolute end-0 top-full mt-1 z-[100] min-w-[11.5rem] bg-bodybg border border-defaultborder rounded-md shadow-lg"
+                className="hs-dropdown-menu ti-dropdown-menu hidden absolute start-0 top-full mt-1 z-[100] min-w-[11.5rem] bg-bodybg border border-defaultborder rounded-md shadow-lg"
                 role="menu"
                 aria-labelledby={moreMenuId}
               >
@@ -216,6 +205,15 @@ export function ModulesListToolbar({
                   </Link>
                 </li>
               </ul>
+            </div>
+            <div className="flex-1 min-w-1" aria-hidden />
+            <div className="shrink-0 ms-auto">
+              <ModulesStatusFilter
+                value={statusFilter}
+                counts={lifecycleCounts}
+                hrefFor={hrefForStatus}
+                onChange={onStatusChange}
+              />
             </div>
           </div>
         </div>

@@ -25,7 +25,7 @@ export function ModulesFolderExpandControls({
   return (
     <button
       type="button"
-      className="ti-btn ti-btn-light !mb-0 h-9 !py-0 !px-2.5 !w-auto shrink-0 whitespace-nowrap inline-flex items-center"
+      className="ti-btn ti-btn-light !mb-0 h-9 !py-0 !px-2 !w-auto shrink-0 whitespace-nowrap inline-flex items-center"
       aria-label={label}
       aria-pressed={!collapsed}
       disabled={folderCount === 0}
