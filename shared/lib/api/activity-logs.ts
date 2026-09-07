@@ -56,17 +56,21 @@ export async function exportActivityLogsCsv(params?: ExportActivityLogsParams): 
  * Same RBAC/scope as the Activity Logs list (not Platform Audit).
  */
 export async function downloadActivityLogsExcel(
-  params?: ExportActivityLogsParams
+  params?: ExportActivityLogsParams,
+  /** Range label for the filename, e.g. "2026-09-01_2026-09-07". Defaults to today's date. */
+  rangeLabel?: string
 ): Promise<void> {
   const { data } = await apiClient.get<Blob>("/activity-logs/export/excel", {
     params,
     responseType: "blob",
   });
-  const dateStamp = new Date().toISOString().slice(0, 10);
+  // Two exports of different ranges on one day used to share a filename, so the second silently
+  // became "(1)" in the downloads folder with nothing to tell the two apart.
+  const stamp = rangeLabel?.trim() || new Date().toISOString().slice(0, 10);
   const url = URL.createObjectURL(data);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `activity-logs-${dateStamp}.xlsx`;
+  a.download = `activity-logs-${stamp}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }

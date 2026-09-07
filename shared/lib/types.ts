@@ -118,6 +118,8 @@ export interface ActivityLog {
   action: string;
   entityType?: string | null;
   entityId?: string | null;
+  /** API convenience: display name of the linked record, resolved server-side. */
+  entityName?: string | null;
   metadata?: Record<string, unknown> | null;
   ip?: string | null;
   /** Browser-reported public IP (x-client-ip) at log creation; optional. */

@@ -89,7 +89,11 @@ export const ACTIVITY_LOG_ENTITY_TYPES: string[] = [
   "StudentQuizAttempt",
   "Certificate",
   "Attendance",
-  "Candidate",
+  // One filter entry for person records. The stored value is "Candidate" on rows written before
+  // the rename and "Employee" on rows written after, and both spellings still appear on the same
+  // actions, so offering them separately hides half the history whichever one you pick. The API
+  // splits this on the comma into an $in.
+  "Candidate,Employee",
   "Job",
   "JobApplication",
   "BolnaCandidateAgentSettings",
@@ -98,7 +102,6 @@ export const ACTIVITY_LOG_ENTITY_TYPES: string[] = [
   "OrgUnit",
   "Department",
   "OrgStructure",
-  "Employee",
 ];
 
 export type ActivityLogLabel = { title: string; description: string };
@@ -163,6 +166,7 @@ const ENTITY_TYPE_GROUP: Record<string, string> = {
   Impersonation: "Users & roles",
   Candidate: "Employee",
   Employee: "Employee",
+  "Candidate,Employee": "Employee",
   Job: "Jobs & hiring",
   JobApplication: "Jobs & hiring",
   Referral: "Referrals",
@@ -313,8 +317,15 @@ export const ENTITY_TYPE_LABELS: Record<string, ActivityLogLabel> = {
   Certificate: { title: "Certificate", description: "Issued certificate." },
   Attendance: { title: "Attendance", description: "Punch or attendance record." },
   Candidate: {
-    title: "Candidate",
-    description: "ATS candidate record — covers the full candidate-to-employee lifecycle (profile, documents, salary slips, joining/resign dates).",
+    // The record type was renamed; only the stored string still says Candidate. Showing the old
+    // name would split one person record into two names on screen for no reason.
+    title: "Employee",
+    description:
+      "Employee record (stored as the legacy \"Candidate\" type) — profile, documents, salary slips, joining/resign dates.",
+  },
+  "Candidate,Employee": {
+    title: "Employee",
+    description: "Employee records under both the current and the pre-rename stored type.",
   },
   Job: { title: "Job", description: "Job posting." },
   JobApplication: { title: "Job application", description: "Application to a job." },
@@ -387,6 +398,19 @@ function recipientsLine(metadata: Record<string, unknown>): string | null {
 }
 
 /** Rich Entity column for Role rows (platform audit); uses activity log metadata from the API. */
+/**
+ * Last-resort headline: the name the API resolved for `entityId`. Covers every entity type that
+ * has no hand-written summary above, so the cell shows a person / job / department instead of an
+ * ObjectId. Returns null when the API could not resolve one (deleted record, or an entityId that
+ * is not a document id).
+ */
+export function getResolvedEntityNameSummary(log: {
+  entityName?: string | null;
+}): { headline: string; detailLines: string[] } | null {
+  const name = typeof log.entityName === "string" ? log.entityName.trim() : "";
+  return name ? { headline: name, detailLines: [] } : null;
+}
+
 export function getRoleActivityEntitySummary(log: {
   action?: string | null;
   entityType?: string | null;
@@ -700,6 +724,7 @@ export function getOrgStructureActivityEntitySummary(log: {
 export function getEmployeeOrgActivityEntitySummary(log: {
   action?: string | null;
   entityType?: string | null;
+  entityName?: string | null;
   metadata?: Record<string, unknown> | null;
 }): { headline: string; detailLines: string[] } | null {
   if (log.entityType !== "Employee" || log.action !== "employee.departmentAssign") return null;
@@ -708,7 +733,14 @@ export function getEmployeeOrgActivityEntitySummary(log: {
       ? (log.metadata as Record<string, unknown>)
       : {};
   const line = idMetaLine("departmentIdBefore", "departmentIdAfter", m);
-  return { headline: "Department assignment", detailLines: line ? [line] : [] };
+  // Who was moved matters more than the fact of a move — the Action column already says
+  // "Employee department assigned". Name at save time first, then the API's live lookup.
+  const storedName = typeof m.fullName === "string" && m.fullName.trim() ? m.fullName.trim() : null;
+  const liveName = typeof log.entityName === "string" && log.entityName.trim() ? log.entityName.trim() : null;
+  return {
+    headline: storedName ?? liveName ?? "Department assignment",
+    detailLines: line ? [line] : [],
+  };
 }
 
 export function getOrgMutateDeniedEntitySummary(log: {

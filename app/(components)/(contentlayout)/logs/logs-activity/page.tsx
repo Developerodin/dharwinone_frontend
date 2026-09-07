@@ -2,6 +2,7 @@
 
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Seo from "@/shared/layout-components/seo/seo";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { useFeaturePermissions } from "@/shared/hooks/use-feature-permissions";
@@ -18,6 +19,7 @@ import {
   getGroupedActionOptions,
   getGroupedEntityTypeOptions,
   getImpersonationEntitySummary,
+  getResolvedEntityNameSummary,
   getJobActivityEntitySummary,
   getOrgMutateDeniedEntitySummary,
   getOrgStructureActivityEntitySummary,
@@ -29,6 +31,8 @@ import { ActivityLogFilterSelect } from "@/shared/components/activity-log-filter
 import { ActivityLogLocationCell } from "@/shared/components/activity-log-location-cell";
 import ListPagination from "@/shared/components/ListPagination";
 import { getActivityLogDisplayIp } from "@/shared/lib/activity-log-location-display";
+import { formatYmdLocal, parseYmdLocal } from "@/shared/lib/leave-date-range";
+import { formatUserAgentSummary, parseUserAgentDetails } from "@/shared/lib/parse-user-agent";
 import {
   canOpenActivityLogEntity,
   getActivityLogEntityHref,
@@ -52,23 +56,34 @@ function formatDateTime(isoString: string | undefined): string {
   }
 }
 
+/**
+ * Rows are timestamped in the viewer's local zone and the presets below are built from local
+ * calendar days, so the bounds sent to the API have to be that local day's real instants. Stamping
+ * `T00:00:00.000Z` instead (what this did before) shifted every boundary by the UTC offset: in IST
+ * a "Sep 1 – Sep 1" range actually queried 05:30 Sep 1 → 05:29 Sep 2, quietly dropping the first
+ * five and a half hours of the day and pulling in the next morning's.
+ */
 function toIsoStartOfDay(date: string | null): string | undefined {
   if (!date) return undefined;
-  // ponytail: preset ranges use local YMD (toLocalYmd); bounds here are UTC. Full tz alignment deferred.
-  try {
-    return new Date(`${date}T00:00:00.000Z`).toISOString();
-  } catch {
-    return undefined;
-  }
+  const parsed = parseYmdLocal(date);
+  if (!parsed || Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString();
 }
 
 function toIsoEndOfDay(date: string | null): string | undefined {
   if (!date) return undefined;
-  try {
-    return new Date(`${date}T23:59:59.999Z`).toISOString();
-  } catch {
-    return undefined;
-  }
+  const parsed = parseYmdLocal(date);
+  if (!parsed || Number.isNaN(parsed.getTime())) return undefined;
+  const end = new Date(
+    parsed.getFullYear(),
+    parsed.getMonth(),
+    parsed.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+  return end.toISOString();
 }
 
 type DatePreset = "7d" | "30d" | "3m" | "all" | "custom";
@@ -100,7 +115,8 @@ function buildLogRowModel(
       getJobActivityEntitySummary(log) ??
       getRoleActivityEntitySummary(log) ??
       getUserActivityEntitySummary(log) ??
-      getImpersonationEntitySummary(log),
+      getImpersonationEntitySummary(log) ??
+      getResolvedEntityNameSummary(log),
     entityHref: getActivityLogEntityHref(log.entityType, log.entityId),
     canOpenEntity: canOpenActivityLogEntity(
       log.entityType,
@@ -110,6 +126,109 @@ function buildLogRowModel(
       isPlatformSuperUser
     ),
   };
+}
+
+/**
+ * "Chrome 152 · Windows 10 / 11 (64-bit)" instead of three wrapped lines of
+ * `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit…`, which took a quarter of every row and
+ * told the reader nothing they could act on. The raw string stays on the cell's `title`.
+ */
+function shortDeviceLabel(userAgent: string | null | undefined): string {
+  const parsed = parseUserAgentDetails(userAgent);
+  if (!parsed) return "—";
+  return `${parsed.browser} · ${parsed.os}`;
+}
+
+function presetToRange(preset: DatePreset): { start: string; end: string } {
+  if (preset === "all" || preset === "custom") return { start: "", end: "" };
+  const now = new Date();
+  const end = formatYmdLocal(now);
+  const startDate = new Date(now);
+  if (preset === "7d") startDate.setDate(now.getDate() - 6);
+  else if (preset === "30d") startDate.setDate(now.getDate() - 29);
+  else if (preset === "3m") startDate.setMonth(now.getMonth() - 3);
+  return { start: formatYmdLocal(startDate), end };
+}
+
+const DATE_PRESETS: { key: DatePreset; label: string }[] = [
+  { key: "7d", label: "Last 7 days" },
+  { key: "30d", label: "Last 30 days" },
+  { key: "3m", label: "Last 3 months" },
+  { key: "all", label: "All time" },
+  { key: "custom", label: "Custom…" },
+];
+
+const PRESET_KEYS = new Set<string>(DATE_PRESETS.map((p) => p.key));
+const PAGE_SIZES = [10, 20, 50, 100];
+const SORT_FIELDS = ["createdAt", "action", "entityType"] as const;
+type SortField = (typeof SORT_FIELDS)[number];
+const DEFAULT_SORT = "createdAt:desc";
+
+type LogFilters = {
+  q: string;
+  action: string;
+  entityType: string;
+  preset: DatePreset;
+  startDate: string;
+  endDate: string;
+  sortBy: string;
+  includeAttendance: boolean;
+  page: number;
+  limit: number;
+};
+
+const DEFAULT_PRESET: DatePreset = "7d";
+const DEFAULT_LIMIT = 20;
+
+function isValidSort(value: string): boolean {
+  const [field, dir] = value.split(":");
+  return (
+    (SORT_FIELDS as readonly string[]).includes(field) && (dir === "asc" || dir === "desc")
+  );
+}
+
+type SearchParamsLike = { get(name: string): string | null };
+
+/** The URL is the source of truth for filters, so refresh, Back and a shared link all behave. */
+function readFilters(sp: SearchParamsLike): LogFilters {
+  const preset = sp.get("when") ?? "";
+  const sortBy = sp.get("sort") ?? "";
+  const limit = Number(sp.get("limit"));
+  const page = Number(sp.get("page"));
+  const ymd = (key: string) => {
+    const value = (sp.get(key) ?? "").trim();
+    return parseYmdLocal(value) ? value : "";
+  };
+  return {
+    q: (sp.get("q") ?? "").trim(),
+    action: (sp.get("action") ?? "").trim(),
+    entityType: (sp.get("entity") ?? "").trim(),
+    preset: PRESET_KEYS.has(preset) ? (preset as DatePreset) : DEFAULT_PRESET,
+    startDate: ymd("from"),
+    endDate: ymd("to"),
+    sortBy: isValidSort(sortBy) ? sortBy : DEFAULT_SORT,
+    includeAttendance: sp.get("attendance") === "1",
+    page: Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1,
+    limit: PAGE_SIZES.includes(limit) ? limit : DEFAULT_LIMIT,
+  };
+}
+
+/** Only non-defaults reach the address bar, so an untouched page keeps a clean URL. */
+function filtersToQueryString(f: LogFilters): string {
+  const sp = new URLSearchParams();
+  if (f.q) sp.set("q", f.q);
+  if (f.action) sp.set("action", f.action);
+  if (f.entityType) sp.set("entity", f.entityType);
+  if (f.preset !== DEFAULT_PRESET) sp.set("when", f.preset);
+  if (f.preset === "custom") {
+    if (f.startDate) sp.set("from", f.startDate);
+    if (f.endDate) sp.set("to", f.endDate);
+  }
+  if (f.sortBy !== DEFAULT_SORT) sp.set("sort", f.sortBy);
+  if (f.includeAttendance) sp.set("attendance", "1");
+  if (f.limit !== DEFAULT_LIMIT) sp.set("limit", String(f.limit));
+  if (f.page > 1) sp.set("page", String(f.page));
+  return sp.toString();
 }
 
 function ActivityLogEntityCell({
@@ -139,7 +258,7 @@ function ActivityLogEntityCell({
           ))}
         </>
       ) : (
-        <span>{log.entityType ?? "—"}</span>
+        <span>{entityDisp.title}</span>
       )}
       {entityHref && canOpenEntity ? (
         <Link
@@ -169,32 +288,75 @@ function ActivityLogEntityCell({
   );
 }
 
-// Local calendar date (YYYY-MM-DD), NOT toISOString() — avoids UTC day-drift near midnight.
-function toLocalYmd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+const HEADER_CELL =
+  "px-4 py-2.5 text-start font-semibold sticky top-0 z-10 bg-gray-50 dark:bg-bodybg";
+
+function SortableHeader({
+  label,
+  field,
+  sortBy,
+  onSort,
+  className = "",
+}: {
+  label: string;
+  field: SortField;
+  sortBy: string;
+  onSort: (field: SortField) => void;
+  className?: string;
+}) {
+  const [activeField, activeDir] = sortBy.split(":");
+  const isActive = activeField === field;
+  return (
+    <th
+      className={`${HEADER_CELL} ${className}`}
+      aria-sort={isActive ? (activeDir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className="inline-flex items-center gap-1 font-semibold hover:text-primary"
+      >
+        {label}
+        <i
+          className={`text-[0.9rem] leading-none ${
+            isActive
+              ? activeDir === "asc"
+                ? "ri-arrow-up-s-line text-primary"
+                : "ri-arrow-down-s-line text-primary"
+              : "ri-arrow-up-down-line text-defaulttextcolor/35"
+          }`}
+          aria-hidden
+        />
+      </button>
+    </th>
+  );
 }
 
-function presetToRange(preset: DatePreset): { start: string; end: string } {
-  if (preset === "all" || preset === "custom") return { start: "", end: "" };
-  const now = new Date();
-  const end = toLocalYmd(now);
-  const startDate = new Date(now);
-  if (preset === "7d") startDate.setDate(now.getDate() - 6);
-  else if (preset === "30d") startDate.setDate(now.getDate() - 29);
-  else if (preset === "3m") startDate.setMonth(now.getMonth() - 3);
-  return { start: toLocalYmd(startDate), end };
+function FilterChip({
+  label,
+  onRemove,
+  removeLabel,
+}: {
+  label: React.ReactNode;
+  onRemove: () => void;
+  removeLabel: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[0.75rem] ps-2 pe-1 py-1 rounded bg-primary/10 text-primary">
+      {label}
+      <button
+        type="button"
+        aria-label={removeLabel}
+        onClick={onRemove}
+        // A bare "✕" glyph left this with a ~10px hit area. The negative margin lets a true 24×24
+        // target sit inside the chip without making the chip itself any taller.
+        className="inline-flex items-center justify-center w-6 h-6 -my-0.5 rounded hover:bg-primary/20"
+      >
+        <i className="ri-close-line text-[0.85rem] leading-none" aria-hidden />
+      </button>
+    </span>
+  );
 }
-
-const DATE_PRESETS: { key: DatePreset; label: string }[] = [
-  { key: "7d", label: "Last 7 days" },
-  { key: "30d", label: "Last 30 days" },
-  { key: "3m", label: "Last 3 months" },
-  { key: "all", label: "All time" },
-  { key: "custom", label: "Custom…" },
-];
 
 export default function LogsActivityPage() {
   const {
@@ -206,6 +368,9 @@ export default function LogsActivityPage() {
     isDesignatedSuperadmin,
   } = useAuth();
   const logsActivityFeature = useFeaturePermissions("logs.activity");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const canReadActivityLogs = useMemo(() => {
     if (isDesignatedSuperadmin) return true;
@@ -221,25 +386,46 @@ export default function LogsActivityPage() {
     logsActivityFeature.canView,
   ]);
 
+  const filters = useMemo(() => readFilters(searchParams), [searchParams]);
+  const {
+    q,
+    action,
+    entityType,
+    preset: datePreset,
+    startDate,
+    endDate,
+    sortBy,
+    includeAttendance,
+    page,
+    limit,
+  } = filters;
+
+  /**
+   * ponytail: last write wins. Two filter changes inside one tick would both build on the
+   * pre-change URL and the first would be lost — fine for a filter bar driven by clicks. Move to a
+   * reducer over `useSearchParams` if that ever stops being true.
+   */
+  const setFilters = useCallback(
+    (patch: Partial<LogFilters>) => {
+      const next: LogFilters = { ...filters, ...patch };
+      if (!("page" in patch)) next.page = 1;
+      const qs = filtersToQueryString(next);
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [filters, pathname, router]
+  );
+
   const [logs, setLogs] = useState<ActivityLog[]>([]);
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(20);
   const [totalPages, setTotalPages] = useState(1);
   const [totalResults, setTotalResults] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState("");
   const [error, setError] = useState<string>("");
   const [forbidden, setForbidden] = useState(false);
 
-  const [searchInput, setSearchInput] = useState("");
-  const [q, setQ] = useState("");
-  const [action, setAction] = useState("");
-  const [entityType, setEntityType] = useState("");
-  const [datePreset, setDatePreset] = useState<DatePreset>("7d");
-  const [startDate, setStartDate] = useState<string>("");
-  const [endDate, setEndDate] = useState<string>("");
-
+  const [searchInput, setSearchInput] = useState(q);
   const fetchIdRef = useRef(0);
   const customDateIncomplete = datePreset === "custom" && (!startDate || !endDate);
 
@@ -248,16 +434,38 @@ export default function LogsActivityPage() {
     logsActivityFeature.canDelete ||
     (logsActivityFeature.canCreate && logsActivityFeature.canEdit);
 
-  const hasActiveFilters =
-    q.trim() || action.trim() || entityType.trim() || datePreset !== "7d";
+  const activeFilterCount =
+    (q.trim() ? 1 : 0) +
+    (action.trim() ? 1 : 0) +
+    (entityType.trim() ? 1 : 0) +
+    (datePreset !== DEFAULT_PRESET ? 1 : 0) +
+    (includeAttendance ? 1 : 0);
+  const hasActiveFilters = activeFilterCount > 0;
+
+  // Open on arrival only when the link carried filters: the table gets the viewport by default,
+  // but a shared URL still shows what produced it.
+  const [filtersOpen, setFiltersOpen] = useState(() => hasActiveFilters);
+
+  // Keeps the box in step when the URL changes underneath it (Back, Clear all, a shared link)
+  // without fighting the user mid-keystroke.
+  useEffect(() => {
+    setSearchInput((prev) => (prev.trim() === q ? prev : q));
+  }, [q]);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(searchInput.trim());
-      setPage(1);
-    }, 350);
+    const typed = searchInput.trim();
+    if (typed === q) return;
+    const t = setTimeout(() => setFilters({ q: typed }), 350);
     return () => clearTimeout(t);
-  }, [searchInput]);
+  }, [searchInput, q, setFilters]);
+
+  const rangeForApi = useMemo(
+    () =>
+      datePreset === "custom"
+        ? { start: startDate, end: endDate }
+        : presetToRange(datePreset),
+    [datePreset, startDate, endDate]
+  );
 
   const fetchLogs = useCallback(async () => {
     const fetchId = ++fetchIdRef.current;
@@ -265,18 +473,14 @@ export default function LogsActivityPage() {
     setError("");
     setForbidden(false);
 
-    const range =
-      datePreset === "custom"
-        ? { start: startDate, end: endDate }
-        : presetToRange(datePreset);
-
     const params: activityLogsApi.ListActivityLogsParams = {
       action: action.trim() || undefined,
       entityType: entityType.trim() || undefined,
       q: q.trim() || undefined,
-      startDate: toIsoStartOfDay(range.start || null) ?? undefined,
-      endDate: toIsoEndOfDay(range.end || null) ?? undefined,
-      sortBy: "createdAt:desc",
+      startDate: toIsoStartOfDay(rangeForApi.start || null) ?? undefined,
+      endDate: toIsoEndOfDay(rangeForApi.end || null) ?? undefined,
+      includeAttendance: includeAttendance || undefined,
+      sortBy,
       page,
       limit,
     };
@@ -307,7 +511,7 @@ export default function LogsActivityPage() {
       if (fetchId !== fetchIdRef.current) return;
       setLoading(false);
     }
-  }, [action, entityType, q, datePreset, startDate, endDate, page, limit]);
+  }, [action, entityType, q, rangeForApi, includeAttendance, sortBy, page, limit]);
 
   useEffect(() => {
     if (!permissionsLoaded || !canReadActivityLogs) {
@@ -331,30 +535,37 @@ export default function LogsActivityPage() {
 
   useEffect(() => {
     if (totalPages > 0 && page > totalPages) {
-      setPage(totalPages);
+      setFilters({ page: totalPages });
     }
-  }, [page, totalPages]);
+  }, [page, totalPages, setFilters]);
 
-  const buildExportParams = useCallback((): activityLogsApi.ExportActivityLogsParams => {
-    const range =
-      datePreset === "custom"
-        ? { start: startDate, end: endDate }
-        : presetToRange(datePreset);
-    return {
+  const rangeLabel = useMemo(() => {
+    const { start, end } = rangeForApi;
+    if (!start && !end) return "all-time";
+    if (start === end) return start;
+    return `${start || "start"}_${end || "today"}`;
+  }, [rangeForApi]);
+
+  const buildExportParams = useCallback(
+    (): activityLogsApi.ExportActivityLogsParams => ({
       action: action.trim() || undefined,
       entityType: entityType.trim() || undefined,
       q: q.trim() || undefined,
-      startDate: toIsoStartOfDay(range.start || null) ?? undefined,
-      endDate: toIsoEndOfDay(range.end || null) ?? undefined,
-    };
-  }, [action, entityType, q, datePreset, startDate, endDate]);
+      startDate: toIsoStartOfDay(rangeForApi.start || null) ?? undefined,
+      endDate: toIsoEndOfDay(rangeForApi.end || null) ?? undefined,
+      includeAttendance: includeAttendance || undefined,
+    }),
+    [action, entityType, q, rangeForApi, includeAttendance]
+  );
 
   const handleExportExcel = async () => {
     if (customDateIncomplete) return;
     setExporting(true);
     setError("");
+    setExportNote("");
     try {
-      await activityLogsApi.downloadActivityLogsExcel(buildExportParams());
+      await activityLogsApi.downloadActivityLogsExcel(buildExportParams(), rangeLabel);
+      setExportNote(`Downloaded ${totalResults} row${totalResults === 1 ? "" : "s"}.`);
     } catch (err) {
       if (err instanceof AxiosError && err.response?.status === 404) {
         setError("No activity logs match the selected filters.");
@@ -381,20 +592,43 @@ export default function LogsActivityPage() {
     }
   };
 
+  useEffect(() => {
+    if (!exportNote) return;
+    const t = setTimeout(() => setExportNote(""), 5000);
+    return () => clearTimeout(t);
+  }, [exportNote]);
+
   const handleClearFilters = () => {
     setSearchInput("");
-    setQ("");
-    setAction("");
-    setEntityType("");
-    setDatePreset("7d");
-    setStartDate("");
-    setEndDate("");
-    setPage(1);
+    router.replace(pathname, { scroll: false });
+  };
+
+  const handleSort = (field: SortField) => {
+    const [activeField, activeDir] = sortBy.split(":");
+    const nextDir = activeField === field && activeDir === "desc" ? "asc" : "desc";
+    setFilters({ sortBy: `${field}:${nextDir}` });
+  };
+
+  const handlePresetChange = (nextPreset: DatePreset) => {
+    if (nextPreset !== "custom") {
+      setFilters({ preset: nextPreset, startDate: "", endDate: "" });
+      return;
+    }
+    // Carry the range already on screen into the custom fields instead of blanking the table and
+    // asking for two dates from scratch.
+    const seed = presetToRange(datePreset);
+    setFilters({
+      preset: "custom",
+      startDate: startDate || seed.start,
+      endDate: endDate || seed.end,
+    });
   };
 
   const accessLoading = !permissionsLoaded;
-
-  const showPagination = !loading && !customDateIncomplete && (logs.length > 0 || hasActiveFilters);
+  const showToolbar = !accessLoading && canReadActivityLogs && !forbidden;
+  const showPagination = !customDateIncomplete && (logs.length > 0 || hasActiveFilters);
+  const showSkeleton = loading && logs.length === 0;
+  const activeRangeLabel = DATE_PRESETS.find((p) => p.key === datePreset)?.label ?? "";
 
   return (
     <Fragment>
@@ -402,246 +636,309 @@ export default function LogsActivityPage() {
       <div className="mt-5 grid grid-cols-12 gap-6 h-[calc(100vh-8rem)] sm:mt-6">
         <div className="xl:col-span-12 col-span-12 h-full min-h-0 flex flex-col">
           <div className="box custom-box h-full min-h-0 flex flex-col overflow-hidden">
-            <div className="box-header shrink-0 flex flex-col gap-3 !px-5 !py-3 sm:!py-4 bg-white dark:bg-bodybg">
-              <div className="flex items-center justify-between flex-wrap gap-3 sm:gap-4">
-              <div className="box-title mb-0">
-                Activity Logs
-                <span className="badge bg-light text-default rounded-full ms-1 text-[0.75rem] align-middle">
-                  {totalResults}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2 items-center w-full sm:w-auto">
-                {isDesignatedSuperadmin && (
-                  <Link
-                    href="/logs/logs-activity/platform"
-                    className="ti-btn ti-btn-soft-primary !py-1 !px-3 !text-[0.75rem]"
-                  >
-                    Platform audit console
-                  </Link>
-                )}
-                <select
-                  className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem]"
-                  value={limit}
-                  onChange={(e) => {
-                    setLimit(Number(e.target.value));
-                    setPage(1);
-                  }}
-                  aria-label="Results per page"
-                >
-                  {[10, 20, 50, 100].map((size) => (
-                    <option key={size} value={size}>
-                      Show {size}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="ti-btn ti-btn-soft-primary !py-1 !px-3 !text-[0.75rem] !mb-0"
-                  onClick={handleExportExcel}
-                  disabled={loading || exporting || customDateIncomplete}
-                  aria-label="Export activity logs as Excel"
-                  aria-busy={exporting}
-                >
-                  {exporting ? (
-                    <i className="ri-loader-4-line animate-spin motion-reduce:animate-none me-1" aria-hidden />
-                  ) : (
-                    <i className="ri-download-2-line me-1" aria-hidden />
+            <div className="box-header shrink-0 flex flex-col gap-3 !items-stretch !px-5 !py-3 sm:!py-4 bg-white dark:bg-bodybg">
+              <div className="flex w-full min-w-0 items-center justify-between flex-wrap gap-3 sm:gap-4">
+                <div className="box-title mb-0 !me-0 shrink-0 flex items-baseline gap-2">
+                  Activity Logs
+                  {showToolbar && (
+                    <span className="text-[0.75rem] font-normal text-defaulttextcolor/70">
+                      <span className="font-semibold text-defaulttextcolor">{totalResults}</span>{" "}
+                      matching
+                      {activeRangeLabel && datePreset !== "all" && datePreset !== "custom" && (
+                        <span className="text-defaulttextcolor/55">
+                          {" "}
+                          · {activeRangeLabel.toLowerCase()}
+                        </span>
+                      )}
+                    </span>
                   )}
-                  {exporting ? "Exporting..." : "Export Excel"}
-                </button>
-                {currentUser && (
-                  <span className="text-[0.75rem] text-defaulttextcolor/70">
-                    Viewing as: <span className="font-medium">{currentUser.name ?? currentUser.email}</span>
-                  </span>
+                </div>
+                {showToolbar && (
+                  <div className="flex flex-wrap gap-2 items-center shrink-0 ms-auto">
+                    {isDesignatedSuperadmin && (
+                      <Link
+                        href="/logs/logs-activity/platform"
+                        className="ti-btn ti-btn-soft-primary !py-1 !px-3 !text-[0.75rem]"
+                      >
+                        Platform audit console
+                      </Link>
+                    )}
+                    {canFilter && (
+                      <button
+                        type="button"
+                        className={`ti-btn !py-1 !px-3 !text-[0.75rem] !mb-0 ${
+                          filtersOpen || hasActiveFilters ? "ti-btn-soft-primary" : "ti-btn-light"
+                        }`}
+                        onClick={() => setFiltersOpen((open) => !open)}
+                        aria-expanded={filtersOpen}
+                        aria-controls="activity-logs-filters"
+                      >
+                        <i className="ri-filter-3-line me-1" aria-hidden />
+                        Filters
+                        {activeFilterCount > 0 && (
+                          <span className="ms-1.5 inline-flex items-center justify-center min-w-[1.15rem] h-[1.15rem] px-1 rounded-full text-[0.65rem] font-semibold bg-primary text-white">
+                            {activeFilterCount}
+                          </span>
+                        )}
+                        <i
+                          className={`ms-1 ri-arrow-${filtersOpen ? "up" : "down"}-s-line`}
+                          aria-hidden
+                        />
+                      </button>
+                    )}
+                    <select
+                      className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem]"
+                      value={limit}
+                      onChange={(e) => setFilters({ limit: Number(e.target.value) })}
+                      aria-label="Results per page"
+                    >
+                      {PAGE_SIZES.map((size) => (
+                        <option key={size} value={size}>
+                          Show {size}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="ti-btn ti-btn-soft-primary !py-1 !px-3 !text-[0.75rem] !mb-0"
+                      onClick={handleExportExcel}
+                      // Deliberately not disabled while the list reloads: the debounced search
+                      // re-fetches on every keystroke and the button used to flicker inert.
+                      disabled={exporting || customDateIncomplete || totalResults === 0}
+                      aria-label={`Export all ${totalResults} matching activity logs as Excel`}
+                      aria-busy={exporting}
+                    >
+                      {exporting ? (
+                        <i
+                          className="ri-loader-4-line animate-spin motion-reduce:animate-none me-1"
+                          aria-hidden
+                        />
+                      ) : (
+                        <i className="ri-download-2-line me-1" aria-hidden />
+                      )}
+                      {exporting ? "Exporting..." : `Export ${totalResults} rows`}
+                    </button>
+                    {currentUser && (
+                      <span className="text-[0.75rem] text-defaulttextcolor/70 ps-3 border-s border-defaultborder">
+                        Viewing as{" "}
+                        <span className="font-medium text-defaulttextcolor">
+                          {currentUser.name ?? currentUser.email}
+                        </span>
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
-              </div>
 
-              {canFilter && !accessLoading && canReadActivityLogs && !forbidden && (
-                <div className="w-full p-4 rounded-lg border border-defaultborder bg-gray-50/50 dark:bg-gray-800/30">
-                  <div className="mb-3">
-                    <label htmlFor="logs-search" className="form-label !text-[0.75rem] mb-1">
-                      Search
-                    </label>
-                    <input
-                      id="logs-search"
-                      type="search"
-                      className="form-control !py-2 !text-[0.8125rem] w-full"
-                      placeholder="Search by person name, email, or what changed…"
-                      value={searchInput}
-                      onChange={(e) => setSearchInput(e.target.value)}
-                    />
-                  </div>
+              {exportNote && (
+                <p
+                  className="mb-0 text-[0.75rem] text-success flex items-center gap-1"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <i className="ri-check-line" aria-hidden />
+                  {exportNote}
+                </p>
+              )}
 
-                  <div className="mb-3">
-                    <label id="logs-when-label" className="form-label !text-[0.75rem] mb-1">
-                      When
-                    </label>
-                    <div
-                      className="flex flex-wrap items-center gap-2"
-                      role="group"
-                      aria-labelledby="logs-when-label"
-                    >
-                      {DATE_PRESETS.map((p) => (
-                        <button
-                          key={p.key}
-                          type="button"
-                          onClick={() => {
-                            setDatePreset(p.key);
-                            setPage(1);
-                          }}
-                          className={
-                            "ti-btn !py-1 !px-3 !text-[0.75rem] !mb-0 " +
-                            (datePreset === p.key ? "ti-btn-primary" : "ti-btn-light")
-                          }
+              {canFilter && showToolbar && (
+                <>
+                  <div
+                    id="activity-logs-filters"
+                    className={`w-full p-4 rounded-lg border border-defaultborder bg-gray-50/50 dark:bg-gray-800/30 ${
+                      filtersOpen ? "" : "hidden"
+                    }`}
+                  >
+                    <div className="mb-3">
+                      <label htmlFor="logs-search" className="form-label !text-[0.75rem] mb-1">
+                        Search
+                      </label>
+                      <input
+                        id="logs-search"
+                        type="search"
+                        className="form-control !py-2 !text-[0.8125rem] w-full"
+                        placeholder="Search by person, email, action, entity type, ID or IP…"
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        aria-describedby="logs-search-help"
+                      />
+                      <p
+                        id="logs-search-help"
+                        className="mt-1 mb-0 text-[0.7rem] text-defaulttextcolor/55"
+                      >
+                        Matches the actor, the action code, the entity type or ID, and the name of
+                        the record that changed.
+                      </p>
+                    </div>
+
+                    <div className="mb-3">
+                      <label id="logs-when-label" className="form-label !text-[0.75rem] mb-1">
+                        When
+                      </label>
+                      <div
+                        className="flex flex-wrap items-center gap-2"
+                        role="group"
+                        aria-labelledby="logs-when-label"
+                      >
+                        {DATE_PRESETS.map((p) => (
+                          <button
+                            key={p.key}
+                            type="button"
+                            onClick={() => handlePresetChange(p.key)}
+                            aria-pressed={datePreset === p.key}
+                            className={
+                              "ti-btn !py-1 !px-3 !text-[0.75rem] !mb-0 " +
+                              (datePreset === p.key ? "ti-btn-primary" : "ti-btn-light")
+                            }
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+
+                        {/* Kept inside the When group: these are the controls that group just
+                            spawned, and they used to land a row below, beside Action. */}
+                        {datePreset === "custom" && (
+                          <>
+                            <label
+                              htmlFor="logs-start-date"
+                              className="text-[0.75rem] text-defaulttextcolor/70 ms-1"
+                            >
+                              From
+                            </label>
+                            <input
+                              id="logs-start-date"
+                              type="date"
+                              className="form-control !py-1 !text-[0.8125rem] !w-auto"
+                              value={startDate}
+                              max={endDate || undefined}
+                              onChange={(e) => setFilters({ startDate: e.target.value })}
+                            />
+                            <label
+                              htmlFor="logs-end-date"
+                              className="text-[0.75rem] text-defaulttextcolor/70"
+                            >
+                              To
+                            </label>
+                            <input
+                              id="logs-end-date"
+                              type="date"
+                              className="form-control !py-1 !text-[0.8125rem] !w-auto"
+                              value={endDate}
+                              min={startDate || undefined}
+                              onChange={(e) => setFilters({ endDate: e.target.value })}
+                            />
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="w-full sm:min-w-[14rem] sm:w-auto sm:flex-1">
+                        <label htmlFor="logs-action" className="form-label !text-[0.75rem] mb-1">
+                          Action
+                        </label>
+                        <ActivityLogFilterSelect
+                          inputId="logs-action"
+                          groups={getGroupedActionOptions()}
+                          value={action}
+                          onChange={(next) => setFilters({ action: next })}
+                          placeholder="Any action"
+                          noOptionsMessage="No matching actions"
+                        />
+                      </div>
+                      <div className="w-full sm:min-w-[14rem] sm:w-auto sm:flex-1">
+                        <label
+                          htmlFor="logs-entity-type"
+                          className="form-label !text-[0.75rem] mb-1"
                         >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="w-full sm:min-w-[14rem] sm:w-auto sm:flex-1">
-                      <label htmlFor="logs-action" className="form-label !text-[0.75rem] mb-1">
-                        Action
-                      </label>
-                      <ActivityLogFilterSelect
-                        inputId="logs-action"
-                        groups={getGroupedActionOptions()}
-                        value={action}
-                        onChange={(next) => {
-                          setAction(next);
-                          setPage(1);
-                        }}
-                        placeholder="Any action"
-                        noOptionsMessage="No matching actions"
-                      />
-                    </div>
-                    <div className="w-full sm:min-w-[14rem] sm:w-auto sm:flex-1">
-                      <label htmlFor="logs-entity-type" className="form-label !text-[0.75rem] mb-1">
-                        Entity type
-                      </label>
-                      <ActivityLogFilterSelect
-                        inputId="logs-entity-type"
-                        groups={getGroupedEntityTypeOptions()}
-                        value={entityType}
-                        onChange={(next) => {
-                          setEntityType(next);
-                          setPage(1);
-                        }}
-                        placeholder="Any entity"
-                        noOptionsMessage="No matching entity types"
-                      />
+                          Entity type
+                        </label>
+                        <ActivityLogFilterSelect
+                          inputId="logs-entity-type"
+                          groups={getGroupedEntityTypeOptions()}
+                          value={entityType}
+                          onChange={(next) => setFilters({ entityType: next })}
+                          placeholder="Any entity"
+                          noOptionsMessage="No matching entity types"
+                        />
+                      </div>
                     </div>
 
-                    {datePreset === "custom" && (
-                      <>
-                        <div className="w-full sm:min-w-[10rem] sm:w-auto">
-                          <label htmlFor="logs-start-date" className="form-label !text-[0.75rem] mb-1">
-                            Start date
-                          </label>
-                          <input
-                            id="logs-start-date"
-                            type="date"
-                            className="form-control !py-1.5 !text-[0.8125rem]"
-                            value={startDate}
-                            onChange={(e) => {
-                              setStartDate(e.target.value);
-                              setPage(1);
-                            }}
-                          />
-                        </div>
-                        <div className="w-full sm:min-w-[10rem] sm:w-auto">
-                          <label htmlFor="logs-end-date" className="form-label !text-[0.75rem] mb-1">
-                            End date
-                          </label>
-                          <input
-                            id="logs-end-date"
-                            type="date"
-                            className="form-control !py-1.5 !text-[0.8125rem]"
-                            value={endDate}
-                            onChange={(e) => {
-                              setEndDate(e.target.value);
-                              setPage(1);
-                            }}
-                          />
-                        </div>
-                      </>
+                    {/* Attendance punches are excluded by default server-side. Left unstated, that
+                        exclusion is invisible — not something an audit log should hide. */}
+                    <label className="flex items-start gap-2 mt-3 mb-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="form-check-input mt-0.5"
+                        checked={includeAttendance}
+                        onChange={(e) => setFilters({ includeAttendance: e.target.checked })}
+                      />
+                      <span className="text-[0.75rem] leading-snug">
+                        Include attendance events
+                        <span className="block text-[0.7rem] text-defaulttextcolor/55">
+                          Punch in / punch out entries are hidden by default because they outnumber
+                          everything else.
+                        </span>
+                      </span>
+                    </label>
+
+                    {customDateIncomplete && (
+                      <p className="mt-3 mb-0 text-[0.8125rem] text-warning">
+                        Select both start and end dates to load custom range results.
+                      </p>
                     )}
                   </div>
 
-                  {customDateIncomplete && (
-                    <p className="mt-3 mb-0 text-[0.8125rem] text-warning">
-                      Select both start and end dates to load custom range results.
-                    </p>
-                  )}
-
+                  {/* Outside the collapsible panel on purpose: a filter you cannot see is worse
+                      than a panel you have to open. */}
                   {hasActiveFilters && (
-                    <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-defaultborder">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[0.7rem] uppercase tracking-wide text-defaulttextcolor/50">
                         Active
                       </span>
-                      {datePreset !== "7d" && (
-                        <span className="inline-flex items-center gap-1 text-[0.75rem] px-2 py-1 rounded bg-primary/10 text-primary">
-                          {DATE_PRESETS.find((p) => p.key === datePreset)?.label}
-                          <button
-                            type="button"
-                            aria-label="Remove date range filter"
-                            onClick={() => {
-                              setDatePreset("7d");
-                              setPage(1);
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </span>
+                      {datePreset !== DEFAULT_PRESET && (
+                        <FilterChip
+                          label={
+                            datePreset === "custom" && startDate && endDate
+                              ? `${startDate} → ${endDate}`
+                              : activeRangeLabel
+                          }
+                          removeLabel="Remove date range filter"
+                          onRemove={() =>
+                            setFilters({ preset: DEFAULT_PRESET, startDate: "", endDate: "" })
+                          }
+                        />
                       )}
                       {action.trim() && (
-                        <span className="inline-flex items-center gap-1 text-[0.75rem] px-2 py-1 rounded bg-primary/10 text-primary">
-                          {getActionDisplay(action).title}
-                          <button
-                            type="button"
-                            aria-label="Remove action filter"
-                            onClick={() => {
-                              setAction("");
-                              setPage(1);
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </span>
+                        <FilterChip
+                          label={getActionDisplay(action).title}
+                          removeLabel="Remove action filter"
+                          onRemove={() => setFilters({ action: "" })}
+                        />
                       )}
                       {entityType.trim() && (
-                        <span className="inline-flex items-center gap-1 text-[0.75rem] px-2 py-1 rounded bg-primary/10 text-primary">
-                          {getEntityTypeDisplay(entityType).title}
-                          <button
-                            type="button"
-                            aria-label="Remove entity type filter"
-                            onClick={() => {
-                              setEntityType("");
-                              setPage(1);
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </span>
+                        <FilterChip
+                          label={getEntityTypeDisplay(entityType).title}
+                          removeLabel="Remove entity type filter"
+                          onRemove={() => setFilters({ entityType: "" })}
+                        />
+                      )}
+                      {includeAttendance && (
+                        <FilterChip
+                          label="Attendance included"
+                          removeLabel="Exclude attendance events"
+                          onRemove={() => setFilters({ includeAttendance: false })}
+                        />
                       )}
                       {q.trim() && (
-                        <span className="inline-flex items-center gap-1 text-[0.75rem] px-2 py-1 rounded bg-primary/10 text-primary">
-                          “{q.trim()}”
-                          <button
-                            type="button"
-                            aria-label="Remove search filter"
-                            onClick={() => {
-                              setSearchInput("");
-                              setQ("");
-                              setPage(1);
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </span>
+                        <FilterChip
+                          label={`“${q.trim()}”`}
+                          removeLabel="Remove search filter"
+                          onRemove={() => {
+                            setSearchInput("");
+                            setFilters({ q: "" });
+                          }}
+                        />
                       )}
                       <button
                         type="button"
@@ -652,7 +949,7 @@ export default function LogsActivityPage() {
                       </button>
                     </div>
                   )}
-                </div>
+                </>
               )}
             </div>
 
@@ -676,185 +973,223 @@ export default function LogsActivityPage() {
                 <div className="flex flex-1 items-center justify-center px-4 py-10 text-center text-defaulttextcolor/70 text-sm">
                   Choose start and end dates above to view activity logs for a custom range.
                 </div>
-              ) : loading ? (
-                <>
-                  <div className="lg:hidden divide-y divide-defaultborder rounded-lg border border-defaultborder overflow-hidden mx-3 sm:mx-4 mt-3">
-                    {[...Array(4)].map((_, i) => (
-                      <div key={`m-sk-${i}`} className="p-3 sm:p-4 space-y-2">
-                        <div className="h-4 w-2/3 bg-gray-100 dark:bg-white/5 rounded animate-pulse" />
-                        <div className="h-4 w-1/2 bg-gray-100 dark:bg-white/5 rounded animate-pulse" />
-                        <div className="h-3 w-full bg-gray-100 dark:bg-white/5 rounded animate-pulse" />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="hidden lg:block overflow-x-auto overscroll-x-contain mx-3 sm:mx-4 mt-3 rounded-lg border border-defaultborder">
-                    <table className="table table-bordered border-defaultborder min-w-[56rem] w-full mb-0">
-                      <tbody>
-                        <tr>
-                          <td colSpan={7} className="px-4 py-8 text-center text-defaulttextcolor/70">
-                            Loading activity logs...
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : logs.length === 0 ? (
+              ) : !loading && logs.length === 0 ? (
                 <div className="flex flex-1 items-center justify-center mx-3 sm:mx-4 mt-3 rounded-lg border border-defaultborder px-4 py-10 text-center text-defaulttextcolor/70 text-sm">
                   {hasActiveFilters ? "No logs match your filters." : "No activity logs found yet."}
                 </div>
               ) : (
                 <>
-                  <div className="lg:hidden flex-1 min-h-0 overflow-y-auto divide-y divide-defaultborder rounded-lg border border-defaultborder mx-3 sm:mx-4 mt-3 mb-3">
-                    {logs.map((log) => {
-                      const model = buildLogRowModel(
-                        log,
-                        permissions,
-                        !!isAdministrator,
-                        !!isPlatformSuperUser
-                      );
-                      const displayIp = getActivityLogDisplayIp(log);
-                      return (
-                        <article key={log.id} className="p-3 sm:p-4 space-y-2.5 bg-white dark:bg-bodybg">
-                          <time className="block text-[0.75rem] text-defaulttextcolor/70">
-                            {formatDateTime(log.createdAt)}
-                          </time>
-
-                          <div className="grid grid-cols-1 gap-2.5 text-[0.8125rem]">
-                            <div>
-                              <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
-                                Actor
-                              </span>
-                              <p className="font-medium mb-0">{log.actor?.name || "—"}</p>
-                              {log.actor?.id && (
-                                <p className="text-[0.7rem] text-defaulttextcolor/60 font-mono break-all mb-0">
-                                  {log.actor.id}
-                                </p>
-                              )}
-                            </div>
-
-                            <div>
-                              <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
-                                Action
-                              </span>
-                              <p className="font-medium mb-0">{model.actionDisp.title}</p>
-                              <p className="text-[0.7rem] font-mono text-defaulttextcolor/60 mb-0">
-                                {log.action}
-                              </p>
-                            </div>
-
-                            <div>
-                              <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
-                                Entity
-                              </span>
-                              <ActivityLogEntityCell log={log} model={model} />
-                            </div>
-
-                            <div>
-                              <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
-                                Location
-                              </span>
-                              <div className="mt-0.5">
-                                <ActivityLogLocationCell log={log} />
-                              </div>
-                            </div>
+                  <div
+                    className="lg:hidden flex-1 min-h-0 overflow-y-auto divide-y divide-defaultborder rounded-lg border border-defaultborder mx-3 sm:mx-4 mt-3 mb-3"
+                    aria-busy={loading}
+                  >
+                    {showSkeleton
+                      ? [...Array(4)].map((_, i) => (
+                          <div key={`m-sk-${i}`} className="p-3 sm:p-4 space-y-2">
+                            <div className="h-4 w-2/3 bg-gray-100 dark:bg-white/5 rounded animate-pulse motion-reduce:animate-none" />
+                            <div className="h-4 w-1/2 bg-gray-100 dark:bg-white/5 rounded animate-pulse motion-reduce:animate-none" />
+                            <div className="h-3 w-full bg-gray-100 dark:bg-white/5 rounded animate-pulse motion-reduce:animate-none" />
                           </div>
-
-                          <details className="rounded-md border border-defaultborder/70 bg-gray-50/60 dark:bg-gray-800/30 px-3 py-2 text-[0.75rem]">
-                            <summary className="cursor-pointer font-medium text-primary select-none">
-                              Device details
-                            </summary>
-                            <div className="mt-2 space-y-2">
-                              <div>
-                                <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
-                                  IP
-                                </span>
-                                <p className="font-mono break-all mb-0">{displayIp}</p>
-                              </div>
-                              <div>
-                                <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
-                                  User Agent
-                                </span>
-                                <p className="break-words mb-0 text-defaulttextcolor/80">
-                                  {log.userAgent ?? "—"}
-                                </p>
-                              </div>
-                            </div>
-                          </details>
-                        </article>
-                      );
-                    })}
-                  </div>
-
-                  <div className="hidden lg:block flex-1 overflow-y-auto overflow-x-auto overscroll-x-contain mx-3 sm:mx-4 mt-3 mb-3 rounded-lg border border-defaultborder" style={{ minHeight: 0 }}>
-                    <table className="table table-bordered border-defaultborder min-w-[56rem] w-full mb-0">
-                      <thead>
-                        <tr className="bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10">
-                          <th className="px-4 py-2.5 text-start font-semibold min-w-[9.5rem] whitespace-nowrap sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/50">
-                            Timestamp
-                          </th>
-                          <th className="px-4 py-2.5 text-start font-semibold min-w-[8.5rem] sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/50">Actor</th>
-                          <th className="px-4 py-2.5 text-start font-semibold min-w-[9rem] sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/50">Action</th>
-                          <th className="px-4 py-2.5 text-start font-semibold min-w-[12rem] sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/50">Entity</th>
-                          <th
-                            className="px-4 py-2.5 text-start font-semibold min-w-[8rem] sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/50"
-                            title="Device place (GPS) when allowed; IP-based location is approximate."
-                          >
-                            Location
-                          </th>
-                          <th className="px-4 py-2.5 text-start font-semibold min-w-[7rem] whitespace-nowrap sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/50">
-                            IP
-                          </th>
-                          <th className="px-4 py-2.5 text-start font-semibold min-w-[14rem] sticky top-0 z-10 bg-gray-50 dark:bg-gray-800/50">User Agent</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {logs.map((log) => {
+                        ))
+                      : logs.map((log) => {
                           const model = buildLogRowModel(
                             log,
                             permissions,
                             !!isAdministrator,
                             !!isPlatformSuperUser
                           );
+                          const displayIp = getActivityLogDisplayIp(log);
                           return (
-                            <tr key={log.id} className="border-b border-defaultborder">
-                              <td className="px-4 py-2.5 align-middle text-[0.8125rem] whitespace-nowrap">
+                            <article
+                              key={log.id}
+                              className={`p-3 sm:p-4 space-y-2.5 bg-white dark:bg-bodybg transition-opacity ${
+                                loading ? "opacity-50" : ""
+                              }`}
+                            >
+                              <time className="block text-[0.75rem] text-defaulttextcolor/70">
                                 {formatDateTime(log.createdAt)}
-                              </td>
-                              <td className="px-4 py-2.5 align-middle text-[0.8125rem]">
-                                <div className="flex flex-col min-w-[7.5rem]">
-                                  <span className="font-medium">{log.actor?.name || "—"}</span>
-                                  <span className="text-[0.7rem] text-defaulttextcolor/70 break-all">
-                                    {log.actor?.id ?? "—"}
+                              </time>
+
+                              <div className="grid grid-cols-1 gap-2.5 text-[0.8125rem]">
+                                <div>
+                                  <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
+                                    Actor
                                   </span>
+                                  <p
+                                    className="font-medium mb-0"
+                                    title={log.actor?.id ? `ID ${log.actor.id}` : undefined}
+                                  >
+                                    {log.actor?.name || "—"}
+                                  </p>
                                 </div>
-                              </td>
-                              <td className="px-4 py-2.5 align-middle text-[0.8125rem]">
-                                <div className="flex flex-col gap-0.5 min-w-[8rem]">
-                                  <span className="font-medium">{model.actionDisp.title}</span>
-                                  <span className="font-mono text-[0.7rem] text-defaulttextcolor/60">
+
+                                <div>
+                                  <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
+                                    Action
+                                  </span>
+                                  <p className="font-medium mb-0">{model.actionDisp.title}</p>
+                                  <p className="text-[0.7rem] font-mono text-defaulttextcolor/60 mb-0">
                                     {log.action}
-                                  </span>
+                                  </p>
                                 </div>
-                              </td>
-                              <td className="px-4 py-2.5 align-middle text-[0.8125rem]">
-                                <ActivityLogEntityCell log={log} model={model} />
-                              </td>
-                              <td className="px-4 py-2.5 align-middle text-[0.8125rem]">
-                                <ActivityLogLocationCell log={log} />
-                              </td>
-                              <td className="px-4 py-2.5 align-middle text-[0.8125rem] font-mono text-[0.75rem] whitespace-nowrap">
-                                {getActivityLogDisplayIp(log)}
-                              </td>
-                              <td
-                                className="px-4 py-2.5 align-middle text-[0.75rem] text-defaulttextcolor/80 max-w-[18rem]"
-                                title={log.userAgent ?? undefined}
-                              >
-                                <span className="line-clamp-3 break-words">{log.userAgent ?? "—"}</span>
-                              </td>
-                            </tr>
+
+                                <div>
+                                  <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
+                                    Entity
+                                  </span>
+                                  <ActivityLogEntityCell log={log} model={model} />
+                                </div>
+
+                                <div>
+                                  <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
+                                    Location
+                                  </span>
+                                  <div className="mt-0.5">
+                                    <ActivityLogLocationCell log={log} />
+                                  </div>
+                                </div>
+                              </div>
+
+                              <details className="rounded-md border border-defaultborder/70 bg-gray-50/60 dark:bg-gray-800/30 px-3 py-2 text-[0.75rem]">
+                                <summary className="cursor-pointer font-medium text-primary select-none">
+                                  Device details
+                                </summary>
+                                <div className="mt-2 space-y-2">
+                                  <div>
+                                    <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
+                                      IP
+                                    </span>
+                                    <p className="font-mono break-all mb-0">{displayIp}</p>
+                                  </div>
+                                  <div>
+                                    <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
+                                      Device
+                                    </span>
+                                    <p className="mb-0">{formatUserAgentSummary(log.userAgent)}</p>
+                                    <p className="break-words mb-0 text-[0.7rem] text-defaulttextcolor/60">
+                                      {log.userAgent ?? "—"}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <span className="text-[0.65rem] uppercase tracking-wide text-defaulttextcolor/50">
+                                      Actor ID
+                                    </span>
+                                    <p className="font-mono break-all mb-0 text-[0.7rem] text-defaulttextcolor/60">
+                                      {log.actor?.id ?? "—"}
+                                    </p>
+                                  </div>
+                                </div>
+                              </details>
+                            </article>
                           );
                         })}
+                  </div>
+
+                  <div
+                    className="hidden lg:block flex-1 overflow-y-auto overflow-x-auto overscroll-x-contain mx-3 sm:mx-4 mt-3 mb-3 rounded-lg border border-defaultborder"
+                    style={{ minHeight: 0 }}
+                    aria-busy={loading}
+                  >
+                    <table className="table table-bordered border-defaultborder min-w-[52rem] w-full mb-0">
+                      <thead>
+                        <tr className="bg-gray-50 dark:bg-bodybg sticky top-0 z-10">
+                          <SortableHeader
+                            label="Timestamp"
+                            field="createdAt"
+                            sortBy={sortBy}
+                            onSort={handleSort}
+                            className="min-w-[9.5rem] whitespace-nowrap"
+                          />
+                          <th className={`${HEADER_CELL} min-w-[8.5rem]`}>Actor</th>
+                          <SortableHeader
+                            label="Action"
+                            field="action"
+                            sortBy={sortBy}
+                            onSort={handleSort}
+                            className="min-w-[9rem]"
+                          />
+                          <SortableHeader
+                            label="Entity"
+                            field="entityType"
+                            sortBy={sortBy}
+                            onSort={handleSort}
+                            className="min-w-[12rem]"
+                          />
+                          <th
+                            className={`${HEADER_CELL} min-w-[8rem]`}
+                            title="Device place (GPS) when allowed; IP-based location is approximate."
+                          >
+                            Location
+                          </th>
+                          <th className={`${HEADER_CELL} min-w-[7rem] whitespace-nowrap`}>IP</th>
+                          <th className={`${HEADER_CELL} min-w-[9rem]`}>Device</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {showSkeleton
+                          ? [...Array(6)].map((_, i) => (
+                              <tr key={`sk-${i}`} className="border-b border-defaultborder">
+                                {[...Array(7)].map((__, c) => (
+                                  <td key={c} className="px-4 py-3">
+                                    <div className="h-3.5 bg-gray-100 dark:bg-white/5 rounded animate-pulse motion-reduce:animate-none" />
+                                  </td>
+                                ))}
+                              </tr>
+                            ))
+                          : logs.map((log) => {
+                              const model = buildLogRowModel(
+                                log,
+                                permissions,
+                                !!isAdministrator,
+                                !!isPlatformSuperUser
+                              );
+                              return (
+                                <tr
+                                  key={log.id}
+                                  className={`border-b border-defaultborder transition-opacity ${
+                                    loading ? "opacity-50" : ""
+                                  }`}
+                                >
+                                  <td className="px-4 py-2.5 align-middle text-[0.8125rem] whitespace-nowrap">
+                                    {formatDateTime(log.createdAt)}
+                                  </td>
+                                  <td className="px-4 py-2.5 align-middle text-[0.8125rem]">
+                                    {/* The 24-hex actor id moved to the tooltip: it sat under every
+                                        name and again in the Entity column, and no reader was
+                                        comparing the two by eye. */}
+                                    <span
+                                      className="font-medium"
+                                      title={log.actor?.id ? `ID ${log.actor.id}` : undefined}
+                                    >
+                                      {log.actor?.name || "—"}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2.5 align-middle text-[0.8125rem]">
+                                    <div className="flex flex-col gap-0.5 min-w-[8rem]">
+                                      <span className="font-medium">{model.actionDisp.title}</span>
+                                      <span className="font-mono text-[0.7rem] text-defaulttextcolor/60">
+                                        {log.action}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-2.5 align-middle text-[0.8125rem]">
+                                    <ActivityLogEntityCell log={log} model={model} />
+                                  </td>
+                                  <td className="px-4 py-2.5 align-middle text-[0.8125rem]">
+                                    <ActivityLogLocationCell log={log} />
+                                  </td>
+                                  <td className="px-4 py-2.5 align-middle font-mono text-[0.75rem] whitespace-nowrap">
+                                    {getActivityLogDisplayIp(log)}
+                                  </td>
+                                  <td
+                                    className="px-4 py-2.5 align-middle text-[0.8125rem] text-defaulttextcolor/80"
+                                    title={log.userAgent ?? undefined}
+                                  >
+                                    {shortDeviceLabel(log.userAgent)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                       </tbody>
                     </table>
                   </div>
@@ -862,14 +1197,14 @@ export default function LogsActivityPage() {
               )}
             </div>
 
-            {showPagination && (
+            {showToolbar && showPagination && (
               <div className="box-footer shrink-0 !border-t-0 bg-white dark:bg-bodybg">
                 <ListPagination
                   page={page}
                   totalPages={totalPages}
                   totalResults={totalResults}
                   pageSize={limit}
-                  onPageChange={setPage}
+                  onPageChange={(next) => setFilters({ page: next })}
                   ariaLabel="Activity logs page navigation"
                   gotoInputId="activity-logs-goto-page"
                 />

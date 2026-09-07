@@ -27,6 +27,7 @@ import {
   getRoleActivityEntitySummary,
   getUserActivityEntitySummary,
   getImpersonationEntitySummary,
+  getResolvedEntityNameSummary,
   getJobActivityEntitySummary,
   getOrgMutateDeniedEntitySummary,
   getOrgStructureActivityEntitySummary,
@@ -862,46 +863,46 @@ export default function PlatformAuditLogsPage() {
 
               <div className="flex-1 min-h-[16rem] overflow-auto rounded-md border border-defaultborder">
                 <table className="table min-w-full table-bordered border-defaultborder mb-0">
-                  <thead className="sticky top-0 z-[1] shadow-sm">
-                    <tr className="bg-gray-50 dark:bg-gray-800/90">
+                  <thead className="sticky top-0 z-10 shadow-sm">
+                    <tr className="bg-gray-50 dark:bg-bodybg">
                       <th
-                        className={`px-2 ${cellY} w-10 bg-gray-50 dark:bg-gray-800/90`}
+                        className={`px-2 ${cellY} w-10 bg-gray-50 dark:bg-bodybg`}
                         scope="col"
                         aria-label="Expand row"
                       />
                       <th
-                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-gray-800/90`}
+                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-bodybg`}
                         scope="col"
                       >
                         Timestamp
                       </th>
                       <th
-                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-gray-800/90`}
+                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-bodybg`}
                         scope="col"
                       >
                         Actor
                       </th>
                       <th
-                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-gray-800/90`}
+                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-bodybg`}
                         scope="col"
                       >
                         Action
                       </th>
                       <th
-                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-gray-800/90`}
+                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-bodybg`}
                         scope="col"
                       >
                         Entity
                       </th>
                       <th
-                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-gray-800/90`}
+                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-bodybg`}
                         scope="col"
                         title="Device place (GPS) when allowed; IP-based location is approximate."
                       >
                         Location
                       </th>
                       <th
-                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-gray-800/90`}
+                        className={`px-4 ${cellY} text-start font-semibold bg-gray-50 dark:bg-bodybg`}
                         scope="col"
                       >
                         IP
@@ -953,7 +954,8 @@ export default function PlatformAuditLogsPage() {
                           getJobActivityEntitySummary(log) ??
                           getRoleActivityEntitySummary(log) ??
                           getUserActivityEntitySummary(log) ??
-                          getImpersonationEntitySummary(log);
+                          getImpersonationEntitySummary(log) ??
+                          getResolvedEntityNameSummary(log);
                         const clientGeoPlace = formatActivityLogClientGeoPlaceLine(log.clientGeo);
                         const clientGeoLegacyCoords =
                           !clientGeoPlace &&

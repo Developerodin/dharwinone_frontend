@@ -1,8 +1,6 @@
 @use "../public/assets/css/style.css" as *;
 
 // Packages css
-@use "filepond/dist/filepond.min.css" as *; // file pond css
-@use "filepond-plugin-image-preview/dist/filepond-plugin-image-preview.css" as *; // dependencies plugin css for react file pond package
 @use "react-datepicker/dist/react-datepicker.css" as *; // (datepicker)
 
 @use "@simonwep/pickr/dist/themes/classic.min.css" as *;
@@ -263,87 +261,133 @@ th.text-center{
   text-align: center !important;
 }
 
-/* Portaled react-datepicker — Schedule Interview + PM project form */
-.schedule-interview-dp-cal.react-datepicker,
-.pm-project-form-dp-cal.react-datepicker {
+/* Portaled react-datepicker — Schedule Interview */
+.schedule-interview-dp-cal.react-datepicker {
   border-radius: 0.75rem;
   border: 1px solid rgb(226 232 240 / 0.95);
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.18);
   font-family: inherit;
 }
-.dark .schedule-interview-dp-cal.react-datepicker,
-.dark .pm-project-form-dp-cal.react-datepicker {
+.dark .schedule-interview-dp-cal.react-datepicker {
   border-color: rgb(255 255 255 / 0.12);
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.55);
 }
 .dark .schedule-interview-dp-cal.react-datepicker {
   background: rgb(15 23 42 / 1);
 }
-.dark .pm-project-form-dp-cal.react-datepicker {
-  background: rgb(var(--body-bg));
-  color: rgb(var(--default-text-color));
-}
-.schedule-interview-dp-cal .react-datepicker__header,
-.pm-project-form-dp-cal .react-datepicker__header {
+.schedule-interview-dp-cal .react-datepicker__header {
   background: linear-gradient(to bottom, rgb(248 250 252 / 1), rgb(255 255 255 / 1));
   border-bottom: 1px solid rgb(226 232 240 / 0.9);
   border-radius: 0.75rem 0.75rem 0 0;
 }
-.dark .schedule-interview-dp-cal .react-datepicker__header,
-.dark .pm-project-form-dp-cal .react-datepicker__header {
+.dark .schedule-interview-dp-cal .react-datepicker__header {
   background: linear-gradient(to bottom, rgb(0 0 0 / 0.35), rgb(0 0 0 / 0.2));
   border-bottom-color: rgb(255 255 255 / 0.1);
 }
-.dark .pm-project-form-dp-cal .react-datepicker__header {
-  color: rgb(var(--default-text-color));
-}
-.dark .pm-project-form-dp-cal .react-datepicker__day-name,
-.dark .pm-project-form-dp-cal .react-datepicker__day,
-.dark .pm-project-form-dp-cal .react-datepicker__current-month {
-  color: rgb(var(--default-text-color));
-}
 .schedule-interview-dp-cal .react-datepicker__day--selected,
-.schedule-interview-dp-cal .react-datepicker__day--keyboard-selected,
-.pm-project-form-dp-cal .react-datepicker__day--selected,
-.pm-project-form-dp-cal .react-datepicker__day--keyboard-selected {
+.schedule-interview-dp-cal .react-datepicker__day--keyboard-selected {
   background-color: rgb(var(--primary) / 1) !important;
   color: #fff !important;
 }
-.schedule-interview-dp-cal .react-datepicker__day:hover,
-.pm-project-form-dp-cal .react-datepicker__day:hover {
+.schedule-interview-dp-cal .react-datepicker__day:hover {
   background-color: rgb(var(--primary) / 0.12) !important;
 }
 .schedule-interview-dp-cal .react-datepicker-time-list-item--selected {
   background-color: rgb(var(--primary) / 1) !important;
   color: #fff !important;
 }
-.schedule-interview-dp-cal .react-datepicker__navigation-icon::before,
-.pm-project-form-dp-cal .react-datepicker__navigation-icon::before {
+.schedule-interview-dp-cal .react-datepicker__navigation-icon::before {
   border-color: rgb(100 116 139);
 }
-.dark .schedule-interview-dp-cal .react-datepicker__navigation-icon::before,
-.dark .pm-project-form-dp-cal .react-datepicker__navigation-icon::before {
+.dark .schedule-interview-dp-cal .react-datepicker__navigation-icon::before {
   border-color: rgb(226 232 240 / 0.75);
 }
 
-/* PM project form — portaled Select2 menus: undo global white-on-white focused/selected options in dark mode */
-.pm-project-form-select-menu .Select2__option--is-selected,
-.pm-project-form-select-menu .Select2__option--is-focused {
-  background-color: rgb(var(--primary) / 0.08) !important;
+/* ---------------------------------------------------------------------------------------------
+ * Select2 (react-select) option states — opt in with the `ats-select-menu` class
+ * (see `atsSelectClassNames` in shared/lib/reactSelectTheme.ts).
+ *
+ * WHY THESE NEED `!important` AND A THREE-CLASS SELECTOR
+ * The vendor sheet ships `public/assets/css/style.css:14343`:
+ *     .Select2__menu div .Select2__option--is-selected { color:#fff !important; background:primary !important }
+ * That is specificity (0,2,1). A plain `.ats-select-menu .Select2__option--is-selected` is (0,2,0)
+ * and loses on the element count, so the vendor's white text survives while a scoped rule sets the
+ * background — which is exactly how "white text on light lavender" happened. Every rule below is
+ * therefore (0,3,0) or higher (react-select always renders option inside `.Select2__menu-list`) and
+ * always declares `color` next to `background-color`, so the pair can never be split again.
+ *
+ * THE STATE MODEL
+ *   normal            transparent, default text
+ *   focused (cursor)  tinted fill — react-select moves this for BOTH hover and arrow keys, so it
+ *                     is the ONLY filled row on screen and mouse/keyboard look identical
+ *   selected (value)  no fill — weight + check only, so it never reads as a second cursor
+ *   selected+focused  cursor fill, keeps weight + check
+ * Text is never white on a light fill: the label keeps `--default-text-color` in every state.
+ * --------------------------------------------------------------------------------------------- */
+
+/* GROUPED MENUS — why a grouped list used to render as a horizontal mega-menu
+   The vendor ships `.Select2__menu div div { display:flex; align-items:center !important }`
+   (style.css:14418) so a flat option can sit beside its icon. react-select builds a group as
+   `.Select2__group > [.Select2__group-heading, <div>{options}</div>]` — that options wrapper is an
+   UNCLASSED div (see `Group` in react-select/dist: `jsx(GroupHeading, …), jsx("div", null, children)`),
+   and it matches `div div` just as well. Turned into a flex row it laid every option of a group
+   side by side, so the list ran off the right edge and needed horizontal scrolling.
+   `> div` covers both children, so the heading sits above its options and the options stack. This
+   restores normal block flow rather than masking the overflow; (0,3,0) outranks the vendor's
+   (0,1,2), and neither element exists in a flat menu, so ungrouped consumers cannot be affected.
+   The options themselves stay flex — block-level, so still one per row — which is what keeps the
+   selected row's check aligned with its label. */
+.ats-select-menu .Select2__menu-list .Select2__group,
+.ats-select-menu .Select2__menu-list .Select2__group > div {
+  display: block !important;
+}
+
+/* Selected — the stored value. No fill at all: the check plus the bolder label carry it, so the
+   only filled row on screen is ever the cursor. A fill here reads as a second cursor. */
+.ats-select-menu .Select2__menu-list .Select2__option--is-selected {
+  background-color: transparent !important;
+  color: rgb(var(--default-text-color)) !important;
+  font-weight: 600;
+}
+
+/* Focused — the cursor, from hover or arrow keys. Kept a clear step above selected so the two are
+   never confused, and applied last so it wins when a row is both. */
+.ats-select-menu .Select2__menu-list .Select2__option--is-focused {
+  background-color: rgb(var(--primary) / 0.24) !important;
   color: rgb(var(--default-text-color)) !important;
 }
-.pm-project-form-select-menu .Select2__option--is-selected {
-  background-color: rgb(var(--primary)) !important;
-  color: #fff !important;
-}
-.dark .pm-project-form-select-menu .Select2__option--is-selected,
-.dark .pm-project-form-select-menu .Select2__option--is-focused {
-  background-color: rgb(var(--primary) / 0.35) !important;
+.dark .ats-select-menu .Select2__menu-list .Select2__option--is-focused {
+  background-color: rgb(var(--primary) / 0.38) !important;
   color: rgb(var(--default-text-color)) !important;
 }
-.dark .pm-project-form-select-menu .Select2__option--is-selected {
-  background-color: rgb(var(--primary)) !important;
-  color: #fff !important;
+
+/* The check keeps the selected row identifiable when the cursor is elsewhere, so selection is not
+   signalled by background alone. Violet clears the 3:1 graphical-indicator floor on both fills;
+   dark mode uses a lighter violet because `--primary` on the dark fill is only 2.8:1. */
+.ats-select-menu .Select2__menu-list .Select2__option--is-selected::after {
+  content: "✓";
+  float: inline-end;
+  margin-inline-start: 0.5rem;
+  color: rgb(var(--primary));
+  font-weight: 700;
+}
+.dark .ats-select-menu .Select2__menu-list .Select2__option--is-selected::after {
+  color: #c4b5fd;
+}
+
+/* The vendor also ships a CSS-only `.Select2__option:hover { color:#fff; background:primary }`.
+   It knows nothing about react-select's focus state, so it kept a second row lit under the pointer
+   while the keyboard moved elsewhere. Suppress it and let `--is-focused` be the single fill. */
+.ats-select-menu .Select2__menu-list .Select2__option:hover:not(.Select2__option--is-focused) {
+  background-color: transparent !important;
+  color: rgb(var(--default-text-color)) !important;
+}
+
+/* Disabled options stay legible but clearly inert. */
+.ats-select-menu .Select2__menu-list .Select2__option--is-disabled {
+  background-color: transparent !important;
+  color: rgb(var(--default-text-color) / 0.45) !important;
+  cursor: not-allowed;
 }
 
 /* Schedule Interview — custom trigger + isClearable (library defaults overlap the control) */
