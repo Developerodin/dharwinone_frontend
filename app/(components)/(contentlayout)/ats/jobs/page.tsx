@@ -348,7 +348,7 @@ const Jobs = () => {
     }
     setJobPreviewTab('details')
     setPreviewJobApplicationsLoading(true)
-    listJobApplications({ jobId: previewJob.id, limit: 200 })
+    listJobApplications({ jobId: previewJob.id, limit: 100 })
       .then((res) => setPreviewJobApplications(res.results ?? []))
       .catch(() => setPreviewJobApplications([]))
       .finally(() => setPreviewJobApplicationsLoading(false))

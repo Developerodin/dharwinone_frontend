@@ -203,15 +203,15 @@ export default function SettingsUsersPage() {
     setLoading(true);
     setError("");
     try {
-      const [usersRes, rolesRes] = await Promise.all([
-        usersApi.listUsers({
-          search: searchQuery.trim() || undefined,
-          status: statusFilter || undefined,
-          limit: 500,
-        }),
+      const listParams = {
+        search: searchQuery.trim() || undefined,
+        status: statusFilter || undefined,
+      };
+      const [allUsers, rolesRes] = await Promise.all([
+        usersApi.listAllUsers(listParams),
         rolesApi.listRoles({ limit: 100 }),
       ]);
-      setUsers(usersRes.results ?? []);
+      setUsers(allUsers);
       setRoles(rolesRes.results ?? []);
     } catch (err) {
       const msg =

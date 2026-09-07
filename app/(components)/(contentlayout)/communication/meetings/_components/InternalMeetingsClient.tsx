@@ -22,7 +22,7 @@ import {
 } from "@/shared/lib/api/internal-meetings"
 import CreateInternalMeetingModal from "./CreateInternalMeetingModal"
 import RecordingsModal, { type RecordingListItem } from "../../../ats/interviews/_components/RecordingsModal"
-import { listUsers, pickOfficialEmail } from "@/shared/lib/api/users"
+import { listAllUsers, pickOfficialEmail } from "@/shared/lib/api/users"
 import ParticipantInvitesField, { type ParticipantUser } from "@/shared/components/meeting/ParticipantInvitesField"
 import MeetingReadOnlyView from "@/shared/components/meeting/MeetingReadOnlyView"
 import { useConfirm } from "@/shared/components/ui/useConfirm"
@@ -520,9 +520,9 @@ export default function InternalMeetingsClient() {
     setEditUsersLoading(true)
     setEditUsersError(null)
     try {
-      const res = await listUsers({ limit: 500, status: "active" })
+      const users = await listAllUsers({ status: "active" })
       setEditUsers(
-        (res.results || [])
+        users
           .map((u) => ({ id: u.id, name: u.name, email: pickOfficialEmail(u) }))
           .filter((u) => u.email)
       )

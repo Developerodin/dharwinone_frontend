@@ -14,7 +14,7 @@ import Swal from 'sweetalert2'
 import { listJobs, type Job } from '@/shared/lib/api/jobs'
 import { type CandidateListItem } from '@/shared/lib/api/candidates'
 import { listReferralLeads, type ReferralLeadRow } from '@/shared/lib/api/referralLeads'
-import { listUsers } from '@/shared/lib/api/users'
+import { listAllUsers } from '@/shared/lib/api/users'
 import ParticipantInvitesField, { type ParticipantUser } from '@/shared/components/meeting/ParticipantInvitesField'
 import MeetingReadOnlyView from '@/shared/components/meeting/MeetingReadOnlyView'
 import { useConfirm } from '@/shared/components/ui/useConfirm'
@@ -479,9 +479,9 @@ export default function InterviewsClient() {
     setEditUsersLoading(true)
     setEditUsersError(null)
     try {
-      const res = await listUsers({ limit: 500, status: 'active' })
+      const users = await listAllUsers({ status: 'active' })
       setEditUsers(
-        (res.results || [])
+        users
           .map((u) => ({ id: u.id, name: u.name, email: u.email }))
           .filter((u) => u.email)
       )
@@ -633,7 +633,7 @@ export default function InterviewsClient() {
           if (candId) {
             setEditJobsLoading(true)
             import('@/shared/lib/api/jobApplications')
-              .then(({ listJobApplications }) => listJobApplications({ candidateId: candId, limit: 200 }))
+              .then(({ listJobApplications }) => listJobApplications({ candidateId: candId, limit: 100 }))
               .then((res) => {
                 if (cancelled) return
                 // Build job list from applications (same as CreateInterviewModal.jobOptionsFromApplications)

@@ -19,7 +19,7 @@ import InterviewDateTimeOverlay from './InterviewDateTimeOverlay'
 import { to12Hour } from './interviewSlots'
 import AgentMultiSelect from './AgentMultiSelect'
 import { saveDraft, loadDraft, clearDraft, type InterviewDraftData } from './interviewDraft'
-import { listUsers, pickOfficialEmail } from '@/shared/lib/api/users'
+import { listAllUsers, pickOfficialEmail } from '@/shared/lib/api/users'
 import ParticipantInvitesField, { type ParticipantUser } from '@/shared/components/meeting/ParticipantInvitesField'
 
 function jobIdFromAppJob(job: JobApplication['job'] | undefined | null): string | null {
@@ -180,9 +180,9 @@ export default function CreateInterviewModal({
     setParticipantUsersLoading(true)
     setParticipantUsersError(null)
     try {
-      const res = await listUsers({ limit: 500, status: 'active' })
+      const users = await listAllUsers({ status: 'active' })
       setParticipantUsers(
-        (res.results || []).map((u) => ({ id: u.id, name: u.name, email: pickOfficialEmail(u) })).filter((u) => u.email)
+        users.map((u) => ({ id: u.id, name: u.name, email: pickOfficialEmail(u) })).filter((u) => u.email)
       )
     } catch {
       setParticipantUsersError('Could not load users.')
@@ -202,7 +202,7 @@ export default function CreateInterviewModal({
     setApplicationJobsLoading(true)
     setApplicationJobsError(null)
     try {
-      const res = await listJobApplications({ candidateId, limit: 200 })
+      const res = await listJobApplications({ candidateId, limit: 100 })
       const list = jobOptionsFromApplications(res.results)
       setJobsForCandidate(list)
       if (preselectJobId && list.some((j) => String(j.id ?? j._id) === preselectJobId)) {

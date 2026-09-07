@@ -7,7 +7,7 @@ import { useAuth } from "@/shared/contexts/auth-context"
 import { appendJoinIdentityToUrl, resolveMeetingShareUrl, resolvePersonalJoinIdentity } from "@/shared/lib/join-room-url"
 import type { InternalMeeting } from "@/shared/lib/api/internal-meetings"
 import MeetingCreatedSuccess from "@/shared/components/meeting/MeetingCreatedSuccess"
-import { listUsers, pickOfficialEmail } from "@/shared/lib/api/users"
+import { listAllUsers, pickOfficialEmail } from "@/shared/lib/api/users"
 import ParticipantInvitesField, { type ParticipantUser } from "@/shared/components/meeting/ParticipantInvitesField"
 import RecurrenceFields from "@/shared/components/meeting/RecurrenceFields"
 
@@ -78,10 +78,10 @@ export default function CreateInternalMeetingModal({
     setParticipantUsersLoading(true)
     setParticipantUsersError(null)
     try {
-      const res = await listUsers({ limit: 500, status: "active" })
+      const users = await listAllUsers({ status: "active" })
       setParticipantUsers(
         // Show ALL users: company work email when assigned, otherwise personal login email.
-        (res.results || [])
+        users
           .map((u) => ({ id: u.id, name: u.name, email: pickOfficialEmail(u) }))
           .filter((u) => u.email)
       )

@@ -127,7 +127,7 @@ export default function BrowseJobDetailsPage() {
       return;
     }
     setApplicationsLoading(true);
-    getMyApplications({ limit: 500 })
+    getMyApplications({ limit: 100 })
       .then((res) => {
         const list = res.results ?? [];
         const forThisJob = list.find(
@@ -149,7 +149,7 @@ export default function BrowseJobDetailsPage() {
         effectiveReferralRef ? { ref: effectiveReferralRef } : undefined
       );
       setMessage({ type: "success", text: "Application submitted successfully." });
-      const res = await getMyApplications({ limit: 500 });
+      const res = await getMyApplications({ limit: 100 });
       const forThisJob = (res.results ?? []).find(
         (a) => (a.job?._id ?? (a.job as { id?: string })?.id) === jobId
       );

@@ -139,11 +139,33 @@ export function getCompanyAssignedEmail(u: User): string {
   return (typeof r.companyAssignedEmail === "string" && r.companyAssignedEmail.trim()) || "";
 }
 
+export const USERS_LIST_MAX_PAGE_SIZE = 100;
+
 export async function listUsers(params?: ListUsersParams): Promise<UsersListResponse> {
   const { data } = await apiClient.get<UsersListResponse>('/users', {
     params: serializeUserListParams(params),
   });
   return data;
+}
+
+/** Fetch all users matching filters, paginating at the backend max page size. */
+export async function listAllUsers(
+  params?: Omit<ListUsersParams, 'limit' | 'page'>
+): Promise<User[]> {
+  let pageNum = 1;
+  let totalPages = 1;
+  const allUsers: User[] = [];
+  do {
+    const res = await listUsers({
+      ...params,
+      limit: USERS_LIST_MAX_PAGE_SIZE,
+      page: pageNum,
+    });
+    allUsers.push(...(res.results ?? []));
+    totalPages = res.totalPages ?? 1;
+    pageNum += 1;
+  } while (pageNum <= totalPages);
+  return allUsers;
 }
 
 export async function getUser(userId: string): Promise<User> {
