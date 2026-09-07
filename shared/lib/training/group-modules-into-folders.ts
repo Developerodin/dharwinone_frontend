@@ -75,6 +75,16 @@ function lifecycleStatus(status: string | undefined): "draft" | "published" | "a
 }
 
 /**
+ * Category ObjectId as used by folder buckets (`id` from toJSON, `_id` if lean).
+ */
+function categoryRefId(c: { id?: string; _id?: string } | null | undefined): string | undefined {
+  if (!c) return undefined
+  const raw = c.id ?? c._id
+  if (raw == null || raw === "") return undefined
+  return String(raw)
+}
+
+/**
  * Sort modules using the admin list sort control.
  */
 function sortModules(
@@ -133,15 +143,16 @@ export function groupTrainingModulesIntoFolders(
   const uncategorized: ApiTrainingModule[] = []
   for (const m of published) {
     const cats = m.categories ?? []
-    if (cats.length === 0) {
+    const catIds = cats.map((c) => categoryRefId(c)).filter((id): id is string => Boolean(id))
+    if (catIds.length === 0) {
       uncategorized.push(m)
       continue
     }
-    for (const c of cats) {
-      let bucket = byCategoryId.get(c.id)
+    for (const id of catIds) {
+      let bucket = byCategoryId.get(id)
       if (!bucket) {
         bucket = []
-        byCategoryId.set(c.id, bucket)
+        byCategoryId.set(id, bucket)
       }
       bucket.push(m)
     }

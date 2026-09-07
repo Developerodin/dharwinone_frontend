@@ -422,12 +422,19 @@ export async function updateTrainingModule(
   return data;
 }
 
-/** Update only folder assignments (training categories). Empty array = uncategorized. */
+/**
+ * Update folder assignments (training categories). Empty array = uncategorized.
+ * Pass `status` when the module must leave Archive so it can appear in those folders.
+ */
 export async function setTrainingModuleFolders(
   moduleId: string,
-  categoryIds: string[]
+  categoryIds: string[],
+  options?: { status?: "draft" | "published" | "archived" }
 ): Promise<TrainingModule> {
-  return updateTrainingModule(moduleId, { categories: categoryIds });
+  return updateTrainingModule(moduleId, {
+    categories: categoryIds,
+    ...(options?.status ? { status: options.status } : {}),
+  });
 }
 
 /**

@@ -56,6 +56,18 @@ function enrolledLabel(count: number): string {
 }
 
 /**
+ * Native tooltip: module name plus folder names / Uncategorized / lifecycle.
+ */
+function moduleLocationTitle(m: ApiTrainingModule): string {
+  const folders = (m.categories ?? [])
+    .map((c) => c.name?.trim())
+    .filter((name): name is string => Boolean(name))
+  const place = folders.length > 0 ? folders.join(', ') : 'Uncategorized'
+  const status = m.status === 'archived' ? 'Archived' : m.status === 'draft' ? 'Draft' : 'Published'
+  return `${m.moduleName} — ${status} · ${place}`
+}
+
+/**
  * Icon + count pills; zeros stay visible (e.g. `0 PDFs`).
  */
 function LessonCountPills({ summary }: { summary: ModuleSummary }) {
@@ -264,7 +276,7 @@ function TrainingModuleCardInner({
             <Link
               href={`/training/curriculum/modules/edit?id=${m.id}`}
               className="min-w-0 flex-1 truncate font-semibold text-[0.9375rem] leading-snug hover:text-primary"
-              title={`Edit ${m.moduleName}`}
+              title={moduleLocationTitle(m)}
             >
               {m.moduleName}
             </Link>
@@ -273,7 +285,7 @@ function TrainingModuleCardInner({
               type="button"
               onClick={handleView}
               className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-start font-semibold text-[0.9375rem] leading-snug hover:text-primary"
-              title={m.moduleName}
+              title={moduleLocationTitle(m)}
             >
               {m.moduleName}
             </button>

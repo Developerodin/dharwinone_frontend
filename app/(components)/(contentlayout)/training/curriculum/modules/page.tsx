@@ -39,6 +39,10 @@ import {
   removeModulesFromList,
   replaceModuleInList,
 } from './_lib/mutateModulesCatalog'
+import {
+  resolvedModuleCategories,
+  statusWhenLeavingArchive,
+} from './_lib/leaveArchiveOnFolderMove'
 
 const Select = dynamic(() => import('react-select'), { ssr: false })
 
@@ -914,18 +918,34 @@ const TrainingModules = () => {
       return { id, name: match?.name ?? id }
     })
     const results = await Promise.allSettled(
-      ids.map((id) => trainingModulesApi.setTrainingModuleFolders(id, categoryIds)),
+      ids.map((id) => {
+        const current = allModulesRef.current.find((m) => m.id === id)
+        const leaveArchive = statusWhenLeavingArchive(current?.status)
+        return trainingModulesApi.setTrainingModuleFolders(
+          id,
+          categoryIds,
+          leaveArchive ? { status: leaveArchive } : undefined,
+        )
+      }),
     )
     let next = allModulesRef.current
     results.forEach((result, index) => {
       const id = ids[index]
       if (!id || result.status !== 'fulfilled') return
+      const previous = allModulesRef.current.find((m) => m.id === id)
+      const leaveArchive = statusWhenLeavingArchive(previous?.status)
       next = replaceModuleInList(next, id, {
         ...result.value,
-        categories: result.value.categories?.length ? result.value.categories : cats,
+        categories: resolvedModuleCategories(result.value, cats),
+        status: result.value.status ?? leaveArchive ?? previous?.status ?? result.value.status,
       })
     })
     if (next !== allModulesRef.current) commitCatalog(next)
+    if (statusFilter === 'archived' && results.some((r) => r.status === 'fulfilled')) {
+      router.replace(`${pathname}${modulesListStatusSearchString(searchParams, 'published')}`, {
+        scroll: false,
+      })
+    }
     const success = results.filter((r) => r.status === 'fulfilled').length
     const fail = results.length - success
     setBulkBusy(false)
@@ -940,7 +960,7 @@ const TrainingModules = () => {
       showConfirmButton: false,
       timerProgressBar: true,
     })
-  }, [selectedIds, clearSelection, commitCatalog, categories])
+  }, [selectedIds, clearSelection, commitCatalog, categories, statusFilter, router, pathname, searchParams])
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -1044,18 +1064,24 @@ const TrainingModules = () => {
       setStatusUpdatingId(moduleId)
       try {
         const updated = await trainingModulesApi.updateTrainingModule(moduleId, { status })
+        const nextStatus = updated.status ?? status
         commitCatalog(
           patchModuleInList(allModulesRef.current, moduleId, {
-            status: updated.status ?? status,
+            status: nextStatus,
           }),
         )
         setSelectedModuleDetail((prev) =>
-          prev?.id === moduleId ? { ...prev, status: updated.status ?? status } : prev,
+          prev?.id === moduleId ? { ...prev, status: nextStatus } : prev,
         )
+        if (statusFilter === 'archived' && nextStatus !== 'archived') {
+          router.replace(`${pathname}${modulesListStatusSearchString(searchParams, nextStatus === 'draft' ? 'draft' : 'published')}`, {
+            scroll: false,
+          })
+        }
         void Swal.fire({
           icon: 'success',
           title: 'Status updated',
-          text: `Module is now ${status}.`,
+          text: `Module is now ${nextStatus}.`,
           toast: true,
           position: 'top-end',
           timer: 2500,
@@ -1078,7 +1104,7 @@ const TrainingModules = () => {
         setStatusUpdatingId(null)
       }
     },
-    [commitCatalog],
+    [commitCatalog, statusFilter, router, pathname, searchParams],
   )
 
   const handleDelete = useCallback(async (moduleId: string) => {
@@ -1238,20 +1264,35 @@ const TrainingModules = () => {
     const mod = assignFoldersModule
     if (!mod) return
     try {
-      const updated = await trainingModulesApi.setTrainingModuleFolders(mod.id, categoryIds)
+      const leaveArchive = statusWhenLeavingArchive(mod.status)
+      const updated = await trainingModulesApi.setTrainingModuleFolders(
+        mod.id,
+        categoryIds,
+        leaveArchive ? { status: leaveArchive } : undefined,
+      )
       const cats = categoryIds.map((id) => {
         const match = categories.find((c) => c.id === id)
         return { id, name: match?.name ?? id }
       })
+      const nextStatus = updated.status ?? leaveArchive ?? mod.status
       commitCatalog(
         replaceModuleInList(allModulesRef.current, mod.id, {
           ...updated,
-          categories: updated.categories?.length ? updated.categories : cats,
+          categories: resolvedModuleCategories(updated, cats),
+          status: nextStatus,
         }),
       )
+      if (statusFilter === 'archived' && nextStatus !== 'archived') {
+        router.replace(`${pathname}${modulesListStatusSearchString(searchParams, 'published')}`, {
+          scroll: false,
+        })
+      }
+      const folderLabel =
+        cats.length > 0 ? cats.map((c) => c.name).join(', ') : 'Uncategorized'
       void Swal.fire({
         icon: 'success',
-        title: 'Folders updated',
+        title: leaveArchive ? 'Moved out of archive' : 'Folders updated',
+        text: `Now in ${folderLabel}.`,
         toast: true,
         position: 'top-end',
         timer: 2500,
