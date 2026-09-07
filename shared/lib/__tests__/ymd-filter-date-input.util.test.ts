@@ -7,6 +7,8 @@ import {
   describeDmyProblem,
   isReferralLeadsDateRangeInvalid,
   getReferralLeadsDateRangeError,
+  getYmdDateRangeIncompleteError,
+  isYmdDateRangePartiallyFilled,
   REFERRAL_LEADS_INVALID_DATE_RANGE_MESSAGE,
 } from "@/shared/lib/ymd-filter-date-input.util";
 
@@ -180,5 +182,24 @@ describe("referral leads date range validation", () => {
     expect(getReferralLeadsDateRangeError("2026-02-01", "2026-01-31")).toBe(
       REFERRAL_LEADS_INVALID_DATE_RANGE_MESSAGE
     );
+  });
+});
+
+describe("ymd date range completeness", () => {
+  it("detects a partially filled range", () => {
+    expect(isYmdDateRangePartiallyFilled("", "")).toBe(false);
+    expect(isYmdDateRangePartiallyFilled("2026-01-01", "2026-01-31")).toBe(false);
+    expect(isYmdDateRangePartiallyFilled("2026-01-01", "")).toBe(true);
+    expect(isYmdDateRangePartiallyFilled("", "2026-01-31")).toBe(true);
+  });
+
+  it("uses page-specific labels in the incomplete message", () => {
+    expect(getYmdDateRangeIncompleteError("From", "To", "", "2026-01-31")).toBe(
+      "You didn't enter From. Both fields are required."
+    );
+    expect(getYmdDateRangeIncompleteError("Applied from", "Applied to", "2026-01-01", "")).toBe(
+      "You didn't enter Applied to. Both fields are required."
+    );
+    expect(getYmdDateRangeIncompleteError("Saved from", "Saved to", "2026-01-01", "2026-01-31")).toBeNull();
   });
 });

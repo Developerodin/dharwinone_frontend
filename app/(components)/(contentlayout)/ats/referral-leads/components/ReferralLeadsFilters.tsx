@@ -5,6 +5,7 @@ import { STATUS_META } from "@/shared/lib/ats/referral-leads-constants";
 import { SalesAgentFilterSelect } from "./SalesAgentFilterSelect";
 import { FILTER_BAR_PLACEHOLDER_CLASS, YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
 import { getReferralLeadsDateRangeError } from "@/shared/lib/ymd-filter-date-input.util";
+import { alertYmdDateRangeIncomplete } from "@/shared/lib/ymd-filter-date-range-alert";
 import type { ReferralLeadsFilterState } from "../hooks/useReferralLeadsFilters";
 import type { DatePreset } from "../utils/dateRange.util";
 import type { QuickStatusFilter } from "../utils/attributionScope.util";
@@ -48,8 +49,11 @@ export function ReferralLeadsFilters({
   };
 
   const commitCustomDate = (key: "customFrom" | "customTo", sanitized: string) => {
+    const nextFrom = key === "customFrom" ? sanitized : filters.customFrom;
+    const nextTo = key === "customTo" ? sanitized : filters.customTo;
     setFilter(key, sanitized);
     if (sanitized) setFilter("datePreset", "all");
+    void alertYmdDateRangeIncomplete("From", "To", nextFrom, nextTo);
     // A filled From should hand over to To rather than make the user aim at it. The From
     // field is keyed on its own value, so it remounts on this commit -- wait a frame or the
     // focus lands on the element that is about to be torn down.

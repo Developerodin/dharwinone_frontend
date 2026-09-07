@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ReferralLeadsQueryParams } from "@/shared/lib/api/referralLeads";
 import { type DatePreset, rangeForPreset } from "../utils/dateRange.util";
-import { isReferralLeadsDateRangeInvalid } from "@/shared/lib/ymd-filter-date-input.util";
+import { isReferralLeadsDateRangeInvalid, isYmdDateRangePartiallyFilled } from "@/shared/lib/ymd-filter-date-input.util";
 import type { QuickStatusFilter } from "../utils/attributionScope.util";
 
 export interface ReferralLeadsFilterState {
@@ -52,11 +52,17 @@ export function useReferralLeadsFilters(
     [filters.customFrom, filters.customTo]
   );
 
+  const dateRangeIncomplete = useMemo(
+    () => isYmdDateRangePartiallyFilled(filters.customFrom, filters.customTo),
+    [filters.customFrom, filters.customTo]
+  );
+
   const baseParams = useMemo((): ReferralLeadsQueryParams => {
     const hasCustomDates = !!(filters.customFrom || filters.customTo);
     const customRangeInvalid = isReferralLeadsDateRangeInvalid(filters.customFrom, filters.customTo);
+    const customRangeIncomplete = isYmdDateRangePartiallyFilled(filters.customFrom, filters.customTo);
     const { from, to } =
-      hasCustomDates && !customRangeInvalid
+      hasCustomDates && !customRangeInvalid && !customRangeIncomplete
         ? { from: filters.customFrom || undefined, to: filters.customTo || undefined }
         : rangeForPreset(filters.datePreset);
 
@@ -107,6 +113,7 @@ export function useReferralLeadsFilters(
     clearFilters,
     hasActiveFilters,
     dateRangeInvalid,
+    dateRangeIncomplete,
     baseParams,
     queryParams: baseParams,
   };

@@ -119,3 +119,31 @@ export function isReferralLeadsDateRangeInvalid(from?: string | null, to?: strin
 export function getReferralLeadsDateRangeError(from?: string | null, to?: string | null): string | null {
   return isReferralLeadsDateRangeInvalid(from, to) ? REFERRAL_LEADS_INVALID_DATE_RANGE_MESSAGE : null;
 }
+
+/** True when exactly one end of a paired range filter is set. */
+export function isYmdDateRangePartiallyFilled(start?: string | null, end?: string | null): boolean {
+  const hasStart = !!(start ?? "").trim();
+  const hasEnd = !!(end ?? "").trim();
+  return hasStart !== hasEnd;
+}
+
+/**
+ * User-facing message when a paired date filter has only one side filled.
+ * Pass the same labels shown on that page (From/To, Applied from/Applied to, etc.).
+ */
+export function getYmdDateRangeIncompleteError(
+  startLabel: string,
+  endLabel: string,
+  start?: string | null,
+  end?: string | null
+): string | null {
+  const hasStart = !!(start ?? "").trim();
+  const hasEnd = !!(end ?? "").trim();
+  if (hasStart && !hasEnd) {
+    return `You didn't enter ${endLabel}. Both fields are required.`;
+  }
+  if (hasEnd && !hasStart) {
+    return `You didn't enter ${startLabel}. Both fields are required.`;
+  }
+  return null;
+}

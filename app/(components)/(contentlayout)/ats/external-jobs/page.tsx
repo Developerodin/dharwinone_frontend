@@ -22,7 +22,8 @@ import { buildPageWindow, getPaginationRange } from "@/shared/lib/pagination-ite
 // Same dd/mm/yyyy picker the referral-leads and jobs filter bars use. Imported across
 // routes exactly as ats/jobs/_components/JobsFilterPanel.tsx already does.
 import { YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
-import { getReferralLeadsDateRangeError } from "@/shared/lib/ymd-filter-date-input.util";
+import { getReferralLeadsDateRangeError, getYmdDateRangeIncompleteError } from "@/shared/lib/ymd-filter-date-input.util";
+import { alertYmdDateRangeIncomplete } from "@/shared/lib/ymd-filter-date-range-alert";
 import ExternalJobPreviewPanel from "./_components/ExternalJobPreviewPanel";
 import {
   ExternalJobsButtonSpinner,
@@ -423,6 +424,16 @@ export default function ExternalJobsPage() {
 
   const loadSavedJobs = useCallback(
     (page: number = 1) => {
+      const incompleteMsg = getYmdDateRangeIncompleteError(
+        "Saved from",
+        "Saved to",
+        debouncedSavedFilters.savedFrom,
+        debouncedSavedFilters.savedTo
+      );
+      if (incompleteMsg) {
+        setSavedLoading(false);
+        return;
+      }
       setSavedLoading(true);
       setSavedLoadStatus("loading");
       setSavedLoadError(null);
@@ -480,6 +491,16 @@ export default function ExternalJobsPage() {
 
   const loadSavedContacts = useCallback(
     (page: number = 1) => {
+      const incompleteMsg = getYmdDateRangeIncompleteError(
+        "Saved from",
+        "Saved to",
+        debouncedContactFilters.savedFrom,
+        debouncedContactFilters.savedTo
+      );
+      if (incompleteMsg) {
+        setSavedContactsLoading(false);
+        return;
+      }
       setSavedContactsLoading(true);
       setContactsLoadStatus("loading");
       setContactsLoadError(null);
@@ -1429,7 +1450,10 @@ export default function ExternalJobsPage() {
                     rangeError={savedDateRangeError}
                     inputClassName="form-control !rounded-xl !border-defaultborder/80 !py-[0.45rem] !px-3 !text-[0.8125rem] !shadow-none focus:!border-primary/60 focus:!ring-2 focus:!ring-primary/15 dark:!border-white/10 dark:!bg-bodybg w-[9.5rem]"
                     labelClassName="mb-1 block text-[0.68rem] font-bold uppercase tracking-[0.11em] text-textmuted dark:text-white/40"
-                    onCommit={(v) => setSavedFilters((f) => ({ ...f, savedFrom: v }))}
+                    onCommit={(v) => {
+                      setSavedFilters((f) => ({ ...f, savedFrom: v }));
+                      void alertYmdDateRangeIncomplete("Saved from", "Saved to", v, savedFilters.savedTo);
+                    }}
                   />
                   <YmdFilterDateInput
                     label="Saved to"
@@ -1440,7 +1464,10 @@ export default function ExternalJobsPage() {
                     rangeError={savedDateRangeError}
                     inputClassName="form-control !rounded-xl !border-defaultborder/80 !py-[0.45rem] !px-3 !text-[0.8125rem] !shadow-none focus:!border-primary/60 focus:!ring-2 focus:!ring-primary/15 dark:!border-white/10 dark:!bg-bodybg w-[9.5rem]"
                     labelClassName="mb-1 block text-[0.68rem] font-bold uppercase tracking-[0.11em] text-textmuted dark:text-white/40"
-                    onCommit={(v) => setSavedFilters((f) => ({ ...f, savedTo: v }))}
+                    onCommit={(v) => {
+                      setSavedFilters((f) => ({ ...f, savedTo: v }));
+                      void alertYmdDateRangeIncomplete("Saved from", "Saved to", savedFilters.savedFrom, v);
+                    }}
                   />
 
                   {savedFiltersActive && (
@@ -1482,7 +1509,10 @@ export default function ExternalJobsPage() {
                     rangeError={contactDateRangeError}
                     inputClassName="form-control !rounded-xl !border-defaultborder/80 !py-[0.45rem] !px-3 !text-[0.8125rem] !shadow-none focus:!border-primary/60 focus:!ring-2 focus:!ring-primary/15 dark:!border-white/10 dark:!bg-bodybg w-[9.5rem]"
                     labelClassName="mb-1 block text-[0.68rem] font-bold uppercase tracking-[0.11em] text-textmuted dark:text-white/40"
-                    onCommit={(v) => setContactFilters((f) => ({ ...f, savedFrom: v }))}
+                    onCommit={(v) => {
+                      setContactFilters((f) => ({ ...f, savedFrom: v }));
+                      void alertYmdDateRangeIncomplete("Saved from", "Saved to", v, contactFilters.savedTo);
+                    }}
                   />
                   <YmdFilterDateInput
                     label="Saved to"
@@ -1493,7 +1523,10 @@ export default function ExternalJobsPage() {
                     rangeError={contactDateRangeError}
                     inputClassName="form-control !rounded-xl !border-defaultborder/80 !py-[0.45rem] !px-3 !text-[0.8125rem] !shadow-none focus:!border-primary/60 focus:!ring-2 focus:!ring-primary/15 dark:!border-white/10 dark:!bg-bodybg w-[9.5rem]"
                     labelClassName="mb-1 block text-[0.68rem] font-bold uppercase tracking-[0.11em] text-textmuted dark:text-white/40"
-                    onCommit={(v) => setContactFilters((f) => ({ ...f, savedTo: v }))}
+                    onCommit={(v) => {
+                      setContactFilters((f) => ({ ...f, savedTo: v }));
+                      void alertYmdDateRangeIncomplete("Saved from", "Saved to", contactFilters.savedFrom, v);
+                    }}
                   />
 
                   {contactFiltersActive && (

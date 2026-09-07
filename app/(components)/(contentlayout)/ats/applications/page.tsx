@@ -25,7 +25,8 @@ import {
   REJECTED_REOPEN_STATUSES,
 } from "@/shared/lib/ats/applicationPipeline";
 import { YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
-import { getReferralLeadsDateRangeError } from "@/shared/lib/ymd-filter-date-input.util";
+import { getReferralLeadsDateRangeError, getYmdDateRangeIncompleteError } from "@/shared/lib/ymd-filter-date-input.util";
+import { alertYmdDateRangeIncomplete } from "@/shared/lib/ymd-filter-date-range-alert";
 
 const APPLIED_TO_INPUT_ID = "applications-applied-to";
 
@@ -366,6 +367,11 @@ export default function ApplicationsPage() {
 
   const fetchApplications = useCallback(() => {
     const generation = ++fetchGenerationRef.current;
+    const incompleteMsg = getYmdDateRangeIncompleteError("Applied from", "Applied to", dateFrom, dateTo);
+    if (incompleteMsg) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const params: Parameters<typeof listJobApplications>[0] = {
       limit: LIST_PAGE_SIZE,
@@ -674,6 +680,7 @@ export default function ApplicationsPage() {
                 onCommit={(sanitized) => {
                   setDateFrom(sanitized);
                   setPage(1);
+                  void alertYmdDateRangeIncomplete("Applied from", "Applied to", sanitized, dateTo);
                 }}
                 portalId="applications-datepicker-portal-from"
                 popperClassName="!z-[9999]"
@@ -691,6 +698,7 @@ export default function ApplicationsPage() {
                 onCommit={(sanitized) => {
                   setDateTo(sanitized);
                   setPage(1);
+                  void alertYmdDateRangeIncomplete("Applied from", "Applied to", dateFrom, sanitized);
                 }}
                 portalId="applications-datepicker-portal-to"
                 popperClassName="!z-[9999]"

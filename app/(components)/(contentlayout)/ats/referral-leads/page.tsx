@@ -65,11 +65,11 @@ export default function ReferralLeadsPage() {
   const canUseOrgReferralControls = canManage && !isSalesAgent;
   const canOverrideAttribution = canUseOrgReferralControls;
 
-  const { filters, setFilter, setFilters, clearFilters, hasActiveFilters, dateRangeInvalid, baseParams } =
+  const { filters, setFilter, setFilters, clearFilters, hasActiveFilters, dateRangeInvalid, dateRangeIncomplete, baseParams } =
     useReferralLeadsFilters(featureEnabled, initial.filters);
   // Gate both fetches on a usable range so the table never shows unfiltered rows
   // while the From/To fields are displaying a range error.
-  const canFetch = permissionsLoaded && !dateRangeInvalid;
+  const canFetch = permissionsLoaded && !dateRangeInvalid && !dateRangeIncomplete;
   const {
     stats,
     error: statsError,
