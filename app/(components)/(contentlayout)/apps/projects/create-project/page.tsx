@@ -13,7 +13,6 @@ import {
   type ProjectPriority,
 } from "@/shared/lib/api/projects";
 import { createTeamGroup, listTeamGroups } from "@/shared/lib/api/projectTeams";
-import { listUsers } from "@/shared/lib/api/users";
 import { PROJECT_STATUS_OPTIONS, PROJECT_PRIORITY_OPTIONS } from "@/shared/data/apps/projects/projectFormConfig";
 import type { SelectOption } from "@/shared/data/apps/projects/projectFormConfig";
 import { useRouter } from "next/navigation";
@@ -24,6 +23,8 @@ import { bootstrapSmartTeam } from "@/shared/lib/api/pmAssistant";
 import { runAssignmentGenerationWithUi } from "@/shared/lib/pm/runAssignmentGenerationWithUi";
 import { isPmAssistantUiEnabled } from "@/shared/lib/pm/featureFlags";
 import { composeProjectDescriptionPlainFromParts } from "@/shared/lib/apps/composeProjectDescriptionPlain";
+import { escapeHtmlForTextNode } from "@/shared/lib/sanitize-html";
+import { MONGO_ID_REGEX, validateProjectForm } from "./validateProjectForm";
 import type { BreakdownContext } from "@/shared/types/pmAssistant";
 
 type AfterCreateAiMode = "ask" | "smart_team" | "tasks" | "assign";
@@ -56,7 +57,7 @@ function stripHtmlToText(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-const MONGO_ID_REGEX = /^[0-9a-fA-F]{24}$/;
+const TEAM_OPTIONS_LIMIT = 200;
 
 function buildBootstrapBreakdownFromForm(v: ProjectFormValues): BreakdownContext {
   const end =
@@ -111,9 +112,10 @@ const Createproject = () => {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [assignedToOptions, setAssignedToOptions] = useState<SelectOption[]>([]);
-  const [assignedUserOptions, setAssignedUserOptions] = useState<SelectOption[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(true);
   const [teamOptionsError, setTeamOptionsError] = useState<string | null>(null);
-  const [userOptionsError, setUserOptionsError] = useState<string | null>(null);
+  /** Set on the first field change so the unload guard only fires on a dirty form. */
+  const [dirty, setDirty] = useState(false);
   const [aiTaskModalOpen, setAiTaskModalOpen] = useState(false);
   const [aiTaskProjectId, setAiTaskProjectId] = useState("");
   const [aiTaskProjectName, setAiTaskProjectName] = useState("");
@@ -145,7 +147,7 @@ const Createproject = () => {
         const r1 = await Swal.fire({
           icon: "info",
           title: "Tasks created — staffing needs review",
-          html: `<p class="text-start text-sm">${result.message ?? "No automatic employee matches were produced."} Match people on the assignment screen, then approve and apply when ready.</p>${
+          html: `<p class="text-start text-sm">${escapeHtmlForTextNode(result.message ?? "No automatic employee matches were produced.")} Match people on the assignment screen, then approve and apply when ready.</p>${
             result.lowConfidence
               ? `<p class="text-start text-xs mt-2 text-amber-700 dark:text-amber-300">Context score was below the recommended threshold (${Math.round((result.confidenceScore ?? 0) * 100)}%). Add more structured detail next time for stronger automation.</p>`
               : ""
@@ -191,40 +193,43 @@ const Createproject = () => {
   [router]
   );
 
+  /** ponytail: flat fetch capped at TEAM_OPTIONS_LIMIT and a notice when it truncates.
+   *  Swap for a searchable AsyncSelect (as “Assigned people” already uses) if orgs pass the cap. */
   useEffect(() => {
     setTeamOptionsError(null);
-    listTeamGroups({ limit: 200 })
+    setTeamsLoading(true);
+    listTeamGroups({ limit: TEAM_OPTIONS_LIMIT })
       .then((res) => {
         const options: SelectOption[] = (res.results ?? []).map((t) => {
           const teamId = (t as { id?: string }).id ?? t._id;
           return { value: teamId, label: t.name || teamId };
         });
         setAssignedToOptions(options);
+        const total = (res as { totalResults?: number }).totalResults ?? options.length;
+        if (total > options.length) {
+          setTeamOptionsError(
+            `Showing the first ${options.length} of ${total} teams. Create the project, then add the rest from the project page.`
+          );
+        }
       })
       .catch(() => {
         setAssignedToOptions([]);
         setTeamOptionsError("Could not load teams. Check permissions or try again.");
-      });
+      })
+      .finally(() => setTeamsLoading(false));
   }, []);
 
+  /** ponytail: native unload prompt only — App Router has no route-change guard,
+   *  so in-app navigation still discards the draft. Add a router guard if that bites. */
   useEffect(() => {
-    setUserOptionsError(null);
-    listUsers({ limit: 200, status: "active" })
-      .then((res) => {
-        const options: SelectOption[] = (res.results ?? []).map((u) => {
-          const id = String(u.id ?? "").trim();
-          const label = [u.name, u.email].filter(Boolean).join(" — ") || id;
-          return { value: id, label };
-        });
-        setAssignedUserOptions(options);
-      })
-      .catch(() => {
-        setAssignedUserOptions([]);
-        setUserOptionsError("Could not load users for assignment.");
-      });
-  }, []);
+    if (!dirty || submitting) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty, submitting]);
 
   const handleChange = useCallback((name: string, value: unknown) => {
+    setDirty(true);
     setValues((prev) => ({ ...prev, [name]: value }));
     setErrors((prev) => {
       const next = { ...prev };
@@ -302,30 +307,12 @@ const Createproject = () => {
   };
 
   const handleSubmit = async () => {
-    if (!String(values.name ?? "").trim()) {
-      setErrors({ name: "Project name is required" });
-      return;
-    }
-    const start =
-      values.startDate instanceof Date
-        ? values.startDate
-        : values.startDate
-          ? new Date(values.startDate as string)
-          : null;
-    const end =
-      values.endDate instanceof Date
-        ? values.endDate
-        : values.endDate
-          ? new Date(values.endDate as string)
-          : null;
-    if (
-      start &&
-      end &&
-      !Number.isNaN(start.getTime()) &&
-      !Number.isNaN(end.getTime()) &&
-      end < start
-    ) {
-      setErrors({ endDate: "End date must be on or after the start date." });
+    const found = validateProjectForm(values);
+    if (Object.keys(found).length) {
+      setErrors(found);
+      // inputId on every control matches the field name, so this reaches selects and dates too.
+      const first = Object.keys(found)[0];
+      requestAnimationFrame(() => document.getElementById(first)?.focus());
       return;
     }
     const payload = buildPayload();
@@ -333,6 +320,9 @@ const Createproject = () => {
     setErrors({});
     try {
       const created = await createProject(payload);
+      // Only now is the draft safely on the server — clearing `dirty` before the await would
+      // disarm the unload guard and let a failed create silently lose the form.
+      setDirty(false);
       const projectId = getCreatedProjectId(created);
       const projectName = String(created.name ?? payload.name ?? "Project").trim() || "Project";
 
@@ -392,13 +382,13 @@ const Createproject = () => {
               <input type="checkbox" id="pm-post-create-smart" class="mt-0.5 shrink-0" />
               <span>
                 <strong class="text-defaulttextcolor">New AI team + smart student assignment</strong>
-                <span class="block text-[#8c9097] dark:text-white/55 mt-1">
+                <span class="block text-defaulttextcolor/70 dark:text-defaulttextcolor/55 mt-1">
                   Creates tasks with GPT and runs smart candidate matching (often 30–90 seconds). You then <strong>review on the assignment screen</strong> and apply when ready — that step sets task owners and syncs the project team.
                 </span>
               </span>
             </label>
           </div>
-          <p class="text-start text-[0.75rem] text-[#8c9097] dark:text-white/50 mb-2">Or pick manual steps (you review before saving):</p>
+          <p class="text-start text-[0.75rem] text-defaulttextcolor/70 dark:text-defaulttextcolor/55 mb-2">Or pick manual steps (you review before saving):</p>
           <div class="text-start space-y-2 text-[0.875rem]">
             <label class="flex items-start gap-2 cursor-pointer">
               <input type="checkbox" id="pm-post-create-tasks" class="mt-1" />
@@ -516,15 +506,25 @@ const Createproject = () => {
             <div className="box-header">
               <div className="box-title">Create Project</div>
             </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleSubmit();
+            }}
+            onKeyDown={(e) => {
+              // react-select only calls preventDefault on Enter while its menu is OPEN. With the
+              // menu closed the keydown reaches the form and implicitly submits it, so tabbing to
+              // Status and pressing Enter would create a half-filled project. Enter still submits
+              // from the plain text inputs, which is the point of having a <form>.
+              if (e.key !== "Enter") return;
+              if ((e.target as HTMLElement).closest?.(".Select2__control")) e.preventDefault();
+            }}
+            noValidate
+          >
             <div className="box-body">
               {teamOptionsError ? (
                 <div className="alert alert-warning text-[0.8125rem] mb-3" role="status">
                   {teamOptionsError}
-                </div>
-              ) : null}
-              {userOptionsError ? (
-                <div className="alert alert-light border text-[0.8125rem] mb-3" role="status">
-                  {userOptionsError}
                 </div>
               ) : null}
               <DynamicProjectForm
@@ -532,7 +532,7 @@ const Createproject = () => {
                 onChange={handleChange}
                 errors={errors}
                 assignedToOptions={assignedToOptions}
-                assignedUserOptions={assignedUserOptions}
+                assignedTeamsLoading={teamsLoading}
                 onCreateTeamGroup={handleCreateTeamGroup}
                 briefAiEnhanceEnabled={isPmAssistantUiEnabled()}
               />
@@ -551,11 +551,11 @@ const Createproject = () => {
                       <div>
                         <h2
                           id="pm-after-create-ai-heading"
-                          className="m-0 text-[0.9375rem] font-semibold text-defaulttextcolor"
+                          className="m-0 text-[1rem] font-semibold text-defaulttextcolor"
                         >
                           After you create
                         </h2>
-                        <p className="m-0 text-[0.75rem] text-[#8c9097] dark:text-white/45">
+                        <p className="m-0 text-[0.75rem] text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                           One tap after <strong className="text-defaulttextcolor">Create Project</strong> — you can still change course in the next step.
                         </p>
                       </div>
@@ -566,8 +566,8 @@ const Createproject = () => {
                     <label
                       className={`group flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
                         afterCreateAiMode === "ask"
-                          ? "border-primary/50 bg-primary/[0.07] shadow-[0_0_0_1px_rgba(var(--primary-rgb),0.12)] ring-1 ring-primary/15"
-                          : "border-defaultborder bg-[rgb(var(--default-background))]/60 hover:border-primary/25 hover:shadow-sm dark:bg-black/15"
+                          ? "border-indigo-500/50 bg-indigo-500/[0.07] ring-1 ring-indigo-500/15"
+                          : "border-defaultborder bg-[rgb(var(--default-background))]/60 hover:border-indigo-500/25 hover:shadow-sm dark:bg-black/15"
                       }`}
                     >
                       <input
@@ -582,7 +582,7 @@ const Createproject = () => {
                           <i className="ri-chat-3-line text-indigo-500/90" aria-hidden />
                           Ask me first
                         </span>
-                        <span className="mt-1 block text-[0.8125rem] leading-snug text-[#8c9097] dark:text-white/50">
+                        <span className="mt-1 block text-[0.8125rem] leading-snug text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                           Show choices: AI team + assign, task breakdown, or employee assignment.
                         </span>
                       </span>
@@ -591,8 +591,8 @@ const Createproject = () => {
                     <label
                       className={`group flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
                         afterCreateAiMode === "smart_team"
-                          ? "border-primary/50 bg-primary/[0.07] shadow-[0_0_0_1px_rgba(var(--primary-rgb),0.12)] ring-1 ring-primary/15"
-                          : "border-defaultborder bg-[rgb(var(--default-background))]/60 hover:border-primary/25 hover:shadow-sm dark:bg-black/15"
+                          ? "border-indigo-500/50 bg-indigo-500/[0.07] ring-1 ring-indigo-500/15"
+                          : "border-defaultborder bg-[rgb(var(--default-background))]/60 hover:border-indigo-500/25 hover:shadow-sm dark:bg-black/15"
                       }`}
                     >
                       <input
@@ -607,14 +607,14 @@ const Createproject = () => {
                           <i className="ri-rocket-2-line text-indigo-500/90" aria-hidden />
                           AI team + auto-assign
                         </span>
-                        <span className="mt-1 block text-[0.8125rem] leading-snug text-[#8c9097] dark:text-white/50">
+                        <span className="mt-1 block text-[0.8125rem] leading-snug text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                           One run: draft tasks, match candidates, create a project team, set owners, link the team.
                         </span>
-                        <details className="mt-2 text-[0.72rem] text-[#8c9097] dark:text-white/45">
+                        <details className="mt-2 text-[0.75rem] text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                           <summary className="cursor-pointer select-none text-indigo-600/90 underline-offset-2 hover:underline dark:text-indigo-300">
                             Required permissions
                           </summary>
-                          <p className="mt-1.5 mb-0 font-mono text-[0.7rem] leading-relaxed">
+                          <p className="mt-1.5 mb-0 font-mono text-[0.75rem] leading-relaxed">
                             projects.manage · tasks.manage · teams.manage · candidates.read
                           </p>
                         </details>
@@ -624,8 +624,8 @@ const Createproject = () => {
                     <label
                       className={`group flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
                         afterCreateAiMode === "tasks"
-                          ? "border-primary/50 bg-primary/[0.07] shadow-[0_0_0_1px_rgba(var(--primary-rgb),0.12)] ring-1 ring-primary/15"
-                          : "border-defaultborder bg-[rgb(var(--default-background))]/60 hover:border-primary/25 hover:shadow-sm dark:bg-black/15"
+                          ? "border-indigo-500/50 bg-indigo-500/[0.07] ring-1 ring-indigo-500/15"
+                          : "border-defaultborder bg-[rgb(var(--default-background))]/60 hover:border-indigo-500/25 hover:shadow-sm dark:bg-black/15"
                       }`}
                     >
                       <input
@@ -640,7 +640,7 @@ const Createproject = () => {
                           <i className="ri-task-line text-indigo-500/90" aria-hidden />
                           AI task breakdown
                         </span>
-                        <span className="mt-1 block text-[0.8125rem] leading-snug text-[#8c9097] dark:text-white/50">
+                        <span className="mt-1 block text-[0.8125rem] leading-snug text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                           Preview and edit suggested tasks before they are saved.
                         </span>
                       </span>
@@ -649,8 +649,8 @@ const Createproject = () => {
                     <label
                       className={`group flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-all duration-200 ease-out motion-reduce:transition-none ${
                         afterCreateAiMode === "assign"
-                          ? "border-primary/50 bg-primary/[0.07] shadow-[0_0_0_1px_rgba(var(--primary-rgb),0.12)] ring-1 ring-primary/15"
-                          : "border-defaultborder bg-[rgb(var(--default-background))]/60 hover:border-primary/25 hover:shadow-sm dark:bg-black/15"
+                          ? "border-indigo-500/50 bg-indigo-500/[0.07] ring-1 ring-indigo-500/15"
+                          : "border-defaultborder bg-[rgb(var(--default-background))]/60 hover:border-indigo-500/25 hover:shadow-sm dark:bg-black/15"
                       }`}
                     >
                       <input
@@ -665,7 +665,7 @@ const Createproject = () => {
                           <i className="ri-user-search-line text-indigo-500/90" aria-hidden />
                           AI employee assignment
                         </span>
-                        <span className="mt-1 block text-[0.8125rem] leading-snug text-[#8c9097] dark:text-white/50">
+                        <span className="mt-1 block text-[0.8125rem] leading-snug text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                           Match candidates to tasks — best when the project already has tasks.
                         </span>
                       </span>
@@ -673,14 +673,14 @@ const Createproject = () => {
                   </div>
 
                   {afterCreateAiMode === "tasks" ? (
-                    <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-dashed border-primary/25 bg-primary/[0.03] p-3 text-[0.8125rem] motion-safe:animate-pm-panel-in motion-reduce:animate-none dark:border-primary/30 dark:bg-primary/[0.06]">
+                    <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-dashed border-indigo-500/25 bg-indigo-500/[0.03] p-3 text-[0.8125rem] motion-safe:animate-pm-panel-in motion-reduce:animate-none dark:border-indigo-400/30 dark:bg-indigo-500/[0.06]">
                       <input
                         type="checkbox"
                         className="mt-0.5 shrink-0"
                         checked={afterTasksOpenAssignment}
                         onChange={(e) => setAfterTasksOpenAssignment(e.target.checked)}
                       />
-                      <span className="text-[#8c9097] dark:text-white/55">
+                      <span className="text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                         After tasks are created, open <strong className="text-defaulttextcolor">employee assignment</strong> review automatically.
                       </span>
                     </label>
@@ -689,14 +689,15 @@ const Createproject = () => {
               ) : null}
 
               {errors.submit && (
-                <div className="text-danger mt-2">{errors.submit}</div>
+                <div role="alert" className="text-danger mt-2">
+                  {errors.submit}
+                </div>
               )}
             </div>
             <div className="box-footer flex flex-wrap items-center justify-end gap-2 border-t border-gray-200/80 pt-4 dark:border-white/10">
               <button
-                type="button"
-                className="ti-btn ti-btn-primary btn-wave ms-auto inline-flex min-w-[10.5rem] items-center justify-center gap-2 transition-transform duration-150 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100"
-                onClick={handleSubmit}
+                type="submit"
+                className="ti-btn ti-btn-primary btn-wave ms-auto inline-flex min-h-[2.75rem] min-w-[10.5rem] items-center justify-center gap-2 transition-transform duration-150 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100"
                 disabled={submitting}
                 aria-busy={submitting}
               >
@@ -713,6 +714,7 @@ const Createproject = () => {
                 )}
               </button>
             </div>
+          </form>
           </div>
         </div>
       </div>

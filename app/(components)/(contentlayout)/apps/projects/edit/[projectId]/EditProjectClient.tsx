@@ -16,7 +16,6 @@ import {
   type ProjectPriority,
 } from "@/shared/lib/api/projects";
 import { createTeamGroup, listTeamGroups } from "@/shared/lib/api/projectTeams";
-import { listUsers } from "@/shared/lib/api/users";
 import { PROJECT_STATUS_OPTIONS, PROJECT_PRIORITY_OPTIONS } from "@/shared/data/apps/projects/projectFormConfig";
 import type { SelectOption } from "@/shared/data/apps/projects/projectFormConfig";
 import { useRouter } from "next/navigation";
@@ -89,7 +88,6 @@ export function EditProjectClient({ projectId }: EditProjectClientProps) {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [assignedToOptions, setAssignedToOptions] = useState<SelectOption[]>([]);
-  const [assignedUserOptions, setAssignedUserOptions] = useState<SelectOption[]>([]);
   const [assignmentStarting, setAssignmentStarting] = useState(false);
 
   useEffect(() => {
@@ -102,16 +100,6 @@ export function EditProjectClient({ projectId }: EditProjectClientProps) {
         setAssignedToOptions(options);
       })
       .catch(() => setAssignedToOptions([]));
-    listUsers({ limit: 200, status: "active" })
-      .then((res) => {
-        setAssignedUserOptions(
-          (res.results ?? []).map((u) => ({
-            value: String(u.id ?? "").trim(),
-            label: [u.name, u.email].filter(Boolean).join(" — ") || u.id,
-          }))
-        );
-      })
-      .catch(() => setAssignedUserOptions([]));
   }, []);
 
   useEffect(() => {
@@ -286,7 +274,6 @@ export function EditProjectClient({ projectId }: EditProjectClientProps) {
                 onChange={handleChange}
                 errors={errors}
                 assignedToOptions={assignedToOptions}
-                assignedUserOptions={assignedUserOptions}
                 onCreateTeamGroup={handleCreateTeamGroup}
                 briefAiEnhanceEnabled={isPmAssistantUiEnabled()}
               />

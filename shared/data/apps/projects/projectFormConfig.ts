@@ -10,8 +10,7 @@ export type ProjectFormFieldType =
   | "multiselect"
   | "date"
   | "richtext"
-  | "tags"
-  | "file";
+  | "tags";
 
 export interface SelectOption {
   value: string | number;
@@ -29,8 +28,6 @@ export interface ProjectFormFieldConfig {
   colSpan?: 4 | 6 | 12; // grid cols: 4 = xl:col-span-4, etc.
   /** For select/multiselect: option list key or inline options */
   options?: SelectOption[];
-  /** Max items for tags (creatable) or file */
-  maxItems?: number;
   /** Rows for textarea */
   rows?: number;
   /** When true, field is part of optional “intake” block toggled in the form */
@@ -130,7 +127,6 @@ export const PROJECT_FORM_FIELDS: ProjectFormFieldConfig[] = [
     label: "Status",
     type: "select",
     options: PROJECT_STATUS_OPTIONS,
-    placeholder: "Inprogress",
     colSpan: 6,
   },
   {
@@ -138,7 +134,6 @@ export const PROJECT_FORM_FIELDS: ProjectFormFieldConfig[] = [
     label: "Priority",
     type: "select",
     options: PROJECT_PRIORITY_OPTIONS,
-    placeholder: "High",
     colSpan: 6,
   },
   {

@@ -3,14 +3,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import TiptapEditor from "@/shared/data/forms/form-editors/tiptapeditor";
-import { FilePond } from "react-filepond";
 import CreatableSelect from "react-select/creatable";
 import type { GroupBase, StylesConfig } from "react-select";
-import { atsSelectStyles } from "@/shared/lib/reactSelectTheme";
+import { atsSelectClassNames, atsSelectStyles } from "@/shared/lib/reactSelectTheme";
+import { YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
+import { formatYmdLocal, parseYmdLocal } from "@/shared/lib/leave-date-range";
 import {
   PROJECT_FORM_FIELDS,
-  PROJECT_STATUS_OPTIONS,
-  PROJECT_PRIORITY_OPTIONS,
   type ProjectFormFieldConfig,
   type SelectOption,
 } from "@/shared/data/apps/projects/projectFormConfig";
@@ -23,9 +22,43 @@ import {
   type BriefRegenerateInput,
 } from "@/shared/components/pm/BriefEnhancedReviewModal";
 
-const DatePicker = dynamic(() => import("react-datepicker"), { ssr: false });
-const Select = dynamic(() => import("react-select"), { ssr: false });
-const AsyncSelect = dynamic(() => import("react-select/async"), { ssr: false });
+/** Placeholder matches the 38px control height so client-only controls do not shift layout on hydration. */
+const controlSkeleton = () => (
+  <div className="h-[38px] rounded-lg border border-defaultborder bg-bodybg" aria-hidden />
+);
+
+const Select = dynamic(() => import("react-select"), { ssr: false, loading: controlSkeleton });
+const AsyncSelect = dynamic(() => import("react-select/async"), { ssr: false, loading: controlSkeleton });
+
+/** Muted helper/hint text. Token-based so both themes clear 4.5:1 (hex greys did not). */
+const MUTED = "text-[0.75rem] text-defaulttextcolor/70 dark:text-defaulttextcolor/55";
+
+/**
+ * Field error message. One component instead of 13 copies of `invalid-feedback d-block`,
+ * which styled nothing — those Bootstrap classes have no rules in this codebase.
+ * `--danger` (#E6533C) is only 3.6:1 on the light card, so light mode uses a darker red.
+ */
+function FieldError({ id, children }: { id: string; children: React.ReactNode }) {
+  return (
+    <div id={id} role="alert" className="mt-1 text-[0.75rem] text-[#b42318] dark:text-danger">
+      {children}
+    </div>
+  );
+}
+
+/** Red outline for react-select, whose control is rendered inside the wrapper we can class. */
+const selectErrorClass = "[&_.Select2__control]:!border-danger";
+
+/**
+ * Form values hold `Date | ISO string | null`, but the shared From/To input speaks `yyyy-mm-dd`.
+ * Parsing through `Date` first (rather than slicing an ISO string) keeps the calendar day the user
+ * sees identical to what the old picker showed, since stored ISO timestamps are UTC.
+ */
+function toYmd(value: unknown): string {
+  if (!value) return "";
+  const d = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(d.getTime()) ? "" : formatYmdLocal(d);
+}
 
 /** Server-searched — org can exceed any client-side prefetch cap (see TASK_LIMIT truncation
  *  bug in the task-board Assignees picker), so assignable users are never fully loaded up front. */
@@ -62,20 +95,17 @@ export interface DynamicProjectFormProps {
   onChange: (name: string, value: unknown) => void;
   /** Team group options for “Project team(s)” multiselect (default: multiselectdata from createprojectdata) */
   assignedToOptions?: SelectOption[];
-  /** User options for “Assigned people” multiselect */
-  assignedUserOptions?: SelectOption[];
+  /** Show a spinner in “Project team(s)” while the parent is still fetching teams. */
+  assignedTeamsLoading?: boolean;
   /** Field-level errors */
   errors?: Record<string, string>;
-  /** File list for attachments (FilePond); parent controls state */
-  attachmentFiles?: unknown[];
-  onAttachmentFilesChange?: (files: unknown[]) => void;
   /** Disable all inputs (e.g. view mode) */
   disabled?: boolean;
   /**
    * When set, “Project team(s)” shows a create flow. Resolve with `{ value, label }` (new team id + name);
    * parent should refresh options and persist via API.
    */
-  onCreateTeamGroup?: (name: string) => Promise<{ value: string; label: string }>;
+  onCreateTeamGroup?: (name: string) => Promise<SelectOption>;
   /** When true, show “Enhance with AI” on the project description (requires PM assistant + server OpenAI). */
   briefAiEnhanceEnabled?: boolean;
 }
@@ -108,10 +138,8 @@ const pmFormSelectStylesUnknown = pmFormSelectStyles as StylesConfig<
   GroupBase<unknown>
 >;
 
-/** Portaled menus leave `.pm-project-form`; tag portal so globals.scss can override Select2 focus/selected colors. */
-const pmFormSelectClassNames = {
-  menuPortal: () => "pm-project-form-select-menu",
-};
+/** Shared with every other `atsSelectStyles` consumer — see `atsSelectClassNames`. */
+const pmFormSelectClassNames = atsSelectClassNames;
 
 function getGridClass(colSpan: 4 | 6 | 12 = 6): string {
   return `xl:col-span-${colSpan} col-span-12`;
@@ -173,7 +201,7 @@ function ProjectFormSection({
           </h2>
         </div>
         {inlineHint ? (
-          <p className="m-0 max-w-2xl text-[0.75rem] leading-snug text-[#8c9097] dark:text-white/45 sm:text-end">
+          <p className="m-0 max-w-2xl text-[0.75rem] leading-snug text-defaulttextcolor/70 dark:text-defaulttextcolor/55 sm:text-end">
             {hint}
           </p>
         ) : null}
@@ -186,7 +214,7 @@ function ProjectFormSection({
           >
             <i className="ri-lightbulb-line text-base" />
           </span>
-          <p className="m-0 flex-1 text-[0.78rem] leading-relaxed text-[#4d5875] dark:text-white/70">{hint}</p>
+          <p className="m-0 flex-1 text-[0.8125rem] leading-relaxed text-defaulttextcolor/85 dark:text-defaulttextcolor/75">{hint}</p>
         </div>
       ) : null}
       <div className="grid grid-cols-12 gap-4 overflow-visible">{children}</div>
@@ -198,10 +226,8 @@ export function DynamicProjectForm({
   values,
   onChange,
   assignedToOptions = defaultAssignedToOptions,
-  assignedUserOptions = [],
+  assignedTeamsLoading = false,
   errors = {},
-  attachmentFiles = [],
-  onAttachmentFilesChange,
   disabled = false,
   onCreateTeamGroup,
   briefAiEnhanceEnabled = false,
@@ -377,6 +403,12 @@ export function DynamicProjectForm({
     const value = values[field.name];
     const error = errors[field.name];
     const colClass = getGridClass(field.colSpan);
+    const errorId = `${field.name}-error`;
+    /** Spread onto native inputs so the error is announced and the field reads as invalid. */
+    const a11yError = {
+      "aria-invalid": error ? true : undefined,
+      "aria-describedby": error ? errorId : undefined,
+    } as const;
 
     if (field.type === "textarea") {
       const tv = (value as string) ?? "";
@@ -386,19 +418,18 @@ export function DynamicProjectForm({
             {field.label}
             {field.required && " *"}
           </label>
-          {field.helpText ? (
-            <p className="text-[0.75rem] text-[#8c9097] dark:text-white/45 mb-1">{field.helpText}</p>
-          ) : null}
+          {field.helpText ? <p className={`${MUTED} mb-1`}>{field.helpText}</p> : null}
           <textarea
             id={field.name}
-            className={`form-control ${error ? "is-invalid" : ""}`}
+            className={`form-control ${error ? "!border-danger" : ""}`}
             placeholder={field.placeholder}
             rows={field.rows ?? 4}
             value={tv}
             onChange={(e) => handleChange(field.name)(e.target.value)}
             disabled={disabled}
+            {...a11yError}
           />
-          {error && <div className="invalid-feedback d-block">{error}</div>}
+          {error && <FieldError id={errorId}>{error}</FieldError>}
         </div>
       );
     }
@@ -410,19 +441,19 @@ export function DynamicProjectForm({
             {field.label}
             {field.required && " *"}
           </label>
-          {field.helpText ? (
-            <p className="text-[0.75rem] text-[#8c9097] dark:text-white/45 mb-1">{field.helpText}</p>
-          ) : null}
+          {field.helpText ? <p className={`${MUTED} mb-1`}>{field.helpText}</p> : null}
           <input
             type="text"
             id={field.name}
-            className={`form-control mt-auto ${error ? "is-invalid" : ""}`}
+            className={`form-control mt-auto ${error ? "!border-danger" : ""}`}
             placeholder={field.placeholder}
             value={(value as string) ?? ""}
             onChange={(e) => handleChange(field.name)(e.target.value)}
             disabled={disabled}
+            required={field.required}
+            {...a11yError}
           />
-          {error && <div className="invalid-feedback d-block">{error}</div>}
+          {error && <FieldError id={errorId}>{error}</FieldError>}
         </div>
       );
     }
@@ -435,62 +466,60 @@ export function DynamicProjectForm({
           : options.find((o) => o.value === value) ?? null;
       return (
         <div key={field.name} className={colClass}>
-          <label className="form-label">
+          <label htmlFor={field.name} className="form-label">
             {field.label}
             {field.required && " *"}
           </label>
-          {field.helpText ? (
-            <p className="text-[0.75rem] text-[#8c9097] dark:text-white/45 mb-1">{field.helpText}</p>
-          ) : null}
+          {field.helpText ? <p className={`${MUTED} mb-1`}>{field.helpText}</p> : null}
           <Select
+            inputId={field.name}
             name={field.name}
             options={options}
-            className={`js-states ${error ? "is-invalid" : ""}`}
+            className={`js-states ${error ? selectErrorClass : ""}`}
             classNamePrefix="Select2"
             placeholder={field.placeholder}
             value={selectValue}
             onChange={(opt) => handleChange(field.name)(opt)}
             isDisabled={disabled}
             menuPlacement="auto"
+            aria-invalid={error ? true : undefined}
+            aria-errormessage={error ? errorId : undefined}
             {...selectPortalTargetProps}
             classNames={pmFormSelectClassNames}
             styles={pmFormSelectStylesUnknown}
           />
-          {error && <div className="invalid-feedback d-block">{error}</div>}
+          {error && <FieldError id={errorId}>{error}</FieldError>}
         </div>
       );
     }
 
     if (field.type === "multiselect") {
       const options =
-        field.name === "assignedTeams"
-          ? assignedToOptions
-          : field.name === "assignedUsers"
-            ? assignedUserOptions
-            : (field.options ?? []);
+        field.name === "assignedTeams" ? assignedToOptions : (field.options ?? []);
       const multiValue = Array.isArray(value) ? (value as SelectOption[]) : [];
       return (
         <div key={field.name} className={colClass}>
-          <label className="form-label">
+          <label htmlFor={field.name} className="form-label">
             {field.label}
             {field.required && " *"}
           </label>
-          {field.helpText ? (
-            <p className="text-[0.75rem] text-[#8c9097] dark:text-white/45 mb-1">{field.helpText}</p>
-          ) : null}
+          {field.helpText ? <p className={`${MUTED} mb-1`}>{field.helpText}</p> : null}
           {field.name === "assignedUsers" ? (
             <AsyncSelect
               isMulti
+              inputId={field.name}
               name={field.name}
               cacheOptions
               defaultOptions
               loadOptions={loadAssignedUserOptions}
-              className={`js-states ${error ? "is-invalid" : ""}`}
+              className={`js-states ${error ? selectErrorClass : ""}`}
               classNamePrefix="Select2"
               value={multiValue}
               onChange={(opt) => handleChange(field.name)(Array.isArray(opt) ? opt : [])}
               isDisabled={disabled}
               menuPlacement="auto"
+              aria-invalid={error ? true : undefined}
+              aria-errormessage={error ? errorId : undefined}
               {...selectPortalTargetProps}
               classNames={pmFormSelectClassNames}
               styles={pmFormSelectStylesUnknown}
@@ -498,25 +527,29 @@ export function DynamicProjectForm({
           ) : (
             <Select
               isMulti
+              inputId={field.name}
               name={field.name}
               options={options}
-              className={`js-states ${error ? "is-invalid" : ""}`}
+              isLoading={field.name === "assignedTeams" && assignedTeamsLoading}
+              className={`js-states ${error ? selectErrorClass : ""}`}
               classNamePrefix="Select2"
               value={multiValue}
               onChange={(opt) => handleChange(field.name)(Array.isArray(opt) ? opt : [])}
               isDisabled={disabled}
               menuPlacement="auto"
+              aria-invalid={error ? true : undefined}
+              aria-errormessage={error ? errorId : undefined}
               {...selectPortalTargetProps}
               classNames={pmFormSelectClassNames}
               styles={pmFormSelectStylesUnknown}
             />
           )}
-          {error && <div className="invalid-feedback d-block">{error}</div>}
+          {error && <FieldError id={errorId}>{error}</FieldError>}
           {field.name === "assignedTeams" && onCreateTeamGroup && !disabled ? (
             <div className="mt-2 space-y-2">
               <button
                 type="button"
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[0.8125rem] font-medium transition-all duration-200 ease-out motion-reduce:transition-none ${
+                className={`inline-flex min-h-[2.75rem] items-center gap-1.5 rounded-md border px-3 py-2 text-[0.8125rem] font-medium transition-all duration-200 ease-out motion-reduce:transition-none ${
                   teamCreateOpen
                     ? "border-teal-500/40 bg-teal-500/5 text-teal-800 dark:text-teal-200"
                     : "border-defaultborder text-defaulttextcolor hover:border-teal-500/50 hover:bg-teal-500/[0.04] active:scale-[0.98] motion-reduce:active:scale-100"
@@ -575,7 +608,7 @@ export function DynamicProjectForm({
                       <div className="flex flex-wrap gap-2 pt-0.5">
                         <button
                           type="button"
-                          className="ti-btn ti-btn-primary !text-[0.8125rem] !py-1 !px-3 transition-transform duration-150 active:scale-[0.97] motion-reduce:active:scale-100"
+                          className="ti-btn ti-btn-primary !text-[0.8125rem] !min-h-[2.75rem] !py-2 !px-3 transition-transform duration-150 active:scale-[0.97] motion-reduce:active:scale-100"
                           disabled={teamCreateSubmitting || !newTeamName.trim()}
                           onClick={() => {
                             void (async () => {
@@ -627,7 +660,7 @@ export function DynamicProjectForm({
                         </button>
                         <button
                           type="button"
-                          className="ti-btn ti-btn-light !text-[0.8125rem] !py-1 !px-3 transition-transform duration-150 active:scale-[0.98] motion-reduce:active:scale-100"
+                          className="ti-btn ti-btn-light !text-[0.8125rem] !min-h-[2.75rem] !py-2 !px-3 transition-transform duration-150 active:scale-[0.98] motion-reduce:active:scale-100"
                           disabled={teamCreateSubmitting}
                           onClick={() => {
                             setTeamCreateOpen(false);
@@ -651,31 +684,27 @@ export function DynamicProjectForm({
     }
 
     if (field.type === "date") {
-      const dateVal = value instanceof Date ? value : value ? new Date(value as string) : null;
+      // Start/End are a range: each caps the other in the picker, so an inverted range cannot be
+      // entered in the first place — `validateProjectForm` stays as the backstop for typed input.
+      const isRangeEnd = field.name === "endDate";
+      const otherBound = toYmd(values[isRangeEnd ? "startDate" : "endDate"]);
       return (
         <div key={field.name} className={colClass}>
-          <label className="form-label">
-            {field.label}
-            {field.required && " *"}
-          </label>
-          {field.helpText ? (
-            <p className="text-[0.75rem] text-[#8c9097] dark:text-white/45 mb-1">{field.helpText}</p>
-          ) : null}
-          <div className="input-group">
-            <div className="input-group-text text-muted">
-              <i className="ri-calendar-line" />
-            </div>
-            <DatePicker
-              className="ti-form-input ltr:rounded-l-none rtl:rounded-r-none focus:z-10"
-              calendarClassName="pm-project-form-dp-cal"
-              selected={dateVal}
-              onChange={(d) => handleChange(field.name)(d ?? null)}
-              disabled={disabled}
-              portalId="pm-project-form-datepicker-portal"
-              popperClassName="!z-[10050]"
-            />
-          </div>
-          {error && <div className="invalid-feedback d-block">{error}</div>}
+          {field.helpText ? <p className={`${MUTED} mb-1 mt-0`}>{field.helpText}</p> : null}
+          <YmdFilterDateInput
+            label={`${field.label}${field.required ? " *" : ""}`}
+            inputId={field.name}
+            portalId={`pm-project-form-datepicker-portal-${field.name}`}
+            popperClassName="!z-[10050]"
+            value={toYmd(value)}
+            minDate={isRangeEnd ? otherBound || undefined : undefined}
+            maxDate={isRangeEnd ? undefined : otherBound || undefined}
+            rangeError={error ?? null}
+            labelClassName="form-label"
+            inputClassName={`form-control w-full ${error ? "!border-danger" : ""}`}
+            // Stored as a local Date so `buildPayload`'s toISOString keeps its existing meaning.
+            onCommit={(ymd) => handleChange(field.name)(ymd ? parseYmdLocal(ymd) : null)}
+          />
         </div>
       );
     }
@@ -696,12 +725,12 @@ export function DynamicProjectForm({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-[0.8125rem] font-semibold text-defaulttextcolor">{field.label}</span>
-                    <span className="rounded bg-slate-500/10 px-1.5 py-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-[#7987a1] dark:text-white/50">
+                    <span className="rounded bg-slate-500/10 px-1.5 py-0.5 text-[0.75rem] font-medium uppercase tracking-wide text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                       Rich text
                     </span>
                   </div>
                   {field.helpText ? (
-                    <p className="mb-0 mt-1 max-w-3xl text-[0.75rem] leading-relaxed text-[#8c9097] dark:text-white/45">
+                    <p className="mb-0 mt-1 max-w-3xl text-[0.75rem] leading-relaxed text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                       {field.helpText}
                     </p>
                   ) : null}
@@ -710,7 +739,7 @@ export function DynamicProjectForm({
                   {briefAiEnhanceEnabled ? (
                     <button
                       type="button"
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-indigo-500/35 bg-indigo-500/[0.08] px-3 py-1.5 text-[0.78rem] font-semibold text-indigo-900 shadow-sm transition-all duration-200 hover:border-indigo-500/55 hover:bg-indigo-500/[0.12] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 disabled:pointer-events-none disabled:opacity-60 dark:text-indigo-100 dark:hover:bg-indigo-500/20"
+                      className="inline-flex items-center justify-center gap-1.5 min-h-[2.75rem] rounded-lg border border-indigo-500/35 bg-indigo-500/[0.08] px-3 py-2 text-[0.8125rem] font-semibold text-indigo-900 shadow-sm transition-all duration-200 hover:border-indigo-500/55 hover:bg-indigo-500/[0.12] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 disabled:pointer-events-none disabled:opacity-60 dark:text-indigo-100 dark:hover:bg-indigo-500/20"
                       disabled={disabled || briefEnhanceLoading}
                       aria-busy={briefEnhanceLoading}
                       onClick={() => void handleBriefEnhance()}
@@ -731,7 +760,7 @@ export function DynamicProjectForm({
                       )}
                     </button>
                   ) : null}
-                  <p className="m-0 hidden text-end text-[0.6875rem] leading-snug text-[#949eb7] sm:block sm:max-w-[14rem] dark:text-white/40">
+                  <p className="m-0 hidden text-end text-[0.75rem] leading-snug text-defaulttextcolor/70 sm:block sm:max-w-[14rem] dark:text-defaulttextcolor/55">
                     Toolbar formats copy; optional guided fields sit below when enabled.
                   </p>
                 </div>
@@ -747,10 +776,10 @@ export function DynamicProjectForm({
                   editable={!disabled}
                 />
               </div>
-              <p className="mt-2 mb-0 text-[0.6875rem] leading-snug text-[#949eb7] sm:hidden dark:text-white/40">
+              <p className="mt-2 mb-0 text-[0.75rem] leading-snug text-defaulttextcolor/70 sm:hidden dark:text-defaulttextcolor/55">
                 Use the toolbar for structure; guided prompts appear below when turned on above.
               </p>
-              {error && <div className="invalid-feedback d-block mt-2">{error}</div>}
+              {error && <FieldError id={errorId}>{error}</FieldError>}
             </fieldset>
           </div>
         );
@@ -762,10 +791,9 @@ export function DynamicProjectForm({
             {field.label}
             {field.required && " *"}
           </label>
-          {field.helpText ? (
-            <p className="text-[0.75rem] text-[#8c9097] dark:text-white/45 mb-1">{field.helpText}</p>
-          ) : null}
-          <div id="project-description-editor">
+          {field.helpText ? <p className={`${MUTED} mb-1`}>{field.helpText}</p> : null}
+          {/* A contenteditable is not a labelable control, so the label is exposed via the group. */}
+          <div id="project-description-editor" role="group" aria-label={field.label}>
             <TiptapEditor
               content={html}
               placeholder={field.placeholder}
@@ -773,7 +801,7 @@ export function DynamicProjectForm({
               editable={!disabled}
             />
           </div>
-          {error && <div className="invalid-feedback d-block">{error}</div>}
+          {error && <FieldError id={errorId}>{error}</FieldError>}
         </div>
       );
     }
@@ -798,8 +826,12 @@ export function DynamicProjectForm({
       };
       return (
         <div key={field.name} className={colClass}>
-          <label className="form-label">{field.label}</label>
+          <label htmlFor={field.name} className="form-label">
+            {field.label}
+          </label>
+          <p className={`${MUTED} mb-1`}>Press Enter after each tag.</p>
           <CreatableSelect
+            inputId={field.name}
             components={components}
             classNamePrefix="Select2"
             isClearable
@@ -810,10 +842,10 @@ export function DynamicProjectForm({
             inputValue={tagInputValue}
             onInputChange={(v) => setTagInputValue(v ?? "")}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && tagInputValue.trim()) {
-                e.preventDefault();
-                addTag(tagInputValue);
-              }
+              // Always swallow Enter: inside a <form> a bare Enter here would submit the project.
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              if (tagInputValue.trim()) addTag(tagInputValue);
             }}
             onChange={(newVal) =>
               handleChange(field.name)(Array.isArray(newVal) ? newVal : [])
@@ -824,25 +856,7 @@ export function DynamicProjectForm({
             classNames={pmFormSelectClassNames}
             styles={pmFormSelectStyles}
           />
-          {error && <div className="invalid-feedback d-block">{error}</div>}
-        </div>
-      );
-    }
-
-    if (field.type === "file") {
-      return (
-        <div key={field.name} className={colClass}>
-          <label className="form-label">{field.label}</label>
-          <FilePond
-            files={attachmentFiles as never[]}
-            onupdatefiles={(files) => onAttachmentFilesChange?.(files)}
-            allowMultiple
-            maxFiles={field.maxItems ?? 3}
-            server="/api"
-            name="files"
-            labelIdle="Drag & Drop your file here or click"
-            disabled={disabled}
-          />
+          {error && <FieldError id={errorId}>{error}</FieldError>}
         </div>
       );
     }
@@ -865,7 +879,7 @@ export function DynamicProjectForm({
   const rosterFields = visibleFields.filter((f) =>
     ["assignedTeams", "assignedUsers"].includes(f.name)
   );
-  const metaFields = visibleFields.filter((f) => f.name === "tags" || f.type === "file");
+  const metaFields = visibleFields.filter((f) => f.name === "tags");
   const sectioned = new Set(
     [
       ...overviewFields,
@@ -901,7 +915,7 @@ export function DynamicProjectForm({
         >
           <button
             type="button"
-            className="ti-btn ti-btn-outline-secondary !text-[0.8125rem] !py-2 !px-3 !mb-0 transition-transform duration-200 ease-out hover:-translate-y-px motion-reduce:transform-none active:scale-[0.98] motion-reduce:active:scale-100"
+            className="ti-btn ti-btn-outline-secondary !text-[0.8125rem] !min-h-[2.75rem] !py-2 !px-3 !mb-0 transition-transform duration-200 ease-out hover:-translate-y-px motion-reduce:transform-none active:scale-[0.98] motion-reduce:active:scale-100"
             onClick={() => setShowIntake((s) => !s)}
             disabled={disabled}
             aria-expanded={showIntake}
@@ -918,7 +932,7 @@ export function DynamicProjectForm({
               </>
             )}
           </button>
-          <p className="mb-0 mt-2 max-w-3xl text-[0.75rem] leading-relaxed text-[#8c9097] dark:text-white/45">
+          <p className="mb-0 mt-2 max-w-3xl text-[0.75rem] leading-relaxed text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
             Optional prompts strengthen descriptions for PM assistant and handover.
           </p>
         </div>
@@ -947,7 +961,7 @@ export function DynamicProjectForm({
               </span>
               <div>
                 <h3 className="m-0 text-[0.8125rem] font-semibold text-defaulttextcolor">Guided prompts</h3>
-                <p className="m-0 text-[0.72rem] leading-snug text-[#8c9097] dark:text-white/45">
+                <p className="m-0 text-[0.75rem] leading-snug text-defaulttextcolor/70 dark:text-defaulttextcolor/55">
                   Structured answers — appended under a delimiter in the saved brief.
                 </p>
               </div>
@@ -974,8 +988,8 @@ export function DynamicProjectForm({
       </ProjectFormSection>
 
       <ProjectFormSection
-        title="Labels & files"
-        hint="Tags for filtering in the project list and project attachments."
+        title="Labels"
+        hint="Tags for filtering in the project list."
         animationDelayMs={320}
       >
         {metaFields.map((field) => renderField(field))}
