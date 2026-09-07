@@ -8,6 +8,7 @@ export interface LeaveRequestStudent {
   _id: string;
   user?: { name?: string; email?: string };
   fullName?: string;
+  employeeId?: string | null;
 }
 
 export interface LeaveRequest {

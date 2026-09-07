@@ -38,11 +38,25 @@ function getStudentName(request: LeaveRequest, studentsList: Student[] = []): st
   return "Unknown";
 }
 
-function getStudentEmail(request: LeaveRequest): string {
+function getEmployeeId(request: LeaveRequest, studentsList: Student[] = []): string {
   const s = request.student;
-  if (!s) return request.studentEmail ?? "";
-  if (typeof s === "object" && s.user?.email) return s.user.email;
-  return request.studentEmail ?? "";
+  if (typeof s === "object" && s?.employeeId?.trim()) return s.employeeId.trim();
+  const studentId = typeof s === "object" && s != null
+    ? (s as { _id?: string; id?: string })._id ?? (s as { _id?: string; id?: string }).id
+    : typeof s === "string"
+      ? s
+      : "";
+  if (studentId && studentsList.length > 0) {
+    const student = studentsList.find(
+      (st) => String((st as { id?: string }).id ?? (st as { _id?: string })._id) === String(studentId)
+    );
+    if (student?.employeeId?.trim()) return student.employeeId.trim();
+  }
+  return "";
+}
+
+function employeeOptionSecondary(student: Student): string {
+  return student.employeeId?.trim() ?? "";
 }
 
 const DATE_VALUE_CLASS = "text-sm text-defaulttextcolor dark:text-white break-words leading-relaxed";
@@ -141,7 +155,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
     return sortedStudents.filter(
       (s) =>
         (s.user?.name ?? "").toLowerCase().includes(q) ||
-        (s.user?.email ?? "").toLowerCase().includes(q)
+        (s.employeeId ?? "").toLowerCase().includes(q)
     );
   }, [sortedStudents, filterStudentSearch]);
 
@@ -179,7 +193,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
       title: "Approve Leave Request",
       html: `
         <div class="text-left mb-4">
-          <p><strong>Student:</strong> ${getStudentName(request, students)}</p>
+          <p><strong>Employee:</strong> ${getStudentName(request, students)}</p>
           <p><strong>Leave Type:</strong> ${request.leaveType === "casual" ? "Casual Leave" : request.leaveType === "sick" ? "Sick Leave" : "Unpaid Leave"}</p>
           <p><strong>Dates:</strong> ${formatLeaveDates(request.dates)}</p>
           <p><strong>Total Days:</strong> ${leaveDayCount(request.dates)}</p>
@@ -199,7 +213,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
       await Swal.fire({
         icon: "success",
         title: "Approved",
-        html: "<p>Leave request approved. Leave has been assigned to the student's attendance calendar.</p>",
+        html: "<p>Leave request approved. Leave has been assigned to the employee's attendance calendar.</p>",
         confirmButtonText: "OK",
       });
       await fetchLeaveRequests();
@@ -227,7 +241,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
       title: "Reject Leave Request",
       html: `
         <div class="text-left mb-4">
-          <p><strong>Student:</strong> ${getStudentName(request, students)}</p>
+          <p><strong>Employee:</strong> ${getStudentName(request, students)}</p>
           <p><strong>Leave Type:</strong> ${request.leaveType === "casual" ? "Casual Leave" : request.leaveType === "sick" ? "Sick Leave" : "Unpaid Leave"}</p>
           <p><strong>Dates:</strong> ${formatLeaveDates(request.dates)}</p>
         </div>
@@ -376,7 +390,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
               </span>
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-defaulttextcolor dark:text-white tracking-tight">Leave Requests</h2>
-                <p className="text-xs text-defaulttextcolor/60 dark:text-white/50 mt-0.5">Review and approve student leave requests</p>
+                <p className="text-xs text-defaulttextcolor/60 dark:text-white/50 mt-0.5">Review and approve employee leave requests</p>
               </div>
               {pagination.totalResults > 0 && (
                 <span className="inline-flex h-7 min-w-[1.75rem] items-center justify-center rounded-full bg-primary/15 px-2.5 text-xs font-semibold text-primary ring-1 ring-primary/20">
@@ -425,10 +439,11 @@ export default function SettingsAttendanceLeaveRequestsPage() {
                   className="flex w-full items-center justify-between gap-2 rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-4 py-2.5 text-sm text-defaulttextcolor transition-all duration-150 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 hover:border-defaulttextcolor/50"
                   aria-expanded={filterStudentOpen}
                   aria-haspopup="listbox"
+                  aria-label="Filter by employee"
                 >
                   <span className="truncate">
                     {filterStudent === "all"
-                      ? "All Students"
+                      ? "All Employees"
                       : (() => {
                           const s = students.find((x) => x.id === filterStudent);
                           return s?.user?.name ?? "Unknown";
@@ -442,10 +457,11 @@ export default function SettingsAttendanceLeaveRequestsPage() {
                       <div className="relative">
                         <i className="ri-search-line absolute left-3.5 top-1/2 -translate-y-1/2 text-base text-defaulttextcolor/40 pointer-events-none" aria-hidden />
                         <input
-                          type="text"
+                          type="search"
                           value={filterStudentSearch}
                           onChange={(e) => setFilterStudentSearch(e.target.value)}
-                          placeholder="Search student…"
+                          placeholder="Search employee…"
+                          aria-label="Search employee"
                           className="w-full rounded-lg border border-defaultborder/80 bg-white dark:bg-white/5 pl-10 pr-9 py-2.5 text-sm text-defaulttextcolor placeholder:text-defaulttextcolor/45 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all duration-150"
                           autoFocus
                         />
@@ -473,12 +489,14 @@ export default function SettingsAttendanceLeaveRequestsPage() {
                         }}
                         className={`cursor-pointer px-4 py-2.5 text-sm transition-colors duration-150 hover:bg-primary/10 ${filterStudent === "all" ? "bg-primary/10 text-primary font-medium" : "text-defaulttextcolor"}`}
                       >
-                        All Students
+                        All Employees
                       </li>
                       {filteredStudentsForFilter.length === 0 ? (
-                        <li className="px-4 py-4 text-sm text-defaulttextcolor/60 text-center">No students match</li>
+                        <li className="px-4 py-4 text-sm text-defaulttextcolor/60 text-center">No employees match</li>
                       ) : (
-                        filteredStudentsForFilter.map((s) => (
+                        filteredStudentsForFilter.map((s) => {
+                          const empId = employeeOptionSecondary(s);
+                          return (
                           <li
                             key={s.id}
                             role="option"
@@ -492,9 +510,10 @@ export default function SettingsAttendanceLeaveRequestsPage() {
                             className={`cursor-pointer px-4 py-2.5 text-sm transition-colors duration-150 hover:bg-primary/10 break-words min-w-0 ${filterStudent === s.id ? "bg-primary/10 text-primary font-medium" : "text-defaulttextcolor"}`}
                           >
                             <span className="font-medium">{s.user?.name ?? "Unknown"}</span>
-                            {s.user?.email && <span className="text-defaulttextcolor/60 ml-1 break-all">({s.user.email})</span>}
+                            {empId ? <span className="text-defaulttextcolor/60 ml-1 tabular-nums">({empId})</span> : null}
                           </li>
-                        ))
+                          );
+                        })
                       )}
                     </ul>
                   </div>
@@ -520,7 +539,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
                 <p className="mt-1 max-w-sm text-sm text-defaulttextcolor/60">
                   {(filterStatus !== "all" || filterLeaveType !== "all" || filterStudent !== "all")
                     ? "Try changing filters to see more results."
-                    : "Leave requests will appear here when students submit them."}
+                    : "Leave requests will appear here when employees submit them."}
                 </p>
                 {(filterStatus !== "all" || filterLeaveType !== "all" || filterStudent !== "all") && (
                   <button
@@ -580,7 +599,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
                                 <p className="text-sm font-semibold text-defaulttextcolor tracking-tight">
                                   {getStudentName(request, students)}
                                 </p>
-                                <p className="text-xs text-defaulttextcolor/60 mt-0.5">{getStudentEmail(request) || "Student"}</p>
+                                <p className="text-xs text-defaulttextcolor/60 mt-0.5 tabular-nums">{getEmployeeId(request, students) || "Employee"}</p>
                               </div>
 
                               <div className="rounded-lg bg-defaultborder/10 dark:bg-white/5 border border-defaultborder/50 overflow-hidden">
@@ -742,7 +761,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
                   </li>
                   <li className="flex items-start gap-2.5">
                     <i className="ri-check-double-line mt-0.5 text-emerald-600 dark:text-emerald-400 shrink-0 text-base" />
-                    <span><strong className="text-defaulttextcolor">Approve:</strong> Leave is assigned to the student&apos;s attendance calendar.</span>
+                    <span><strong className="text-defaulttextcolor">Approve:</strong> Leave is assigned to the employee&apos;s attendance calendar.</span>
                   </li>
                   <li className="flex items-start gap-2.5">
                     <i className="ri-close-circle-fill mt-0.5 text-rose-500/90 shrink-0 text-base" />
@@ -750,7 +769,7 @@ export default function SettingsAttendanceLeaveRequestsPage() {
                   </li>
                   <li className="flex items-start gap-2.5">
                     <i className="ri-filter-3-line mt-0.5 text-primary shrink-0 text-base" />
-                    <span>Use filters to find requests by status, leave type, or student.</span>
+                    <span>Use filters to find requests by status, leave type, or employee.</span>
                   </li>
                 </ul>
               </div>
