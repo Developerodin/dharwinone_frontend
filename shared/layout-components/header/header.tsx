@@ -577,7 +577,7 @@ const Header = ({ local_varaiable, ThemeChanger }: any) => {
                 <div
                   role="menu"
                   onClick={(event) => event.stopPropagation()}
-                  className={`main-header-dropdown !p-0 ti-dropdown-menu bg-white border-0 border-defaultborder !m-0 flex max-h-[min(32rem,85vh)] flex-col overflow-hidden dark:bg-bgdark absolute top-full mt-2 end-0 z-[60] !w-[min(22rem,calc(100vw-2rem))] shadow-lg ${
+                  className={`main-header-dropdown !p-0 ti-dropdown-menu bg-white border border-defaultborder !m-0 flex max-h-[min(32rem,85vh)] flex-col overflow-hidden dark:bg-bodybg dark:border-white/10 absolute top-full mt-2 end-0 z-[60] !w-[min(22rem,calc(100vw-2rem))] shadow-lg ${
                     isNotificationMenuOpen
                       ? 'block !opacity-100 visible pointer-events-auto'
                       : 'hidden !opacity-0 invisible pointer-events-none'
@@ -592,12 +592,12 @@ const Header = ({ local_varaiable, ThemeChanger }: any) => {
                         <button
                           type="button"
                           onClick={handleMarkAllAsRead}
-                          className="text-[0.7rem] text-secondary hover:underline focus:outline-none"
+                          className="text-[0.7rem] text-secondary dark:text-primary hover:underline dark:hover:text-primary/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm"
                         >
                           Mark all read
                         </button>
                       )}
-                      <span className="text-[0.75em] py-[0.25rem/2] px-[0.45rem] font-[600] rounded-sm bg-danger/10 text-danger"
+                      <span className="text-[0.75em] py-[0.25rem/2] px-[0.45rem] font-[600] rounded-sm bg-danger/10 text-danger dark:bg-danger/20 dark:text-danger/90"
                         id="notifiation-data">{`${formatCountLocale(unreadCount)} Unread`}</span>
                     </div>
                   </div>
@@ -614,7 +614,7 @@ const Header = ({ local_varaiable, ThemeChanger }: any) => {
                     const grouped = groupByDate(notifications);
                     return Object.entries(grouped).map(([label, items]) => (
                       <Fragment key={label}>
-                        <li className="px-4 py-1.5 text-[0.65rem] font-semibold uppercase tracking-wider text-[#8c9097] bg-gray-50 dark:bg-bgdark/60 sticky top-0 list-none">
+                        <li className="px-4 py-1.5 text-[0.65rem] font-semibold uppercase tracking-wider text-[#8c9097] dark:text-white/60 bg-gray-50 dark:bg-white/5 sticky top-0 list-none backdrop-blur-sm">
                           {label}
                         </li>
                         {items.map((n) => {
@@ -622,7 +622,7 @@ const Header = ({ local_varaiable, ThemeChanger }: any) => {
                           const color = notifTypeToColor[n.type] || 'secondary';
                           return (
                           <li
-                            className={`ti-dropdown-item dropdown-item transition-all duration-150 cursor-pointer hover:bg-primary/5 active:scale-[0.99] focus-within:bg-primary/5 ${n.read ? 'bg-white dark:bg-bgdark' : 'bg-secondary/5 dark:bg-secondary/10 border-s-2 border-secondary'}`}
+                            className={`ti-dropdown-item dropdown-item transition-all duration-150 cursor-pointer hover:bg-primary/5 dark:hover:bg-white/5 active:scale-[0.99] focus-within:bg-primary/5 dark:focus-within:bg-white/5 ${n.read ? 'bg-white dark:bg-transparent' : 'bg-primary/[0.04] dark:bg-primary/[0.08] border-s-2 border-primary/40 dark:border-primary/60'}`}
                             key={n._id}
                             onClick={() => handleNotificationClick(n)}
                             role="button"
@@ -636,14 +636,14 @@ const Header = ({ local_varaiable, ThemeChanger }: any) => {
                                   <i className={`ti ti-${icon} text-[1.125rem]`}></i>
                                 </span>
                               </div>
-                              <div className="grow flex items-center justify-between min-w-0">
-                                <div className="min-w-0">
-                                  <p className={`mb-0 text-defaulttextcolor dark:text-white text-[0.8125rem] truncate ${n.read ? 'font-medium' : 'font-semibold'}`}>
+                              <div className="grow flex items-start justify-between gap-2 min-w-0">
+                                <div className="min-w-0 flex-1">
+                                  <p className={`mb-1 text-defaulttextcolor dark:text-defaulttextcolor text-[0.8125rem] truncate ${n.read ? 'font-medium' : 'font-semibold'}`}>
                                     {n.title}
                                   </p>
-                                  <span className="text-[#8c9097] dark:text-white/50 font-normal text-[0.75rem] header-notification-text whitespace-pre-line line-clamp-2">{n.message}</span>
+                                  <span className="text-[#8c9097] dark:text-white/60 font-normal text-[0.75rem] header-notification-text block min-w-0 whitespace-pre-line line-clamp-2">{n.message}</span>
                                   {n.createdAt && (
-                                    <span className="text-[0.65rem] text-[#8c9097]/70 dark:text-white/30 mt-0.5 block">
+                                    <span className="text-[0.65rem] text-[#8c9097]/70 dark:text-white/60 mt-1 block">
                                       {formatRelativeTime(n.createdAt)}
                                     </span>
                                   )}
@@ -651,7 +651,7 @@ const Header = ({ local_varaiable, ThemeChanger }: any) => {
                                 <button
                                   type="button"
                                   aria-label="Mark as read"
-                                  className="min-w-fit text-[#8c9097] dark:text-white/50 me-1 hover:text-defaulttextcolor dark:hover:text-white p-1 rounded transition-colors"
+                                  className="shrink-0 inline-flex items-center justify-center min-h-[2.75rem] min-w-[2.75rem] text-[#8c9097] dark:text-white/60 hover:text-defaulttextcolor dark:hover:text-white rounded transition-colors touch-manipulation"
                                   onClick={(event) => handleNotificationClose(n, event)}
                                 >
                                   <i className="ti ti-x text-[1rem]"></i>
@@ -666,9 +666,9 @@ const Header = ({ local_varaiable, ThemeChanger }: any) => {
                   })()}
                   </ul>
 
-                  <div className={`empty-header-item1 mt-2 shrink-0 border-t p-4 ${notifications.length > 0 ? 'block' : 'hidden'}`}>
+                  <div className={`empty-header-item1 mt-2 shrink-0 border-t border-defaultborder dark:border-white/10 p-4 ${notifications.length > 0 ? 'block' : 'hidden'}`}>
                     <div className="grid">
-                      <Link href="/notifications" className="ti-btn ti-btn-primary-full !m-0 w-full p-2">View All</Link>
+                      <Link href="/notifications" className="ti-btn ti-btn-primary-full !m-0 w-full p-2 dark:!bg-primary dark:!text-white dark:hover:!bg-primary/90">View All</Link>
                     </div>
                   </div>
                   <div className={`empty-item1 shrink-0 p-[3rem] ${notifications.length === 0 ? 'block' : 'hidden'}`}>
@@ -676,7 +676,7 @@ const Header = ({ local_varaiable, ThemeChanger }: any) => {
                       <span className="!h-[4rem]  !w-[4rem] avatar !leading-[4rem] !rounded-full !bg-secondary/10 !text-secondary">
                         <i className="ri-notification-off-line text-[2rem]  "></i>
                       </span>
-                      <h6 className="font-semibold mt-3 text-defaulttextcolor dark:text-[#8c9097] dark:text-white/50 text-[1rem]">No New Notifications</h6>
+                      <h6 className="font-semibold mt-3 text-defaulttextcolor dark:text-white/60 text-[1rem]">No New Notifications</h6>
                     </div>
                   </div>
                 </div>

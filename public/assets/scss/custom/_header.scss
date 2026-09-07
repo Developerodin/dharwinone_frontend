@@ -399,7 +399,7 @@
 
 /* Start::header notification dropdown */
 .header-notification-text {
-  @apply max-w-[14.5rem];
+  @apply block min-w-0;
 }
 
 /* Start::header notification dropdown */
