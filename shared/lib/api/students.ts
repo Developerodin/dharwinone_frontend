@@ -102,6 +102,8 @@ export interface Student {
   shortBio?: string | null;
   profileImageUrl?: string | null;
   status: string;
+  /** HR employee ID (e.g. DBS123), overlaid from the linked Employee record. */
+  employeeId?: string | null;
   /** First day attendance applies (aligned with candidate joining; used in attendance UI). */
   joiningDate?: string | null;
   weekOff?: string[];
