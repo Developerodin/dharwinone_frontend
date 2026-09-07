@@ -3,7 +3,6 @@
 import Seo from "@/shared/layout-components/seo/seo";
 import React, { Fragment, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { usePmRefetchOnFocus } from "@/shared/hooks/usePmRefetchOnFocus";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   listProjects,
@@ -24,7 +23,7 @@ import { listTeamGroups } from "@/shared/lib/api/projectTeams";
 import * as XLSX from "xlsx";
 import { addSheet, downloadWorkbook, fmtExportDate, fmtExportDateTime } from "@/shared/lib/xlsx-export";
 
-const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
+const CALLOUT_SLICE_THRESHOLD = 5;
 
 const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   Inprogress: "In progress",
@@ -53,6 +52,9 @@ const PM_TABLE_CONTENT_CLASS = "px-4 pb-4 pt-3";
 const PM_TABLE_SURFACE_CLASS =
   "overflow-hidden rounded-lg border border-defaultborder/70 bg-white dark:border-white/10 dark:bg-bodybg";
 const PM_CARD_LINK_BTN = "ti-btn ti-btn-outline-secondary !mb-0 whitespace-nowrap !px-3 !py-1.5";
+const PM_CARD_LINK_BTN_LG =
+  "ti-btn ti-btn-outline-secondary !mb-0 inline-flex min-h-[2.75rem] items-center whitespace-nowrap !px-4 !py-2 text-[0.8125rem] font-semibold";
+const PROJECTS_OVERVIEW_DISPLAY_LIMIT = 10;
 
 const TASK_CHART_LABELS: Record<TaskStatus, string> = {
   new: "New",
@@ -88,106 +90,244 @@ function chartMutedLabelColor(): string {
   return raw ? `rgb(${raw.replace(/\s+/g, ", ")})` : CHART_MUTED_FALLBACK;
 }
 
-function buildDonutChartOptions({
-  labels,
-  colors,
-  centerTotal,
-  centerLabel,
-  tooltipItemLabel,
-}: {
-  labels: string[];
-  colors: string[];
-  centerTotal: number;
-  centerLabel: string;
-  tooltipItemLabel: string;
-}) {
-  const mutedLabel = chartMutedLabelColor();
+function formatSlicePercent(val: number): string {
+  if (val <= 0) return "";
+  return val < 1 ? "<1%" : `${Math.round(val)}%`;
+}
+
+function chartTextColor(isDark: boolean): string {
+  return isDark ? "rgb(226, 232, 240)" : "rgb(30, 41, 59)";
+}
+
+function polarToCartesian(cx: number, cy: number, radius: number, angleDeg: number) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
   return {
-    chart: {
-      type: "donut" as const,
-      fontFamily: "inherit",
-      toolbar: { show: false },
-      animations: { enabled: true, speed: 280, animateGradually: { enabled: true, delay: 80 } },
-    },
-    labels,
-    colors,
-    legend: {
-      position: "bottom" as const,
-      horizontalAlign: "center" as const,
-      fontSize: "12px",
-      fontWeight: 500,
-      markers: { size: 6, strokeWidth: 0, offsetX: -2 },
-      itemMargin: { horizontal: 10, vertical: 6 },
-    },
-    dataLabels: {
-      enabled: true,
-      formatter: (val: number) => (val > 0 ? (val < 1 ? "<1%" : `${Math.round(val)}%`) : ""),
-      hideOverflowingLabels: false,
-      dropShadow: { enabled: false },
-      style: { fontSize: "11px", fontWeight: 600 },
-    },
-    stroke: { width: 3, colors: ["var(--custom-white)"] },
-    plotOptions: {
-      pie: {
-        dataLabels: {
-          hideOverflowingLabels: false,
-        },
-        donut: {
-          size: "68%",
-          labels: {
-            show: true,
-            name: {
-              show: true,
-              fontSize: "11px",
-              fontWeight: 500,
-              offsetY: -6,
-              color: mutedLabel,
-            },
-            value: {
-              show: true,
-              fontSize: "22px",
-              fontWeight: 700,
-              offsetY: 4,
-              formatter: (val: string) => val,
-            },
-            total: {
-              show: true,
-              showAlways: true,
-              label: centerLabel,
-              fontSize: "11px",
-              fontWeight: 500,
-              color: mutedLabel,
-              formatter: () => String(centerTotal),
-            },
-          },
-        },
-      },
-    },
-    tooltip: {
-      y: {
-        formatter: (val: number) => `${val} ${tooltipItemLabel}${val === 1 ? "" : "s"}`,
-      },
-    },
-    states: {
-      hover: { filter: { type: "lighten" as const, value: 0.06 } },
-      active: { filter: { type: "none" as const } },
-    },
-    responsive: [
-      {
-        breakpoint: 480,
-        options: {
-          chart: { height: 260 },
-          legend: { fontSize: "11px", itemMargin: { horizontal: 6, vertical: 4 } },
-        },
-      },
-    ],
+    x: cx + radius * Math.cos(rad),
+    y: cy + radius * Math.sin(rad),
   };
 }
 
-function getProjectOverviewStatusBadgeClass(status: ProjectStatus): string {
-  if (status === "completed") return "bg-success/10 text-success";
-  if (status === "On hold") return "bg-warning/10 text-warning";
-  return "bg-primary/10 text-primary";
+function describeDonutSlice(
+  cx: number,
+  cy: number,
+  outerR: number,
+  innerR: number,
+  startAngle: number,
+  endAngle: number
+) {
+  const sweep = endAngle - startAngle;
+  // A single 360° arc has identical start/end points — SVG renders nothing.
+  // Use two concentric circle subpaths with even-odd fill instead of two 180°
+  // slice halves, which leave visible stroke seams at the join angles.
+  if (sweep >= 359.99) {
+    return [
+      `M ${cx + outerR} ${cy}`,
+      `A ${outerR} ${outerR} 0 1 1 ${cx - outerR} ${cy}`,
+      `A ${outerR} ${outerR} 0 1 1 ${cx + outerR} ${cy}`,
+      `M ${cx + innerR} ${cy}`,
+      `A ${innerR} ${innerR} 0 1 0 ${cx - innerR} ${cy}`,
+      `A ${innerR} ${innerR} 0 1 0 ${cx + innerR} ${cy}`,
+    ].join(" ");
+  }
+
+  const startOuter = polarToCartesian(cx, cy, outerR, endAngle);
+  const endOuter = polarToCartesian(cx, cy, outerR, startAngle);
+  const startInner = polarToCartesian(cx, cy, innerR, startAngle);
+  const endInner = polarToCartesian(cx, cy, innerR, endAngle);
+  const largeArc = sweep <= 180 ? 0 : 1;
+
+  return [
+    `M ${startOuter.x} ${startOuter.y}`,
+    `A ${outerR} ${outerR} 0 ${largeArc} 0 ${endOuter.x} ${endOuter.y}`,
+    `L ${startInner.x} ${startInner.y}`,
+    `A ${innerR} ${innerR} 0 ${largeArc} 1 ${endInner.x} ${endInner.y}`,
+    "Z",
+  ].join(" ");
+}
+
+type DonutSlice = {
+  label: string;
+  count: number;
+  pct: number;
+  color: string;
+  startAngle: number;
+  endAngle: number;
+  midAngle: number;
+};
+
+function buildDonutSlices(
+  labels: string[],
+  series: number[],
+  colors: string[],
+  total: number
+): DonutSlice[] {
+  if (total <= 0) return [];
+  let cursor = 0;
+  const slices: DonutSlice[] = [];
+  labels.forEach((label, index) => {
+    const count = series[index] ?? 0;
+    if (count <= 0) return;
+    const pct = (count / total) * 100;
+    const sweep = (count / total) * 360;
+    const startAngle = cursor;
+    const endAngle = cursor + sweep;
+    cursor = endAngle;
+    slices.push({
+      label,
+      count,
+      pct,
+      color: colors[index] ?? CHART_COLORS[index % CHART_COLORS.length],
+      startAngle,
+      endAngle,
+      midAngle: startAngle + sweep / 2,
+    });
+  });
+  return slices;
+}
+
+function formatDonutTooltip(count: number, pct: number, tooltipItemLabel: string): string {
+  const countLabel = `${count} ${tooltipItemLabel}${count === 1 ? "" : "s"}`;
+  const pctLabel = formatSlicePercent(pct);
+  return pctLabel ? `${countLabel} (${pctLabel})` : countLabel;
+}
+
+type CalloutLayout = {
+  slice: DonutSlice;
+  anchor: { x: number; y: number };
+  elbow: { x: number; y: number };
+  labelX: number;
+  labelY: number;
+  labelAnchor: "start" | "end";
+};
+
+const CALLOUT_LEADER_R = 28;
+const CALLOUT_LABEL_OFFSET = 20;
+const CALLOUT_MIN_GAP = 20;
+
+function resolveCalloutSide(items: CalloutLayout[], minY: number, maxY: number) {
+  if (items.length < 2) return;
+  items.sort((a, b) => a.labelY - b.labelY);
+  for (let i = 1; i < items.length; i++) {
+    const prev = items[i - 1];
+    const curr = items[i];
+    if (curr.labelY - prev.labelY < CALLOUT_MIN_GAP) {
+      curr.labelY = prev.labelY + CALLOUT_MIN_GAP;
+    }
+  }
+  const overflow = items[items.length - 1].labelY - maxY;
+  if (overflow > 0) {
+    for (const item of items) item.labelY -= overflow;
+  }
+  const underflow = minY - items[0].labelY;
+  if (underflow > 0) {
+    for (const item of items) item.labelY += underflow;
+  }
+}
+
+function defaultCalloutIsRight(midAngle: number): boolean {
+  return Math.cos(((midAngle - 90) * Math.PI) / 180) >= 0;
+}
+
+function areAdjacentDonutSlices(a: DonutSlice, b: DonutSlice): boolean {
+  const gap = b.startAngle - a.endAngle;
+  return Math.abs(gap) < 0.5 || Math.abs(gap + 360) < 0.5 || Math.abs(gap - 360) < 0.5;
+}
+
+/** When donut-adjacent small slices share a side, flip the thinner one to the opposite side. */
+function resolveAdjacentCalloutSides(slices: DonutSlice[]): Map<DonutSlice, boolean> {
+  const sorted = [...slices].sort((a, b) => a.startAngle - b.startAngle);
+  const sides = sorted.map((slice) => defaultCalloutIsRight(slice.midAngle));
+
+  const resolvePair = (i: number, j: number) => {
+    if (sides[i] !== sides[j]) return;
+    if (sorted[j].pct < sorted[i].pct) {
+      sides[j] = !sides[j];
+    } else if (sorted[i].pct < sorted[j].pct) {
+      sides[i] = !sides[i];
+    } else {
+      sides[j] = !sides[j];
+    }
+  };
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (areAdjacentDonutSlices(sorted[i - 1], sorted[i])) {
+      resolvePair(i - 1, i);
+    }
+  }
+
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  if (sorted.length > 1 && areAdjacentDonutSlices(last, first)) {
+    resolvePair(sorted.length - 1, 0);
+  }
+
+  return new Map(sorted.map((slice, index) => [slice, sides[index]]));
+}
+
+function buildCalloutLayouts(
+  smallSlices: DonutSlice[],
+  cx: number,
+  cy: number,
+  outerR: number
+): CalloutLayout[] {
+  const sideBySlice = resolveAdjacentCalloutSides(smallSlices);
+
+  const layouts: CalloutLayout[] = smallSlices.map((slice) => {
+    const anchor = polarToCartesian(cx, cy, outerR + 2, slice.midAngle);
+    const elbow = polarToCartesian(cx, cy, outerR + CALLOUT_LEADER_R, slice.midAngle);
+    const isRight = sideBySlice.get(slice) ?? defaultCalloutIsRight(slice.midAngle);
+    const labelX = isRight ? elbow.x + CALLOUT_LABEL_OFFSET : elbow.x - CALLOUT_LABEL_OFFSET;
+    return {
+      slice,
+      anchor,
+      elbow,
+      labelX,
+      labelY: elbow.y,
+      labelAnchor: isRight ? "start" : "end",
+    };
+  });
+
+  const minY = cy - outerR - 36;
+  const maxY = cy + outerR + 36;
+  resolveCalloutSide(layouts.filter((l) => l.labelAnchor === "start"), minY, maxY);
+  resolveCalloutSide(layouts.filter((l) => l.labelAnchor === "end"), minY, maxY);
+
+  return layouts;
+}
+
+function DonutChartLegend({
+  labels,
+  series,
+  colors,
+  total,
+}: {
+  labels: string[];
+  series: number[];
+  colors: string[];
+  total: number;
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 px-1">
+      {labels.map((label, index) => {
+        const count = series[index] ?? 0;
+        const pct = total > 0 ? (count / total) * 100 : 0;
+        const pctLabel = formatSlicePercent(pct);
+        return (
+          <span
+            key={label}
+            className="inline-flex items-center gap-1.5 text-[12px] font-medium text-defaulttextcolor/80 dark:text-white/75"
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: colors[index] ?? CHART_COLORS[index % CHART_COLORS.length] }}
+              aria-hidden="true"
+            />
+            {pctLabel ? `${label} · ${pctLabel}` : label}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function getAtRiskStatusBadgeClass(status: ProjectStatus): string {
@@ -196,12 +336,30 @@ function getAtRiskStatusBadgeClass(status: ProjectStatus): string {
   return "border-danger/20 bg-danger/10 text-danger";
 }
 
-function getPriorityBadgeClass(priority: Project["priority"]): string {
+function getOverviewStatusPillClass(status: ProjectStatus): string {
+  if (status === "completed") return "border-success/20 bg-success/10 text-success";
+  if (status === "On hold") return "border-warning/20 bg-warning/10 text-warning";
+  return "border-primary/20 bg-primary/10 text-primary";
+}
+
+function getOverviewPriorityPillClass(priority: Project["priority"]): string {
   const pri = normalizeProjectPriority(priority);
-  if (pri === "urgent") return "bg-danger/10 text-danger";
-  if (pri === "high") return "bg-orange-500/10 text-orange-600";
-  if (pri === "medium") return "bg-info/10 text-info";
-  return "bg-success/10 text-success";
+  if (pri === "urgent") return "border-danger/20 bg-danger/10 text-danger";
+  if (pri === "high") return "border-orange-500/20 bg-orange-500/10 text-orange-600";
+  if (pri === "medium") return "border-info/20 bg-info/10 text-info";
+  return "border-success/20 bg-success/10 text-success";
+}
+
+function formatProgressLabel(p: Project, pct: number): string {
+  const total = p.totalTasks ?? 0;
+  if (total === 0) return "No tasks";
+  if (pct === 0) return "0%";
+  return `${pct}%`;
+}
+
+function formatTasksCell(done: number, total: number): string {
+  if (total === 0) return "—";
+  return `${done} / ${total}`;
 }
 
 function zebraRowClass(index: number): string | undefined {
@@ -275,6 +433,8 @@ function DonutStatusChart({
   ariaLabel: string;
 }) {
   const [isDark, setIsDark] = useState(false);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
+
   useEffect(() => {
     const el = document.documentElement;
     const update = () => setIsDark(el.classList.contains("dark"));
@@ -284,10 +444,30 @@ function DonutStatusChart({
     return () => obs.disconnect();
   }, []);
 
-  const options = useMemo(
-    () => buildDonutChartOptions({ labels, colors, centerTotal, centerLabel, tooltipItemLabel }),
-    [labels, colors, centerTotal, centerLabel, tooltipItemLabel, isDark]
+  const cx = 150;
+  const cy = 150;
+  const outerR = 88;
+  const innerR = 60;
+
+  const slices = useMemo(
+    () => buildDonutSlices(labels, series, colors, centerTotal),
+    [labels, series, colors, centerTotal]
   );
+
+  const calloutLayouts = useMemo(
+    () =>
+      buildCalloutLayouts(
+        slices.filter((slice) => slice.pct <= CALLOUT_SLICE_THRESHOLD),
+        cx,
+        cy,
+        outerR
+      ),
+    [slices, cx, cy, outerR]
+  );
+
+  const textColor = chartTextColor(isDark);
+  const muted = chartMutedLabelColor();
+  const sliceStroke = isDark ? "rgb(15, 23, 42)" : "rgb(255, 255, 255)";
 
   if (centerTotal === 0) {
     return (
@@ -297,21 +477,119 @@ function DonutStatusChart({
     );
   }
 
+  const showSliceTooltip = (
+    event: React.MouseEvent<SVGPathElement>,
+    slice: DonutSlice
+  ) => {
+    const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+    if (!rect) return;
+    setTooltip({
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      text: formatDonutTooltip(slice.count, slice.pct, tooltipItemLabel),
+    });
+  };
+
   return (
     <div
-      className="flex h-full min-h-[280px] w-full flex-1 flex-col items-center justify-center"
+      className="relative flex h-full min-h-[280px] w-full flex-1 flex-col items-center justify-center"
       role="img"
       aria-label={ariaLabel}
     >
-      <ReactApexChart
-        key={isDark ? "dark" : "light"}
-        type="donut"
-        height={280}
-        width="100%"
-        options={options}
-        series={series}
-      />
+      <svg
+        viewBox="0 0 300 300"
+        className="h-[280px] w-full max-w-[320px]"
+        onMouseLeave={() => setTooltip(null)}
+      >
+        {slices.map((slice) => (
+          <path
+            key={slice.label}
+            d={describeDonutSlice(cx, cy, outerR, innerR, slice.startAngle, slice.endAngle)}
+            fill={slice.color}
+            fillRule="evenodd"
+            stroke={sliceStroke}
+            strokeWidth={3}
+            className="cursor-pointer transition-opacity hover:opacity-90"
+            onMouseMove={(event) => showSliceTooltip(event, slice)}
+            onMouseLeave={() => setTooltip(null)}
+          />
+        ))}
+
+        <text x={cx} y={cy - 8} textAnchor="middle" fill={muted} fontSize="11" fontWeight="500">
+          {centerLabel}
+        </text>
+        <text x={cx} y={cy + 16} textAnchor="middle" fill={textColor} fontSize="22" fontWeight="700">
+          {centerTotal}
+        </text>
+
+        {slices.map((slice) => {
+          const isSmall = slice.pct <= CALLOUT_SLICE_THRESHOLD;
+
+          if (!isSmall) {
+            const innerPoint = polarToCartesian(cx, cy, (outerR + innerR) / 2, slice.midAngle);
+            return (
+              <text
+                key={`${slice.label}-inner`}
+                x={innerPoint.x}
+                y={innerPoint.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill={textColor}
+                fontSize="11"
+                fontWeight="700"
+                pointerEvents="none"
+              >
+                {formatSlicePercent(slice.pct)}
+              </text>
+            );
+          }
+
+          return null;
+        })}
+
+        {calloutLayouts.map(({ slice, anchor, elbow, labelX, labelY, labelAnchor }) => (
+          <g key={`${slice.label}-leader`} pointerEvents="none">
+            <polyline
+              points={`${anchor.x},${anchor.y} ${elbow.x},${elbow.y} ${labelX},${labelY}`}
+              fill="none"
+              stroke={isDark ? "rgb(148, 163, 184)" : "rgb(100, 116, 139)"}
+              strokeWidth={1.25}
+            />
+            <circle cx={anchor.x} cy={anchor.y} r={2.5} fill={slice.color} />
+            <text
+              x={labelX}
+              y={labelY}
+              textAnchor={labelAnchor}
+              dominantBaseline="middle"
+              fill={textColor}
+              fontSize="10.5"
+              fontWeight="600"
+            >
+              {formatSlicePercent(slice.pct)}
+            </text>
+          </g>
+        ))}
+      </svg>
+
+      {tooltip && (
+        <div
+          className="pointer-events-none absolute z-10 rounded-md border border-defaultborder/70 bg-white px-2.5 py-1.5 text-[11px] font-medium text-defaulttextcolor shadow-sm dark:border-white/10 dark:bg-bodybg2 dark:text-white"
+          style={{ left: tooltip.x, top: tooltip.y, transform: "translate(-50%, -120%)" }}
+        >
+          {tooltip.text}
+        </div>
+      )}
+
+      <DonutChartLegend labels={labels} series={series} colors={colors} total={centerTotal} />
     </div>
+  );
+}
+
+type PmCompactTableColumn = string | { label: string; className?: string };
+
+function normalizePmCompactTableColumns(columns: PmCompactTableColumn[]) {
+  return columns.map((col) =>
+    typeof col === "string" ? { label: col, className: undefined } : col
   );
 }
 
@@ -320,11 +598,13 @@ function PmCompactTable({
   children,
   emptyMessage,
   isEmpty,
+  caption,
 }: {
-  columns: string[];
+  columns: PmCompactTableColumn[];
   children: React.ReactNode;
   emptyMessage: string;
   isEmpty: boolean;
+  caption?: string;
 }) {
   if (isEmpty) {
     return (
@@ -334,18 +614,22 @@ function PmCompactTable({
     );
   }
 
+  const normalizedColumns = normalizePmCompactTableColumns(columns);
+
   return (
     <div className={PM_TABLE_SURFACE_CLASS}>
       <div className="table-responsive max-h-[20rem] overflow-x-auto overflow-y-auto overscroll-contain [scrollbar-width:thin] [scrollbar-color:rgb(203_213_225)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/80 dark:[scrollbar-color:rgb(100_116_139)_transparent] dark:[&::-webkit-scrollbar-thumb]:bg-slate-600/80">
         <table className="mb-0 min-w-full">
+          {caption ? <caption className="sr-only">{caption}</caption> : null}
           <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-bodybg/95">
             <tr>
-              {columns.map((col) => (
+              {normalizedColumns.map((col) => (
                 <th
-                  key={col}
-                  className="border-b border-defaultborder/70 px-3 py-2.5 text-start text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-defaulttextcolor/50 dark:border-white/10"
+                  key={col.label}
+                  scope="col"
+                  className={`border-b border-defaultborder/70 px-3 py-2.5 text-start text-[0.6875rem] font-semibold uppercase tracking-[0.04em] text-defaulttextcolor/50 dark:border-white/10 ${col.className ?? ""}`}
                 >
-                  {col}
+                  {col.label}
                 </th>
               ))}
             </tr>
@@ -353,6 +637,70 @@ function PmCompactTable({
           <tbody className="divide-y divide-defaultborder/50 dark:divide-white/10">{children}</tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function ProjectOverviewMobileCards({ projects }: { projects: Project[] }) {
+  return (
+    <div className="space-y-3 md:hidden">
+      {projects.map((p) => {
+        const total = p.totalTasks ?? 0;
+        const done = p.completedTasks ?? 0;
+        const pct = getProjectProgress(p);
+        const progressLabel = formatProgressLabel(p, pct);
+        return (
+          <article
+            key={getProjectId(p)}
+            className="rounded-lg border border-defaultborder/70 bg-white p-3 dark:border-white/10 dark:bg-bodybg"
+          >
+            <Link
+              href={`/apps/projects/edit/${getProjectId(p)}`}
+              className="block truncate text-[0.875rem] font-medium text-defaulttextcolor hover:text-primary hover:underline"
+              title={p.name}
+            >
+              {p.name}
+            </Link>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex rounded-full border px-2 py-0.5 text-[0.6875rem] font-semibold ${getOverviewStatusPillClass(p.status)}`}
+              >
+                {PROJECT_STATUS_LABELS[p.status]}
+              </span>
+              <span
+                className={`inline-flex rounded-full border px-2 py-0.5 text-[0.6875rem] font-semibold capitalize ${getOverviewPriorityPillClass(p.priority)}`}
+              >
+                {normalizeProjectPriority(p.priority)}
+              </span>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              {total > 0 ? (
+                <>
+                  <div className="progress progress-sm min-w-0 flex-1">
+                    <div
+                      className="progress-bar bg-primary"
+                      role="progressbar"
+                      style={{ width: `${pct}%` }}
+                      aria-valuenow={pct}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label={`${p.name}: ${progressLabel}`}
+                    />
+                  </div>
+                  <span className="shrink-0 text-[0.75rem] tabular-nums text-defaulttextcolor/75">
+                    {progressLabel}
+                  </span>
+                </>
+              ) : (
+                <span className="text-[0.75rem] text-defaulttextcolor/55">No tasks</span>
+              )}
+            </div>
+            <p className="mt-2 text-end text-[0.8125rem] tabular-nums text-defaulttextcolor/70">
+              Tasks {formatTasksCell(done, total)}
+            </p>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -830,89 +1178,108 @@ const AnalyticsPage = () => {
 
       <div className={`${PM_SECTION_GAP} grid grid-cols-12 gap-x-3 gap-y-4`}>
         <div className="col-span-12">
-          <div className="box custom-box overflow-hidden rounded-xl border border-defaultborder/80 shadow-sm dark:border-white/10">
-            <div className="box-header !py-2.5 sm:!py-3 border-b border-defaultborder/60 bg-gradient-to-r from-slate-50/80 to-transparent dark:border-white/10 dark:from-white/[0.04]">
-              <h5 className="box-title">Projects overview</h5>
-              <Link
-                href="/apps/projects/project-list"
-                className={PM_CARD_LINK_BTN}
-              >
+          <div className="box custom-box flex h-full w-full flex-col overflow-hidden rounded-xl border border-defaultborder/80 shadow-sm dark:border-white/10">
+            <div className="box-header flex w-full items-center justify-between !py-2.5 sm:!py-3 border-b border-defaultborder/60 bg-slate-50/80 dark:border-white/10 dark:bg-white/[0.03]">
+              <h5 className="box-title mb-0">Projects overview</h5>
+              <Link href="/apps/projects/project-list" className={PM_CARD_LINK_BTN_LG}>
                 View all
               </Link>
             </div>
-            <div className="box-body overflow-x-auto">
+            <div className={`${PM_TABLE_CONTENT_CLASS} flex flex-1 flex-col`}>
               {projects.length === 0 ? (
-                <p className="text-[#8c9097] dark:text-white/50 text-center py-8">
+                <p className="py-10 text-center text-[0.8125rem] text-defaulttextcolor/55">
                   No projects yet.
                 </p>
               ) : (
-                <div className="table-responsive">
-                  <table className="table mb-0 w-full min-w-full table-fixed whitespace-nowrap">
-                    <colgroup>
-                      <col className="w-[40%]" />
-                      <col className="w-[14%]" />
-                      <col className="w-[14%]" />
-                      <col className="w-[22%]" />
-                      <col className="w-[10%]" />
-                    </colgroup>
-                    <thead>
-                      <tr>
-                        <th>Project</th>
-                        <th>Status</th>
-                        <th>Priority</th>
-                        <th>Progress</th>
-                        <th>Tasks</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {projects.slice(0, 10).map((p) => {
+                <>
+                  <ProjectOverviewMobileCards
+                    projects={projects.slice(0, PROJECTS_OVERVIEW_DISPLAY_LIMIT)}
+                  />
+
+                  <div className="hidden md:block">
+                    <PmCompactTable
+                      caption="Projects overview — name, status, priority, progress, and task counts"
+                      columns={[
+                        { label: "Project", className: "min-w-[10rem] max-w-[14rem]" },
+                        { label: "Status", className: "w-[1%] whitespace-nowrap" },
+                        { label: "Priority", className: "w-[1%] whitespace-nowrap" },
+                        { label: "Progress", className: "min-w-[10rem]" },
+                        { label: "Tasks", className: "w-[1%] whitespace-nowrap text-end" },
+                      ]}
+                      emptyMessage="No projects yet."
+                      isEmpty={false}
+                    >
+                      {projects.slice(0, PROJECTS_OVERVIEW_DISPLAY_LIMIT).map((p, idx) => {
                         const total = p.totalTasks ?? 0;
                         const done = p.completedTasks ?? 0;
                         const pct = getProjectProgress(p);
+                        const progressLabel = formatProgressLabel(p, pct);
                         return (
-                          <tr key={getProjectId(p)}>
-                            <td className="max-w-0 truncate" title={p.name}>
+                          <tr
+                            key={getProjectId(p)}
+                            className={`${zebraRowClass(idx) ?? ""} transition-colors hover:bg-slate-50/70 dark:hover:bg-white/[0.04]`}
+                          >
+                            <td className="max-w-[14rem] min-w-[10rem] px-3 py-2 align-middle">
                               <Link
                                 href={`/apps/projects/edit/${getProjectId(p)}`}
-                                className="block truncate font-medium text-primary hover:underline"
+                                className="block truncate text-[0.8125rem] font-medium text-defaulttextcolor hover:text-primary hover:underline"
+                                title={p.name}
                               >
                                 {p.name}
                               </Link>
                             </td>
-                            <td>
-                              <span className={`badge ${getProjectOverviewStatusBadgeClass(p.status)}`}>
+                            <td className="whitespace-nowrap px-3 py-2 align-middle">
+                              <span
+                                className={`inline-flex rounded-full border px-2 py-0.5 text-[0.6875rem] font-semibold ${getOverviewStatusPillClass(p.status)}`}
+                              >
                                 {PROJECT_STATUS_LABELS[p.status]}
                               </span>
                             </td>
-                            <td>
-                              <span className={`badge ${getPriorityBadgeClass(p.priority)}`}>
+                            <td className="whitespace-nowrap px-3 py-2 align-middle">
+                              <span
+                                className={`inline-flex rounded-full border px-2 py-0.5 text-[0.6875rem] font-semibold capitalize ${getOverviewPriorityPillClass(p.priority)}`}
+                              >
                                 {normalizeProjectPriority(p.priority)}
                               </span>
                             </td>
-                            <td>
-                              <div className="flex items-center gap-2">
-                                <div className="progress progress-xs w-24 flex-grow">
-                                  <div
-                                    className="progress-bar bg-primary"
-                                    role="progressbar"
-                                    style={{ width: `${pct}%` }}
-                                    aria-valuenow={pct}
-                                    aria-valuemin={0}
-                                    aria-valuemax={100}
-                                  />
+                            <td className="min-w-[10rem] px-3 py-2 align-middle">
+                              {total > 0 ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="progress progress-sm min-w-0 flex-1">
+                                    <div
+                                      className="progress-bar bg-primary"
+                                      role="progressbar"
+                                      style={{ width: `${pct}%` }}
+                                      aria-valuenow={pct}
+                                      aria-valuemin={0}
+                                      aria-valuemax={100}
+                                      aria-label={`${p.name}: ${progressLabel}`}
+                                    />
+                                  </div>
+                                  <span className="shrink-0 text-[0.75rem] tabular-nums text-defaulttextcolor/75">
+                                    {progressLabel}
+                                  </span>
                                 </div>
-                                <span className="text-[0.75rem]">{pct}%</span>
-                              </div>
+                              ) : (
+                                <span className="text-[0.8125rem] text-defaulttextcolor/55">No tasks</span>
+                              )}
                             </td>
-                            <td>
-                              {done} / {total}
+                            <td className="whitespace-nowrap px-3 py-2 text-end align-middle text-[0.8125rem] tabular-nums text-defaulttextcolor/75">
+                              {formatTasksCell(done, total)}
                             </td>
                           </tr>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
+                    </PmCompactTable>
+                  </div>
+
+                  {projects.length > PROJECTS_OVERVIEW_DISPLAY_LIMIT && (
+                    <p className="mt-3 text-center text-[0.75rem] text-defaulttextcolor/50">
+                      Showing {Math.min(projects.length, PROJECTS_OVERVIEW_DISPLAY_LIMIT)} of{" "}
+                      {projects.length} projects
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>
