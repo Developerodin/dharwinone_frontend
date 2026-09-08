@@ -505,7 +505,7 @@ const CreateJob = () => {
                       </div>
 
                       {/* Company Information — surfaced in job details panel */}
-                      <div className="xl:col-span-4 md:col-span-6 col-span-12">
+                      <div className="xl:col-span-4 md:col-span-6 col-span-12 flex flex-col">
                         <label htmlFor="org-industry" className="form-label">Industry</label>
                         <input
                           type="text"
@@ -517,7 +517,7 @@ const CreateJob = () => {
                           maxLength={120}
                         />
                       </div>
-                      <div className="xl:col-span-4 md:col-span-6 col-span-12">
+                      <div className="xl:col-span-4 md:col-span-6 col-span-12 flex flex-col">
                         <label htmlFor="org-founded" className="form-label">Founded</label>
                         <input
                           type="number"
@@ -532,11 +532,11 @@ const CreateJob = () => {
                           onChange={(e) => handleInputChange('organisationFounded', e.target.value.replace(/\D/g, '').slice(0, 4))}
                         />
                       </div>
-                      <div className="xl:col-span-4 md:col-span-6 col-span-12">
+                      <div className="xl:col-span-4 md:col-span-6 col-span-12 flex flex-col">
                         <label htmlFor="org-company-size" className="form-label">Company Size</label>
                         <select
                           id="org-company-size"
-                          className="form-control"
+                          className="form-select w-full"
                           value={formData.organisationCompanySize}
                           onChange={(e) => handleInputChange('organisationCompanySize', e.target.value)}
                         >

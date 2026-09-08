@@ -675,7 +675,7 @@ export default function EditJobClient() {
                             />
                           </div>
                           {/* Company Information — surfaced in job details panel */}
-                          <div className="xl:col-span-4 md:col-span-6 col-span-12">
+                          <div className="xl:col-span-4 md:col-span-6 col-span-12 flex flex-col">
                             <label className="form-label">Industry</label>
                             <input
                               type="text"
@@ -686,7 +686,7 @@ export default function EditJobClient() {
                               maxLength={120}
                             />
                           </div>
-                          <div className="xl:col-span-4 md:col-span-6 col-span-12">
+                          <div className="xl:col-span-4 md:col-span-6 col-span-12 flex flex-col">
                             <label className="form-label">Founded</label>
                             <input
                               type="number"
@@ -705,10 +705,10 @@ export default function EditJobClient() {
                               }
                             />
                           </div>
-                          <div className="xl:col-span-4 md:col-span-6 col-span-12">
+                          <div className="xl:col-span-4 md:col-span-6 col-span-12 flex flex-col">
                             <label className="form-label">Company Size</label>
                             <select
-                              className="form-control !rounded-md"
+                              className="form-select w-full !rounded-md"
                               value={formData.organisationCompanySize}
                               onChange={(e) => handleInputChange('organisationCompanySize', e.target.value)}
                             >
