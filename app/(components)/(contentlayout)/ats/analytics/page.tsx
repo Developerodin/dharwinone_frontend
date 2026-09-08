@@ -155,6 +155,425 @@ function fillMonthlyTimeBuckets<T extends { period: string; count: number }>(buc
   return filled
 }
 
+const CALLOUT_SLICE_THRESHOLD = 5
+const CHART_MUTED_FALLBACK = 'rgb(140, 144, 151)'
+const CALLOUT_LEADER_R = 28
+const CALLOUT_LABEL_OFFSET = 20
+const CALLOUT_MIN_GAP = 20
+
+function formatSlicePercent(val: number): string {
+  if (val <= 0) return ''
+  return val < 1 ? '<1%' : `${Math.round(val)}%`
+}
+
+function chartTextColor(isDark: boolean): string {
+  return isDark ? 'rgb(226, 232, 240)' : 'rgb(30, 41, 59)'
+}
+
+function chartMutedLabelColor(): string {
+  if (typeof document === 'undefined') return CHART_MUTED_FALLBACK
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim()
+  return raw ? `rgb(${raw.replace(/\s+/g, ', ')})` : CHART_MUTED_FALLBACK
+}
+
+function polarToCartesian(cx: number, cy: number, radius: number, angleDeg: number) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180
+  return {
+    x: cx + radius * Math.cos(rad),
+    y: cy + radius * Math.sin(rad),
+  }
+}
+
+function describeDonutSlice(
+  cx: number,
+  cy: number,
+  outerR: number,
+  innerR: number,
+  startAngle: number,
+  endAngle: number
+) {
+  const sweep = endAngle - startAngle
+  if (sweep >= 359.99) {
+    return [
+      `M ${cx + outerR} ${cy}`,
+      `A ${outerR} ${outerR} 0 1 1 ${cx - outerR} ${cy}`,
+      `A ${outerR} ${outerR} 0 1 1 ${cx + outerR} ${cy}`,
+      `M ${cx + innerR} ${cy}`,
+      `A ${innerR} ${innerR} 0 1 0 ${cx - innerR} ${cy}`,
+      `A ${innerR} ${innerR} 0 1 0 ${cx + innerR} ${cy}`,
+    ].join(' ')
+  }
+
+  const startOuter = polarToCartesian(cx, cy, outerR, endAngle)
+  const endOuter = polarToCartesian(cx, cy, outerR, startAngle)
+  const startInner = polarToCartesian(cx, cy, innerR, startAngle)
+  const endInner = polarToCartesian(cx, cy, innerR, endAngle)
+  const largeArc = sweep <= 180 ? 0 : 1
+
+  return [
+    `M ${startOuter.x} ${startOuter.y}`,
+    `A ${outerR} ${outerR} 0 ${largeArc} 0 ${endOuter.x} ${endOuter.y}`,
+    `L ${startInner.x} ${startInner.y}`,
+    `A ${innerR} ${innerR} 0 ${largeArc} 1 ${endInner.x} ${endInner.y}`,
+    'Z',
+  ].join(' ')
+}
+
+type DonutSlice = {
+  label: string
+  count: number
+  pct: number
+  color: string
+  startAngle: number
+  endAngle: number
+  midAngle: number
+}
+
+function buildDonutSlices(
+  labels: string[],
+  series: number[],
+  colors: string[],
+  total: number
+): DonutSlice[] {
+  if (total <= 0) return []
+  let cursor = 0
+  const slices: DonutSlice[] = []
+  labels.forEach((label, index) => {
+    const count = series[index] ?? 0
+    if (count <= 0) return
+    const pct = (count / total) * 100
+    const sweep = (count / total) * 360
+    const startAngle = cursor
+    const endAngle = cursor + sweep
+    cursor = endAngle
+    slices.push({
+      label,
+      count,
+      pct,
+      color: colors[index] ?? DONUT_PALETTE[index % DONUT_PALETTE.length],
+      startAngle,
+      endAngle,
+      midAngle: startAngle + sweep / 2,
+    })
+  })
+  return slices
+}
+
+function formatDonutTooltip(count: number, pct: number, tooltipItemLabel: string): string {
+  const countLabel = `${count} ${tooltipItemLabel}${count === 1 ? '' : 's'}`
+  const pctLabel = formatSlicePercent(pct)
+  return pctLabel ? `${countLabel} (${pctLabel})` : countLabel
+}
+
+type CalloutLayout = {
+  slice: DonutSlice
+  anchor: { x: number; y: number }
+  elbow: { x: number; y: number }
+  labelX: number
+  labelY: number
+  labelAnchor: 'start' | 'end'
+}
+
+function resolveCalloutSide(items: CalloutLayout[], minY: number, maxY: number) {
+  if (items.length < 2) return
+  items.sort((a, b) => a.labelY - b.labelY)
+  for (let i = 1; i < items.length; i++) {
+    const prev = items[i - 1]
+    const curr = items[i]
+    if (curr.labelY - prev.labelY < CALLOUT_MIN_GAP) {
+      curr.labelY = prev.labelY + CALLOUT_MIN_GAP
+    }
+  }
+  const overflow = items[items.length - 1].labelY - maxY
+  if (overflow > 0) {
+    for (const item of items) item.labelY -= overflow
+  }
+  const underflow = minY - items[0].labelY
+  if (underflow > 0) {
+    for (const item of items) item.labelY += underflow
+  }
+}
+
+function defaultCalloutIsRight(midAngle: number): boolean {
+  return Math.cos(((midAngle - 90) * Math.PI) / 180) >= 0
+}
+
+function areAdjacentDonutSlices(a: DonutSlice, b: DonutSlice): boolean {
+  const gap = b.startAngle - a.endAngle
+  return Math.abs(gap) < 0.5 || Math.abs(gap + 360) < 0.5 || Math.abs(gap - 360) < 0.5
+}
+
+function resolveAdjacentCalloutSides(slices: DonutSlice[]): Map<DonutSlice, boolean> {
+  const sorted = [...slices].sort((a, b) => a.startAngle - b.startAngle)
+  const sides = sorted.map((slice) => defaultCalloutIsRight(slice.midAngle))
+
+  const resolvePair = (i: number, j: number) => {
+    if (sides[i] !== sides[j]) return
+    if (sorted[j].pct < sorted[i].pct) {
+      sides[j] = !sides[j]
+    } else if (sorted[i].pct < sorted[j].pct) {
+      sides[i] = !sides[i]
+    } else {
+      sides[j] = !sides[j]
+    }
+  }
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (areAdjacentDonutSlices(sorted[i - 1], sorted[i])) {
+      resolvePair(i - 1, i)
+    }
+  }
+
+  const first = sorted[0]
+  const last = sorted[sorted.length - 1]
+  if (sorted.length > 1 && areAdjacentDonutSlices(last, first)) {
+    resolvePair(sorted.length - 1, 0)
+  }
+
+  return new Map(sorted.map((slice, index) => [slice, sides[index]]))
+}
+
+function buildCalloutLayouts(
+  smallSlices: DonutSlice[],
+  cx: number,
+  cy: number,
+  outerR: number
+): CalloutLayout[] {
+  const sideBySlice = resolveAdjacentCalloutSides(smallSlices)
+
+  const layouts: CalloutLayout[] = smallSlices.map((slice) => {
+    const anchor = polarToCartesian(cx, cy, outerR + 2, slice.midAngle)
+    const elbow = polarToCartesian(cx, cy, outerR + CALLOUT_LEADER_R, slice.midAngle)
+    const isRight = sideBySlice.get(slice) ?? defaultCalloutIsRight(slice.midAngle)
+    const labelX = isRight ? elbow.x + CALLOUT_LABEL_OFFSET : elbow.x - CALLOUT_LABEL_OFFSET
+    return {
+      slice,
+      anchor,
+      elbow,
+      labelX,
+      labelY: elbow.y,
+      labelAnchor: isRight ? 'start' : 'end',
+    }
+  })
+
+  const minY = cy - outerR - 36
+  const maxY = cy + outerR + 36
+  resolveCalloutSide(layouts.filter((l) => l.labelAnchor === 'start'), minY, maxY)
+  resolveCalloutSide(layouts.filter((l) => l.labelAnchor === 'end'), minY, maxY)
+
+  return layouts
+}
+
+function DonutChartLegend({
+  labels,
+  series,
+  colors,
+  total,
+}: {
+  labels: string[]
+  series: number[]
+  colors: string[]
+  total: number
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 px-1">
+      {labels.map((label, index) => {
+        const count = series[index] ?? 0
+        const pct = total > 0 ? (count / total) * 100 : 0
+        const pctLabel = formatSlicePercent(pct)
+        return (
+          <span
+            key={label}
+            className="inline-flex items-center gap-1.5 text-[12px] font-medium text-defaulttextcolor/80 dark:text-white/75"
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: colors[index] ?? DONUT_PALETTE[index % DONUT_PALETTE.length] }}
+              aria-hidden="true"
+            />
+            {pctLabel ? `${label} · ${pctLabel}` : label}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function AtsDonutStatusChart({
+  labels,
+  series,
+  colors,
+  centerTotal,
+  centerLabel,
+  tooltipItemLabel,
+  emptyMessage,
+  ariaLabel,
+  onSliceClick,
+}: {
+  labels: string[]
+  series: number[]
+  colors: string[]
+  centerTotal: number
+  centerLabel: string
+  tooltipItemLabel: string
+  emptyMessage: string
+  ariaLabel: string
+  onSliceClick?: (label: string) => void
+}) {
+  const [isDark, setIsDark] = useState(false)
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null)
+
+  useEffect(() => {
+    const el = document.documentElement
+    const update = () => setIsDark(el.classList.contains('dark'))
+    update()
+    const obs = new MutationObserver(update)
+    obs.observe(el, { attributes: true, attributeFilter: ['class'] })
+    return () => obs.disconnect()
+  }, [])
+
+  const cx = 150
+  const cy = 150
+  const outerR = 88
+  const innerR = 60
+
+  const slices = useMemo(
+    () => buildDonutSlices(labels, series, colors, centerTotal),
+    [labels, series, colors, centerTotal]
+  )
+
+  const calloutLayouts = useMemo(
+    () =>
+      buildCalloutLayouts(
+        slices.filter((slice) => slice.pct <= CALLOUT_SLICE_THRESHOLD),
+        cx,
+        cy,
+        outerR
+      ),
+    [slices, cx, cy, outerR]
+  )
+
+  const textColor = chartTextColor(isDark)
+  const muted = chartMutedLabelColor()
+  const sliceStroke = isDark ? 'rgb(15, 23, 42)' : 'rgb(255, 255, 255)'
+
+  if (centerTotal === 0) {
+    return (
+      <div className="flex h-full min-h-[14rem] flex-1 items-center justify-center px-4 text-center text-[0.8125rem] text-defaulttextcolor/55">
+        {emptyMessage}
+      </div>
+    )
+  }
+
+  const showSliceTooltip = (
+    event: React.MouseEvent<SVGPathElement>,
+    slice: DonutSlice
+  ) => {
+    const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect()
+    if (!rect) return
+    setTooltip({
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      text: formatDonutTooltip(slice.count, slice.pct, tooltipItemLabel),
+    })
+  }
+
+  return (
+    <div
+      className="relative flex h-full min-h-[280px] w-full flex-1 flex-col items-center justify-center"
+      role="img"
+      aria-label={ariaLabel}
+    >
+      <svg
+        viewBox="0 0 300 300"
+        className="h-[280px] w-full max-w-[320px]"
+        onMouseLeave={() => setTooltip(null)}
+      >
+        {slices.map((slice) => (
+          <path
+            key={slice.label}
+            d={describeDonutSlice(cx, cy, outerR, innerR, slice.startAngle, slice.endAngle)}
+            fill={slice.color}
+            fillRule="evenodd"
+            stroke={sliceStroke}
+            strokeWidth={3}
+            className="cursor-pointer transition-opacity hover:opacity-90"
+            onMouseMove={(event) => showSliceTooltip(event, slice)}
+            onMouseLeave={() => setTooltip(null)}
+            onClick={() => onSliceClick?.(slice.label)}
+          />
+        ))}
+
+        <text x={cx} y={cy - 8} textAnchor="middle" fill={muted} fontSize="11" fontWeight="500">
+          {centerLabel}
+        </text>
+        <text x={cx} y={cy + 16} textAnchor="middle" fill={textColor} fontSize="22" fontWeight="700">
+          {centerTotal}
+        </text>
+
+        {slices.map((slice) => {
+          const isSmall = slice.pct <= CALLOUT_SLICE_THRESHOLD
+
+          if (!isSmall) {
+            const innerPoint = polarToCartesian(cx, cy, (outerR + innerR) / 2, slice.midAngle)
+            return (
+              <text
+                key={`${slice.label}-inner`}
+                x={innerPoint.x}
+                y={innerPoint.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill={textColor}
+                fontSize="11"
+                fontWeight="700"
+                pointerEvents="none"
+              >
+                {formatSlicePercent(slice.pct)}
+              </text>
+            )
+          }
+
+          return null
+        })}
+
+        {calloutLayouts.map(({ slice, anchor, elbow, labelX, labelY, labelAnchor }) => (
+          <g key={`${slice.label}-leader`} pointerEvents="none">
+            <polyline
+              points={`${anchor.x},${anchor.y} ${elbow.x},${elbow.y} ${labelX},${labelY}`}
+              fill="none"
+              stroke={isDark ? 'rgb(148, 163, 184)' : 'rgb(100, 116, 139)'}
+              strokeWidth={1.25}
+            />
+            <circle cx={anchor.x} cy={anchor.y} r={2.5} fill={slice.color} />
+            <text
+              x={labelX}
+              y={labelY}
+              textAnchor={labelAnchor}
+              dominantBaseline="middle"
+              fill={textColor}
+              fontSize="10.5"
+              fontWeight="600"
+            >
+              {formatSlicePercent(slice.pct)}
+            </text>
+          </g>
+        ))}
+      </svg>
+
+      {tooltip && (
+        <div
+          className="pointer-events-none absolute z-10 rounded-md border border-defaultborder/70 bg-white px-2.5 py-1.5 text-[11px] font-medium text-defaulttextcolor shadow-sm dark:border-white/10 dark:bg-bodybg2 dark:text-white"
+          style={{ left: tooltip.x, top: tooltip.y, transform: 'translate(-50%, -120%)' }}
+        >
+          {tooltip.text}
+        </div>
+      )}
+
+      <DonutChartLegend labels={labels} series={series} colors={colors} total={centerTotal} />
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Excel Export
 // ---------------------------------------------------------------------------
@@ -415,8 +834,13 @@ function DrillDownModal({
             {drillModalHeading(drillType, drillValue)}
             <span className="text-defaulttextcolor/60 text-[0.8125rem] font-normal ms-2">({totalResults} records)</span>
           </h5>
-          <button className="ti-btn ti-btn-icon ti-btn-sm ti-btn-ghost-dark" onClick={onClose}>
-            <i className="ri-close-line" />
+          <button
+            type="button"
+            className="ti-btn ti-btn-icon ti-btn-sm shrink-0 text-defaulttextcolor hover:bg-slate-100 hover:text-defaulttextcolor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary dark:text-white/85 dark:hover:bg-white/10 dark:hover:text-white"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <i className="ri-close-line" aria-hidden="true" />
           </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-4">
@@ -527,6 +951,16 @@ const ATSAnalytics = () => {
   const [appsMonthStart, setAppsMonthStart] = useState(0)
   const [jobsMonthStart, setJobsMonthStart] = useState(0)
   const [drillModal, setDrillModal] = useState<{ open: boolean; type: string; value: string }>({ open: false, type: '', value: '' })
+  const [isDark, setIsDark] = useState(false)
+
+  useEffect(() => {
+    const el = document.documentElement
+    const update = () => setIsDark(el.classList.contains('dark'))
+    update()
+    const obs = new MutationObserver(update)
+    obs.observe(el, { attributes: true, attributeFilter: ['class'] })
+    return () => obs.disconnect()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -673,18 +1107,24 @@ const ATSAnalytics = () => {
   }, [jobsOverTimeFull, jobsMonthStart])
 
   const jobStatusData = useMemo(() => {
-    if (!data?.jobStatusBreakdown?.length) return { labels: [], series: [] }
+    if (!data?.jobStatusBreakdown?.length) return { labels: [], series: [], total: 0 }
+    const labels = data.jobStatusBreakdown.map((j) => j.status)
+    const series = data.jobStatusBreakdown.map((j) => j.count)
     return {
-      labels: data.jobStatusBreakdown.map((j) => j.status),
-      series: data.jobStatusBreakdown.map((j) => j.count),
+      labels,
+      series,
+      total: series.reduce((sum, v) => sum + v, 0),
     }
   }, [data?.jobStatusBreakdown])
 
   const appStatusData = useMemo(() => {
-    if (!data?.applicationStatusBreakdown?.length) return { labels: [], series: [] }
+    if (!data?.applicationStatusBreakdown?.length) return { labels: [], series: [], total: 0 }
+    const labels = data.applicationStatusBreakdown.map((a) => a.status)
+    const series = data.applicationStatusBreakdown.map((a) => a.count)
     return {
-      labels: data.applicationStatusBreakdown.map((a) => a.status),
-      series: data.applicationStatusBreakdown.map((a) => a.count),
+      labels,
+      series,
+      total: series.reduce((sum, v) => sum + v, 0),
     }
   }, [data?.applicationStatusBreakdown])
 
@@ -715,7 +1155,7 @@ const ATSAnalytics = () => {
   // ---- Shared chart options builders ----
 
   const lineChartOpts = useCallback(
-    (categories: string[], seriesLabel = 'Count', chartId = 'ats-line-chart') => ({
+    (categories: string[], seriesLabel = 'Count', chartId = 'ats-line-chart', darkMode = false) => ({
       chart: {
         id: chartId,
         toolbar: { show: false },
@@ -772,7 +1212,7 @@ const ATSAnalytics = () => {
         shared: false,
         intersect: true,
         followCursor: false,
-        theme: 'light',
+        theme: darkMode ? 'dark' : 'light',
         x: { show: true },
         y: {
           formatter: (val: number) => `${val} ${seriesLabel.toLowerCase()}${val === 1 ? '' : 's'}`,
@@ -887,16 +1327,6 @@ const ATSAnalytics = () => {
     }
   }, [])
 
-  const donutOpts = useCallback(
-    (labels: string[]) => ({
-      chart: { height: CHART_HEIGHT, parentHeightOffset: 0 },
-      labels,
-      legend: { position: 'bottom' as const },
-      colors: DONUT_PALETTE.slice(0, labels.length),
-    }),
-    []
-  )
-
   const funnelChartOptions = useMemo(() => {
     if (!funnelData.categories.length) return null
     const base = funnelBarOpts(funnelData.categories, funnelData.values, CHART_HEIGHT)
@@ -930,6 +1360,7 @@ const ATSAnalytics = () => {
               className="form-control select-show-page-size !w-auto !py-1.5 !px-3 !text-[0.8125rem]"
               value={range}
               onChange={(e) => setRange((e.target.value || '') as AtsAnalyticsRange | '')}
+              aria-label="Analytics period"
             >
               {RANGE_OPTIONS.map((opt) => (
                 <option key={opt.value || 'all'} value={opt.value}>{opt.label}</option>
@@ -1049,7 +1480,8 @@ const ATSAnalytics = () => {
                           options={lineChartOpts(
                             applicationsOverTimeData.categories,
                             'Applications',
-                            'ats-applications-over-time'
+                            'ats-applications-over-time',
+                            isDark
                           )}
                           height={LINE_CHART_HEIGHT}
                           width="100%"
@@ -1133,25 +1565,17 @@ const ATSAnalytics = () => {
                 <div className="box-header shrink-0"><div className="box-title">Job Status Breakdown</div></div>
                 <div className="box-body flex-1 flex flex-col min-h-0">
                   {jobStatusData.series.length > 0 ? (
-                    <div className="h-[280px]">
-                    <ReactApexChart
-                      type="donut"
+                    <AtsDonutStatusChart
+                      labels={jobStatusData.labels}
                       series={jobStatusData.series}
-                      options={{
-                        ...donutOpts(jobStatusData.labels),
-                        chart: {
-                          height: CHART_HEIGHT,
-                          parentHeightOffset: 0,
-                          events: {
-                            dataPointSelection: (_e: unknown, _chart: unknown, opts: { dataPointIndex: number }) => {
-                              openDrill('jobStatus', jobStatusData.labels[opts.dataPointIndex])
-                            },
-                          },
-                        },
-                      }}
-                      height={CHART_HEIGHT} width="100%"
+                      colors={DONUT_PALETTE.slice(0, jobStatusData.labels.length)}
+                      centerTotal={jobStatusData.total}
+                      centerLabel="Jobs"
+                      tooltipItemLabel="job"
+                      emptyMessage="No data yet"
+                      ariaLabel={`Job status breakdown. ${jobStatusData.total} jobs total.`}
+                      onSliceClick={(label) => openDrill('jobStatus', label)}
                     />
-                    </div>
                   ) : (
                     <div className="flex flex-1 items-center justify-center min-h-[260px] text-defaulttextcolor/60 text-sm">No data yet</div>
                   )}
@@ -1164,25 +1588,17 @@ const ATSAnalytics = () => {
                 <div className="box-header shrink-0"><div className="box-title">Application Status Breakdown</div></div>
                 <div className="box-body flex-1 flex flex-col min-h-0">
                   {appStatusData.series.length > 0 ? (
-                    <div className="h-[280px]">
-                    <ReactApexChart
-                      type="donut"
+                    <AtsDonutStatusChart
+                      labels={appStatusData.labels}
                       series={appStatusData.series}
-                      options={{
-                        ...donutOpts(appStatusData.labels),
-                        chart: {
-                          height: CHART_HEIGHT,
-                          parentHeightOffset: 0,
-                          events: {
-                            dataPointSelection: (_e: unknown, _chart: unknown, opts: { dataPointIndex: number }) => {
-                              openDrill('applicationStatus', appStatusData.labels[opts.dataPointIndex])
-                            },
-                          },
-                        },
-                      }}
-                      height={CHART_HEIGHT} width="100%"
+                      colors={DONUT_PALETTE.slice(0, appStatusData.labels.length)}
+                      centerTotal={appStatusData.total}
+                      centerLabel="Applications"
+                      tooltipItemLabel="application"
+                      emptyMessage="No data yet"
+                      ariaLabel={`Application status breakdown. ${appStatusData.total} applications total.`}
+                      onSliceClick={(label) => openDrill('applicationStatus', label)}
                     />
-                    </div>
                   ) : (
                     <div className="flex flex-1 items-center justify-center min-h-[260px] text-defaulttextcolor/60 text-sm">No data yet</div>
                   )}
@@ -1268,7 +1684,8 @@ const ATSAnalytics = () => {
                           options={lineChartOpts(
                             jobsOverTimeData.categories,
                             'Jobs',
-                            'ats-jobs-over-time'
+                            'ats-jobs-over-time',
+                            isDark
                           )}
                           height={LINE_CHART_HEIGHT}
                           width="100%"
@@ -1324,10 +1741,10 @@ const ATSAnalytics = () => {
                         <thead>
                           <tr className="bg-gray-50 dark:bg-white/5">
                             <th className="!text-start">Recruiter</th>
-                            <th className="!text-end tabular-nums">Total Activities</th>
-                            <th className="!text-end tabular-nums">Jobs Posted</th>
-                            <th className="!text-end tabular-nums">Screened</th>
-                            <th className="!text-end tabular-nums">Interviews</th>
+                            <th className="!text-start tabular-nums">Total Activities</th>
+                            <th className="!text-start tabular-nums">Jobs Posted</th>
+                            <th className="!text-start tabular-nums">Screened</th>
+                            <th className="!text-start tabular-nums">Interviews</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1338,10 +1755,10 @@ const ATSAnalytics = () => {
                               return (
                                 <tr key={`leaderboard-empty-${idx}`} className={`${rowClass} text-defaulttextcolor/40`}>
                                   <td className="!text-start">—</td>
-                                  <td className="text-end tabular-nums">0</td>
-                                  <td className="text-end tabular-nums">0</td>
-                                  <td className="text-end tabular-nums">0</td>
-                                  <td className="text-end tabular-nums">0</td>
+                                  <td className="!text-start tabular-nums">0</td>
+                                  <td className="!text-start tabular-nums">0</td>
+                                  <td className="!text-start tabular-nums">0</td>
+                                  <td className="!text-start tabular-nums">0</td>
                                 </tr>
                               )
                             }
@@ -1353,10 +1770,10 @@ const ATSAnalytics = () => {
                                 className={`${rowClass}${isInactive ? ' text-defaulttextcolor/70' : ''}`}
                               >
                                 <td className="!text-start">{r.recruiter?.name || '—'}</td>
-                                <td className="text-end tabular-nums">{r.totalActivities}</td>
-                                <td className="text-end tabular-nums">{actMap.get('job_posting_created') || 0}</td>
-                                <td className="text-end tabular-nums">{actMap.get('candidate_screened') || 0}</td>
-                                <td className="text-end tabular-nums">{actMap.get('interview_scheduled') || 0}</td>
+                                <td className="!text-start tabular-nums">{r.totalActivities}</td>
+                                <td className="!text-start tabular-nums">{actMap.get('job_posting_created') || 0}</td>
+                                <td className="!text-start tabular-nums">{actMap.get('candidate_screened') || 0}</td>
+                                <td className="!text-start tabular-nums">{actMap.get('interview_scheduled') || 0}</td>
                               </tr>
                             )
                           })}
@@ -1385,7 +1802,7 @@ const ATSAnalytics = () => {
                             <th className="!text-start">#</th>
                             <th className="!text-start">Job Title</th>
                             <th className="!text-start">Organisation</th>
-                            <th className="!text-end">Applications</th>
+                            <th className="!text-start tabular-nums">Applications</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1394,7 +1811,7 @@ const ATSAnalytics = () => {
                               <td>{idx + 1}</td>
                               <td>{j.title || '—'}</td>
                               <td>{j.org || '—'}</td>
-                              <td className="text-end">{j.count}</td>
+                              <td className="!text-start tabular-nums">{j.count}</td>
                             </tr>
                           ))}
                         </tbody>
