@@ -139,6 +139,8 @@ type Props = {
   jobPostingDoc?: string | null
   /** New-offer flow: pick candidate + application instead of free-text name/title. */
   applicationPicker?: OfferLetterApplicationPicker | null
+  /** Letter version history dropdown (Save letter creates vN). */
+  versionPicker?: OfferLetterVersionPicker | null
 }
 
 export type OfferLetterApplicationPicker = {
@@ -150,6 +152,14 @@ export type OfferLetterApplicationPicker = {
   onCandidateChange: (candidateId: string) => void
   onApplicationChange: (applicationId: string) => void
   emptyHint?: string
+}
+
+export type OfferLetterVersionPicker = {
+  versions: { version: number; label: string }[]
+  selectedVersion: number
+  onSelectVersion: (version: number) => void
+  /** True when there are no saved versions yet (placeholder option). */
+  emptyHint?: boolean
 }
 
 function TopbarLogoIcon() {
@@ -212,6 +222,7 @@ export function OfferLetterGeneratorWorkspace({
   formPanelFooter,
   jobPostingDoc = null,
   applicationPicker = null,
+  versionPicker = null,
 }: Props) {
   const jobUi = apiJobTypeToUi(letterForm.jobType)
   const isInternship = letterForm.jobType === 'INTERN_UNPAID'
@@ -616,12 +627,41 @@ export function OfferLetterGeneratorWorkspace({
           </div>
         </div>
         <div className={styles.topbarActions}>
+          {versionPicker && versionPicker.versions.length > 0 ? (
+            <label
+              className={styles.versionPicker}
+              title={
+                versionPicker.emptyHint
+                  ? 'Save letter to create the first version'
+                  : 'Load a previous saved letter version into the editor'
+              }
+            >
+              <span className={styles.versionPickerLabel}>Version</span>
+              <select
+                className={styles.select}
+                value={versionPicker.selectedVersion}
+                disabled={letterBusy || !!versionPicker.emptyHint}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isFinite(n) || n <= 0) return
+                  versionPicker.onSelectVersion(n)
+                }}
+                aria-label="Offer letter version"
+              >
+                {versionPicker.versions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button
             type="button"
             className={`${styles.btn} ${styles.btnPrimary}`}
             onClick={onSaveLetter}
             disabled={letterBusy}
-            title="Save letter fields to the server (required fields must be valid)."
+            title="Save letter fields to the server (required fields must be valid). Creates a new version."
           >
             {letterBusy ? '…' : 'Save letter'}
           </button>

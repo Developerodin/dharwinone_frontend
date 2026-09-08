@@ -13,30 +13,15 @@ import {
   listOffers,
   updateOffer,
   deleteOffer,
-  getOfferById,
-  getOfferLetterDefaults,
-  saveOfferLetter,
-  formatOfferLetterSaveError,
 } from '@/shared/lib/api/offers'
-import type { Offer, OfferLetterJobType, UpdateOfferPayload } from '@/shared/lib/api/offers'
-import {
-  OfferLetterGeneratorWorkspace,
-  createEmptyOfferLetterForm,
-  type OfferLetterFormFields,
-} from './OfferLetterGeneratorWorkspace'
+import type { Offer } from '@/shared/lib/api/offers'
 import { useModalBehavior } from '@/shared/hooks/useModalBehavior'
 import ConfirmDiscardDialog from '@/shared/components/ConfirmDiscardDialog'
-import { detectEligibilityPreset } from './offer-letter-generator-data'
-import { buildOfferLetterUpdatePayload } from './build-offer-letter-update-payload'
-import { confirmCompensationChange } from './confirm-compensation-change'
 import { deleteOffersInBulk } from './delete-offers-in-bulk'
 import { useConfirm } from '@/shared/components/ui/useConfirm'
 import { getPlacementStatusActorSummary } from '@/shared/lib/ats/placementActorText'
 import { JoiningDateTableCell } from '@/shared/components/ats/JoiningDateTableCell'
 import { formatJoiningDateDisplay, joiningDatePresent } from '@/shared/lib/ats/joining-date-display'
-import { combinedJobPostingDocText, resolveOfferLetterRolesHtml, resolveOfferLetterTrainingHtml } from './job-posting-doc'
-import { roleResponsibilitiesLinesToHtml } from '@/shared/lib/ats/jobDescriptionHtml'
-import { letterDateStampYmd } from './letter-date-stamp'
 
 const DIALOG_Z = 12050
 const TOOLBAR_BTN =
@@ -50,13 +35,7 @@ const TH_CLASS =
 const TD_CLASS = 'min-w-0 align-middle px-2 py-2.5 text-[13px] text-slate-800 dark:text-slate-100'
 const CHECKBOX_COL_CLASS = 'w-[1%] max-w-[2.25rem] whitespace-nowrap !px-1 !pl-2.5'
 
-function formatCandidateAddress(c: { address?: Offer['candidate']['address'] } | null | undefined) {
-  const a = c?.address
-  if (!a || typeof a !== 'object') return ''
-  return [a.streetAddress, a.streetAddress2, a.city, a.state, a.zipCode, a.country].filter(Boolean).join(', ')
-}
 
-/** Backend toJSON plugin exposes `id` (string); some paths still have `_id`. */
 function getOfferRecordId(o: { _id?: string; id?: string } | null | undefined): string {
   const v = o?._id ?? o?.id
   if (v == null) return ''
@@ -316,50 +295,26 @@ const OffersPlacement = () => {
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [listNotice, setListNotice] = useState<string | null>(null)
 
-  const [letterModalOffer, setLetterModalOffer] = useState<Offer | null>(null)
-  const [letterSaveError, setLetterSaveError] = useState<string | null>(null)
-  const [letterForm, setLetterForm] = useState<OfferLetterFormFields>(() => createEmptyOfferLetterForm())
-  const [letterBusy, setLetterBusy] = useState(false)
-  const letterFormSnapshotRef = useRef('')
-
-  const letterJobPostingDoc = useMemo(
-    () => combinedJobPostingDocText(letterModalOffer?.job) ?? null,
-    [letterModalOffer]
-  )
-
-  /** After Create Offer (modal or /create redirect): save letter once the workspace is open and form is seeded. */
-  const autoSaveLetterAfterOpenRef = useRef(false)
-
-  const openOfferLetterModal = useCallback(async (raw: Offer) => {
-    const id = getOfferRecordId(raw)
-    if (!id) {
-      setListNotice(
-        'Could not open the offer letter workspace: this offer has no id yet. Use the document icon on the offer row, or try creating the offer again.'
-      )
-      return
-    }
-    setListNotice(null)
-    setLetterSaveError(null)
-    setLetterBusy(true)
-    try {
-      const full = await getOfferById(id)
-      if (typeof window !== 'undefined' && sessionStorage.getItem('dharwin:offerLetterAutoSaveAfterOpen') === '1') {
-        sessionStorage.removeItem('dharwin:offerLetterAutoSaveAfterOpen')
-        autoSaveLetterAfterOpenRef.current = true
+  /** Open the SSR Offer Letter Generator (versioning + server prefetch live there). */
+  const openOfferLetterPage = useCallback(
+    (raw: Offer) => {
+      const id = getOfferRecordId(raw)
+      if (!id) {
+        setListNotice(
+          'Could not open the offer letter workspace: this offer has no id yet. Use the document icon on the offer row, or try creating the offer again.'
+        )
+        return
       }
-      setLetterModalOffer(full)
-    } catch (e: unknown) {
-      setListNotice(
-        (e as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to load offer'
-      )
-    } finally {
-      setLetterBusy(false)
-    }
-  }, [])
+      setListNotice(null)
+      // trailingSlash: true — keep URL canonical for Next redirects
+      router.push(`/ats/offers-placement/offer-letter/new/?offerId=${encodeURIComponent(id)}`)
+    },
+    [router]
+  )
 
   const openLetterParamHandledRef = useRef<string | null>(null)
 
-  /** After Create Offer: ?refresh= refetches list, then ?openLetter= opens generator. Deep links: ?openLetter= only. */
+  /** Deep links / legacy ?openLetter= → SSR letter page. ?refresh= still refreshes the list. */
   useEffect(() => {
     const refresh = searchParams?.get('refresh')
     const letterId = searchParams?.get('openLetter')
@@ -371,11 +326,14 @@ const OffersPlacement = () => {
         .catch(() => {})
         .finally(() => {
           setOffersLoading(false)
-          const next =
-            letterId && /^[0-9a-fA-F]{24}$/.test(letterId)
-              ? `/ats/offers-placement?openLetter=${encodeURIComponent(letterId)}`
-              : '/ats/offers-placement'
-          router.replace(next, { scroll: false })
+          if (letterId && /^[0-9a-fA-F]{24}$/.test(letterId)) {
+            router.replace(
+              `/ats/offers-placement/offer-letter/new/?offerId=${encodeURIComponent(letterId)}`,
+              { scroll: false }
+            )
+          } else {
+            router.replace('/ats/offers-placement', { scroll: false })
+          }
         })
       return
     }
@@ -383,136 +341,15 @@ const OffersPlacement = () => {
     if (letterId && /^[0-9a-fA-F]{24}$/.test(letterId)) {
       if (openLetterParamHandledRef.current === letterId) return
       openLetterParamHandledRef.current = letterId
-      void (async () => {
-        try {
-          await openOfferLetterModal({ _id: letterId } as Offer)
-        } finally {
-          router.replace('/ats/offers-placement', { scroll: false })
-        }
-      })()
+      router.replace(
+        `/ats/offers-placement/offer-letter/new/?offerId=${encodeURIComponent(letterId)}`,
+        { scroll: false }
+      )
     } else {
       openLetterParamHandledRef.current = null
     }
-  }, [searchParams, router, openOfferLetterModal])
+  }, [searchParams, router])
 
-  useEffect(() => {
-    if (!letterModalOffer) return
-    const o = letterModalOffer
-    const c = o.candidate
-    const addr = formatCandidateAddress(c)
-    const jt = (o.jobType as OfferLetterJobType) || 'FT_40'
-    const isIntern = jt === 'INTERN_UNPAID'
-    const eligLines = o.employmentEligibilityLines || []
-    let eligibilityPreset = detectEligibilityPreset(eligLines, isIntern)
-    if (isIntern && eligibilityPreset === 'none' && eligLines.length === 0) {
-      eligibilityPreset = 'opt_stem'
-    }
-    if (!isIntern && eligibilityPreset === 'none' && eligLines.length === 0) {
-      eligibilityPreset = 'opt_stem'
-    }
-    const eligibilityText = eligibilityPreset === 'custom' ? eligLines.join('\n') : ''
-    const base: OfferLetterFormFields = {
-      letterFullName: o.letterFullName || c?.fullName || '',
-      letterAddress: o.letterAddress || addr || '',
-      positionTitle: o.positionTitle || o.job?.title || '',
-      joiningDate: o.joiningDate ? String(o.joiningDate).slice(0, 10) : '',
-      letterDate: o.letterDate ? String(o.letterDate).slice(0, 10) : letterDateStampYmd(),
-      jobType: jt,
-      weeklyHours: typeof o.weeklyHours === 'number' ? o.weeklyHours : 40,
-      workLocation: o.workLocation || 'Remote (USA)',
-      rolesText: resolveOfferLetterRolesHtml(o),
-      trainingText: resolveOfferLetterTrainingHtml(o),
-      annualGrossCtc:
-        o.ctcBreakdown?.gross != null && Number(o.ctcBreakdown.gross) > 0
-          ? String(o.ctcBreakdown.gross)
-          : '',
-      ctcCurrency: (o.ctcBreakdown?.currency || 'USD').toUpperCase() === 'INR' ? 'INR' : 'USD',
-      academicNote: o.academicAlignmentNote || '',
-      eligibilityPreset,
-      eligibilityText,
-      supFirst: o.supervisor?.firstName || 'Jason',
-      supLast: o.supervisor?.lastName || 'Mendonca',
-      supPhone: o.supervisor?.phone || '+1-307-206-9144',
-      supEmail: o.supervisor?.email || 'jason@dharwinbusinesssolutions.com',
-    }
-    setLetterForm(base)
-    letterFormSnapshotRef.current = JSON.stringify(base)
-    const needRoleDefaults = !base.rolesText.trim()
-    const needTrainingDefaults = isIntern && !base.trainingText.trim()
-    if (needRoleDefaults || needTrainingDefaults) {
-      /* Pass the linked job id so the server derives Roles & Responsibilities from that
-         job's description (deriveRoleResponsibilities) instead of generic title defaults. */
-      const offerJobId =
-        (o.job as { _id?: string; id?: string } | undefined)?._id ??
-        (o.job as { id?: string } | undefined)?.id
-      getOfferLetterDefaults(o.job?.title || '', offerJobId)
-        .then((d) => {
-          setLetterForm((f) => ({
-            ...f,
-            rolesText: f.rolesText.trim()
-              ? f.rolesText
-              : (String(d.positionOverviewHtml ?? '').trim() ||
-                  roleResponsibilitiesLinesToHtml(d.roleResponsibilities)),
-            trainingText:
-              f.trainingText.trim()
-                ? f.trainingText
-                : isIntern
-                  ? String(d.trainingOutcomesHtml ?? '').trim() ||
-                    roleResponsibilitiesLinesToHtml(d.trainingOutcomes)
-                  : f.trainingText,
-          }))
-        })
-        .catch(() => {})
-    }
-  }, [letterModalOffer])
-
-  const handleSaveOfferLetter = async () => {
-    if (!letterModalOffer) return
-    const id = getOfferRecordId(letterModalOffer)
-    if (!id) {
-      setLetterSaveError('Missing offer id. Close and reopen the offer letter from the list.')
-      return
-    }
-    setLetterSaveError(null)
-    /**
-     * Same gate as the standalone letter page — this modal edits job type too, so without it the
-     * user would only discover the restriction from a rejected save. `letterModalOffer` comes from
-     * getOfferById, so it carries compensationGate.
-     */
-    const { proceed, ack: compensationAck } = await confirmCompensationChange({
-      gate: letterModalOffer.compensationGate,
-      changing: !!letterModalOffer.jobType && letterForm.jobType !== letterModalOffer.jobType,
-      confirm: confirm,
-    })
-    if (!proceed) return
-
-    setLetterBusy(true)
-    try {
-      const updated = await saveOfferLetter(id, {
-        ...(buildOfferLetterUpdatePayload(letterForm, letterModalOffer) as UpdateOfferPayload),
-        ...(compensationAck ? { compensationChangeAck: true } : {}),
-      })
-      setLetterModalOffer(updated)
-      refreshOffers()
-    } catch (e: unknown) {
-      setLetterSaveError(formatOfferLetterSaveError(e, 'Could not save letter'))
-    } finally {
-      setLetterBusy(false)
-    }
-  }
-
-  const handleSaveOfferLetterRef = useRef(handleSaveOfferLetter)
-  handleSaveOfferLetterRef.current = handleSaveOfferLetter
-
-  /** Defer save so letter form state (and async role defaults) can settle after open. */
-  useEffect(() => {
-    if (!letterModalOffer || !autoSaveLetterAfterOpenRef.current) return
-    autoSaveLetterAfterOpenRef.current = false
-    const t = window.setTimeout(() => {
-      void handleSaveOfferLetterRef.current()
-    }, 1200)
-    return () => window.clearTimeout(t)
-  }, [letterModalOffer])
 
   const editModalDirty =
     !!editOfferModal &&
@@ -532,27 +369,6 @@ const OffersPlacement = () => {
       setEditError(null)
     },
     isDirty: editModalDirty,
-  });
-
-  const letterModalDirty =
-    !!letterModalOffer &&
-    letterFormSnapshotRef.current !== '' &&
-    JSON.stringify(letterForm) !== letterFormSnapshotRef.current;
-  const {
-    containerRef: letterModalContainerRef,
-    backdropProps: letterModalBackdropProps,
-    requestClose: requestCloseLetterModal,
-    confirmDiscardOpen: letterConfirmDiscardOpen,
-    confirmDiscard: confirmLetterDiscard,
-    cancelDiscard: cancelLetterDiscard,
-  } = useModalBehavior({
-    isOpen: !!letterModalOffer,
-    onClose: () => {
-      setLetterModalOffer(null);
-      setLetterSaveError(null);
-      letterFormSnapshotRef.current = '';
-    },
-    isDirty: letterModalDirty,
   });
 
   const historyModalBehavior = useModalBehavior({
@@ -633,7 +449,7 @@ const OffersPlacement = () => {
               type="button"
               className={`${ROW_BTN} ti-btn-light`}
               aria-label="Open offer letter generator"
-              onClick={() => void openOfferLetterModal(raw)}
+              onClick={() => openOfferLetterPage(raw)}
             >
               <i className="ri-article-line" aria-hidden />
             </button>
@@ -689,7 +505,7 @@ const OffersPlacement = () => {
         </div>
       )
     },
-    [canEdit, openOfferLetterModal]
+    [canEdit, openOfferLetterPage]
   )
 
   // Define columns
@@ -2001,46 +1817,8 @@ const OffersPlacement = () => {
 
       <ConfirmDiscardDialog open={editConfirmDiscardOpen} onConfirm={confirmEditDiscard} onCancel={cancelEditDiscard} />
 
-      {/* Offer letter generator (embedded UI — same layout as standalone tool; saves to this offer) */}
-      {letterModalOffer && (
-        <div
-          className="offer-letter-fullscreen fixed inset-0 z-[1060] flex w-full max-w-[100vw] flex-col overflow-hidden bg-slate-100 dark:bg-slate-950 pointer-events-auto"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Offer letter generator"
-          {...letterModalBackdropProps}
-        >
-          <div ref={letterModalContainerRef} className="flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col">
-           <OfferLetterGeneratorWorkspace
-             offerCode={letterModalOffer.offerCode || '—'}
-             jobTitle={letterModalOffer.job?.title || ''}
-             candidateName={letterModalOffer.candidate?.fullName || ''}
-             letterForm={letterForm}
-             setLetterForm={setLetterForm}
-             letterBusy={letterBusy}
-             jobPostingDoc={letterJobPostingDoc}
-             lastSavedLabel={
-               letterModalOffer.updatedAt ? new Date(letterModalOffer.updatedAt).toLocaleString() : null
-             }
-             onClose={requestCloseLetterModal}
-             onSaveLetter={() => void handleSaveOfferLetter()}
-             formPanelTop={
-               letterSaveError ? (
-                 <div
-                   className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100"
-                   role="alert"
-                 >
-                   {letterSaveError}
-                 </div>
-               ) : null
-             }
-           />
-           </div>
-        </div>
-      )}
 
-      <ConfirmDiscardDialog open={letterConfirmDiscardOpen} onConfirm={confirmLetterDiscard} onCancel={cancelLetterDiscard} />
-
+      {/* View Offer Modal */}
       {/* View Offer Modal */}
       {/* View History Modal */}
       {viewHistoryModal && (

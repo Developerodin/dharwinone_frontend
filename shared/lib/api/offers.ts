@@ -29,6 +29,39 @@ export interface CtcBreakdown {
   currency?: string;
 }
 
+/** One immutable Save-letter snapshot (from Offer.letterVersions). */
+export interface OfferLetterVersionSnapshot {
+  letterFullName?: string | null;
+  letterAddress?: string | null;
+  positionTitle?: string | null;
+  jobType?: OfferLetterJobType | null;
+  weeklyHours?: number;
+  workLocation?: string | null;
+  roleResponsibilities?: string[];
+  positionOverviewHtml?: string | null;
+  trainingOutcomes?: string[];
+  trainingOutcomesHtml?: string | null;
+  compensationNarrative?: string | null;
+  academicAlignmentNote?: string | null;
+  employmentEligibilityLines?: string[];
+  supervisor?: {
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    email?: string;
+  };
+  letterDate?: string | null;
+  joiningDate?: string | null;
+  ctcBreakdown?: CtcBreakdown;
+}
+
+export interface OfferLetterVersion {
+  version: number;
+  savedAt: string;
+  savedBy?: { _id?: string; name?: string; email?: string } | string | null;
+  snapshot: OfferLetterVersionSnapshot;
+}
+
 export interface Offer {
   _id: string;
   id?: string;
@@ -97,6 +130,10 @@ export interface Offer {
   letterDate?: string | null;
   offerLetterGeneratedAt?: string | null;
   compensationType?: 'paid' | 'unpaid';
+  /** Monotonic letter save counter (survives trimmed history). */
+  letterVersionSeq?: number;
+  /** Immutable letter snapshots from each successful Save letter (GET /offers/:id only). */
+  letterVersions?: OfferLetterVersion[];
   createdBy?: { _id: string; name?: string; email?: string };
   createdAt?: string;
   updatedAt?: string;
@@ -229,6 +266,9 @@ export async function deleteOffer(id: string): Promise<void> {
 export interface OfferLetterDefaultsResponse {
   roleResponsibilities: string[];
   trainingOutcomes: string[];
+  /** When jobId is passed, backend may return the job's JD HTML. */
+  positionOverviewHtml?: string;
+  trainingOutcomesHtml?: string;
 }
 
 export async function getOfferLetterDefaults(

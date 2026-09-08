@@ -16,10 +16,14 @@ const CreateOffer = () => {
     if (typeof window !== "undefined") {
       sessionStorage.setItem("dharwin:offerLetterAutoSaveAfterOpen", "1");
     }
-    const q = new URLSearchParams();
-    q.set("refresh", String(Date.now()));
-    if (/^[0-9a-fA-F]{24}$/.test(newId)) q.set("openLetter", newId);
-    router.push(`/ats/offers-placement?${q.toString()}`);
+    if (/^[0-9a-fA-F]{24}$/.test(newId)) {
+      // SSR letter page — versioning + server prefetch (not the retired list modal)
+      router.push(
+        `/ats/offers-placement/offer-letter/new/?offerId=${encodeURIComponent(newId)}`
+      );
+      return;
+    }
+    router.push("/ats/offers-placement");
   };
 
   return (
