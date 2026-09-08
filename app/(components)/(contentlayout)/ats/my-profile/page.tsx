@@ -13,6 +13,7 @@ import type { User, ActivityLog } from "@/shared/lib/types";
 import { getDocumentDownloadUrl } from "@/shared/lib/api/candidates";
 import { getMyMatchingJobs } from "@/shared/lib/api/employees";
 import type { JobMatch } from "@/shared/lib/api/employees";
+import JobMatchCard from "../employees/_components/JobMatchCard";
 import { formatPhoneForDisplay } from "@/shared/lib/phoneCountries";
 import {
   getEmployeeProfileDesignationDisplay,
@@ -727,7 +728,31 @@ function DynamicProfileView({
 
         <div className="col-span-12 lg:col-span-8 xl:col-span-8 xxl:col-span-9">
           <div className="rounded-2xl border border-defaultborder/70 bg-white shadow-sm ring-1 ring-black/[0.03] dark:bg-bodybg2 dark:border-defaultborder/20 dark:ring-white/[0.04]">
-            <div className="flex items-center gap-1 overflow-x-auto border-b border-defaultborder/60 px-3 pt-3 dark:border-defaultborder/15">
+            <div
+              role="tablist"
+              aria-label="Profile sections"
+              className="flex items-center gap-1 overflow-x-auto border-b border-defaultborder/60 px-3 pt-3 dark:border-defaultborder/15"
+              onKeyDown={(e) => {
+                const tabs = (
+                  [
+                    { id: "overview" as const },
+                    { id: "activity" as const },
+                    ...(isEmployeeOrCandidate ? [{ id: "jobs" as const }] : []),
+                  ]
+                );
+                const idx = tabs.findIndex((t) => t.id === activeTab);
+                if (idx < 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+                e.preventDefault();
+                let next = idx;
+                if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
+                if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
+                if (e.key === "Home") next = 0;
+                if (e.key === "End") next = tabs.length - 1;
+                const id = tabs[next].id;
+                setActiveTab(id);
+                queueMicrotask(() => document.getElementById(`my-profile-tab-${id}`)?.focus());
+              }}
+            >
               {(
                 [
                   { id: "overview" as const, label: "Overview", icon: "ri-user-3-line", count: undefined as number | undefined },
@@ -741,7 +766,12 @@ function DynamicProfileView({
                 return (
                   <button
                     key={tab.id}
+                    id={`my-profile-tab-${tab.id}`}
                     type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    aria-controls={`my-profile-panel-${tab.id}`}
+                    tabIndex={isActive ? 0 : -1}
                     onClick={() => setActiveTab(tab.id)}
                     className={`relative -mb-px inline-flex items-center gap-1.5 whitespace-nowrap rounded-t-lg border-b-2 px-3.5 py-2.5 text-[0.8125rem] font-semibold transition-colors ${
                       isActive
@@ -749,7 +779,7 @@ function DynamicProfileView({
                         : "border-transparent text-textmuted hover:text-defaulttextcolor dark:text-white/55 dark:hover:text-white/85"
                     }`}
                   >
-                    <i className={`${tab.icon} text-[0.95rem]`} />
+                    <i className={`${tab.icon} text-[0.95rem]`} aria-hidden />
                     {tab.label}
                     {typeof tab.count === "number" && tab.count > 0 && (
                       <span
@@ -766,7 +796,7 @@ function DynamicProfileView({
             </div>
 
             {activeTab === "overview" && (
-              <div className="space-y-5 p-4 md:p-5 motion-safe:animate-[fadeIn_0.3s_ease-out]">
+              <div role="tabpanel" id="my-profile-panel-overview" aria-labelledby="my-profile-tab-overview" className="space-y-5 p-4 md:p-5 motion-safe:animate-[fadeIn_0.3s_ease-out]">
                 <section>
                   <Eyebrow>Personal Information</Eyebrow>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -877,7 +907,7 @@ function DynamicProfileView({
             )}
 
             {activeTab === "activity" && (
-              <div className="p-4 md:p-5 motion-safe:animate-[fadeIn_0.3s_ease-out]">
+              <div role="tabpanel" id="my-profile-panel-activity" aria-labelledby="my-profile-tab-activity" className="p-4 md:p-5 motion-safe:animate-[fadeIn_0.3s_ease-out]">
                 {activitiesLoading ? (
                   <div className="space-y-3">
                     {[0, 1, 2, 3, 4].map((i) => (
@@ -964,7 +994,7 @@ function DynamicProfileView({
             )}
 
             {activeTab === "jobs" && isEmployeeOrCandidate && (
-              <div className="p-4 md:p-5 motion-safe:animate-[fadeIn_0.3s_ease-out]">
+              <div role="tabpanel" id="my-profile-panel-jobs" aria-labelledby="my-profile-tab-jobs" className="p-4 md:p-5 motion-safe:animate-[fadeIn_0.3s_ease-out]">
                 {!candidate?.skills?.length ? (
                   <div className="py-12 text-center">
                     <span className="mx-auto mb-2 inline-flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -1013,109 +1043,18 @@ function DynamicProfileView({
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {matchingJobs.map((job) => {
-                      const scoreTone =
-                        job.fitScore >= 80
-                          ? {
-                              bar: "bg-emerald-500",
-                              text: "text-emerald-600 dark:text-emerald-400",
-                              bg: "bg-emerald-500/10",
-                              ring: "ring-emerald-500/20",
-                            }
-                          : job.fitScore >= 60
-                          ? {
-                              bar: "bg-sky-500",
-                              text: "text-sky-600 dark:text-sky-400",
-                              bg: "bg-sky-500/10",
-                              ring: "ring-sky-500/20",
-                            }
-                          : job.fitScore >= 40
-                          ? {
-                              bar: "bg-amber-500",
-                              text: "text-amber-600 dark:text-amber-400",
-                              bg: "bg-amber-500/10",
-                              ring: "ring-amber-500/20",
-                            }
-                          : {
-                              bar: "bg-slate-400",
-                              text: "text-textmuted",
-                              bg: "bg-slate-500/10",
-                              ring: "ring-slate-500/20",
-                            };
-                      return (
-                        <div
-                          key={job.jobId}
-                          className="group flex flex-col gap-3 rounded-xl border border-defaultborder/70 bg-gradient-to-br from-white via-white to-slate-50/60 p-4 shadow-sm ring-1 ring-black/[0.03] transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md dark:from-bodybg dark:via-bodybg dark:to-white/[0.02] dark:border-defaultborder/20 dark:ring-white/[0.04]"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <p className="m-0 truncate text-[0.9rem] font-semibold tracking-tight text-defaulttextcolor dark:text-white">
-                                {job.title}
-                              </p>
-                              <p className="m-0 mt-0.5 truncate text-[0.72rem] text-textmuted dark:text-white/55">
-                                {job.company && <span>{job.company}</span>}
-                                {job.location && (
-                                  <span>
-                                    {job.company ? " · " : ""}
-                                    {job.location}
-                                  </span>
-                                )}
-                              </p>
-                            </div>
-                            <div
-                              className={`flex shrink-0 flex-col items-center rounded-lg px-2.5 py-1 ring-1 ${scoreTone.bg} ${scoreTone.ring}`}
-                            >
-                              <span className={`text-[1rem] font-bold leading-none ${scoreTone.text}`}>
-                                {job.fitScore}%
-                              </span>
-                              <span
-                                className={`text-[0.55rem] font-semibold uppercase tracking-[0.08em] ${scoreTone.text}`}
-                              >
-                                {job.fitLabel}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="h-1 w-full overflow-hidden rounded-full bg-defaultborder/40 dark:bg-white/5">
-                            <div
-                              className={`h-full ${scoreTone.bar} transition-[width] duration-700 ease-out`}
-                              style={{ width: `${Math.max(2, Math.min(100, job.fitScore))}%` }}
-                              aria-hidden
-                            />
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {job.jobType && (
-                              <span className="inline-flex items-center gap-1 rounded-full border border-defaultborder bg-white/80 px-2 py-0.5 text-[0.65rem] font-medium text-textmuted dark:border-defaultborder/20 dark:bg-white/5 dark:text-white/55">
-                                {job.jobType}
-                              </span>
-                            )}
-                            {job.matchedSkills.slice(0, 3).map((s) => (
-                              <span
-                                key={s.name}
-                                className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[0.65rem] font-medium text-emerald-700 dark:text-emerald-300"
-                              >
-                                <i className="ri-check-line text-[0.7rem]" />
-                                {s.name}
-                              </span>
-                            ))}
-                            {job.missingSkills.slice(0, 2).map((s) => (
-                              <span
-                                key={s.name}
-                                className="inline-flex items-center rounded-full border border-defaultborder bg-white/80 px-2 py-0.5 text-[0.65rem] font-medium text-textmuted dark:border-defaultborder/20 dark:bg-white/5 dark:text-white/55"
-                              >
-                                {s.name}
-                              </span>
-                            ))}
-                          </div>
-                          <Link
-                            href={`/ats/browse-jobs/${job.jobId}`}
-                            className="ti-btn ti-btn-primary !h-9 !py-0 !px-4 mt-auto inline-flex w-full items-center justify-center !text-[0.78rem] font-medium"
-                          >
-                            <i className="ri-send-plane-line me-1.5" />
-                            Apply Now
-                          </Link>
-                        </div>
-                      );
-                    })}
+                    {matchingJobs.map((job) => (
+                      <JobMatchCard
+                        key={job.jobId}
+                        job={job}
+                        variant="profile"
+                        cta={{
+                          href: `/ats/browse-jobs/${job.jobId}`,
+                          label: "Apply Now",
+                          icon: "ri-send-plane-line",
+                        }}
+                      />
+                    ))}
                   </div>
                 )}
               </div>
