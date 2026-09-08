@@ -103,16 +103,34 @@ export function monthStripDays(
 ): Array<{ date: string; hours: number; heightPct: number; kind: "present" | "late" | "leave" | "today" }> {
   const todayIso =
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  const rows = records
-    .map((r) => ({ r, day: String(r.date).slice(0, 10), mins: r.duration ?? 0 }))
-    .sort((a, b) => a.day.localeCompare(b.day));
-  if (rows.length === 0) return [];
-  const max = Math.max(1, ...rows.map((x) => x.mins));
-  return rows.map(({ r, day, mins }) => {
+  const kindPriority: Record<"present" | "late" | "leave", number> = { present: 1, late: 2, leave: 3 };
+  const byDay = new Map<string, { mins: number; kind: "present" | "late" | "leave" }>();
+
+  for (const r of records) {
+    const day = String(r.date).slice(0, 10);
     const status = String(r.status ?? "").toLowerCase();
-    let kind: "present" | "late" | "leave" | "today" = "present";
+    let kind: "present" | "late" | "leave" = "present";
     if (status === "leave") kind = "leave";
     else if (status === "late") kind = "late";
+
+    const mins = r.duration ?? 0;
+    const existing = byDay.get(day);
+    if (!existing) {
+      byDay.set(day, { mins, kind });
+      continue;
+    }
+    existing.mins += mins;
+    if (kindPriority[kind] > kindPriority[existing.kind]) existing.kind = kind;
+  }
+
+  if (byDay.size === 0) return [];
+
+  const rows = [...byDay.entries()]
+    .map(([day, { mins, kind }]) => ({ day, mins, kind }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  const max = Math.max(1, ...rows.map((x) => x.mins));
+  return rows.map(({ day, mins, kind: baseKind }) => {
+    let kind: "present" | "late" | "leave" | "today" = baseKind;
     if (day === todayIso) kind = "today";
     return {
       date: day,

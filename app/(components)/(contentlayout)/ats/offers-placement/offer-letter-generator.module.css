@@ -457,6 +457,24 @@
   color: #b45309;
 }
 
+.freelancePayGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.freelancePayOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
 .input,
 .select,
 .textarea {

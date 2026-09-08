@@ -8,17 +8,94 @@ const OFFER_LETTER_SAVE_API_TIMEOUT_MS = 120_000;
 
 export type OfferStatus = "Draft" | "Active" | "Sent" | "Under Negotiation" | "Accepted" | "Rejected";
 
-/** Must match backend offer letter job types */
-export type OfferLetterJobType = "FT_40" | "PT_25" | "INTERN_UNPAID";
+/** Must match backend `JOB_TYPES` in constants/atsPipeline.js */
+export type OfferLetterJobType =
+  | "FT_40"
+  | "PT_25"
+  | "CONTRACT"
+  | "TEMPORARY"
+  | "INTERN_UNPAID"
+  | "FREELANCE_PAID"
+  | "FREELANCE_UNPAID";
+
+/** Job-posting vocabulary — shared with Employee.employmentType */
+export type EmploymentCategory =
+  | "Full-time"
+  | "Part-time"
+  | "Contract"
+  | "Temporary"
+  | "Internship"
+  | "Freelance";
 
 export const JOB_TYPES: { value: OfferLetterJobType; label: string; compensationType: "paid" | "unpaid" }[] = [
   { value: "FT_40", label: "Full time – 40 hours/week", compensationType: "paid" },
   { value: "PT_25", label: "Part time – 20 hours/week", compensationType: "paid" },
+  { value: "CONTRACT", label: "Contract", compensationType: "paid" },
+  { value: "TEMPORARY", label: "Temporary", compensationType: "paid" },
   { value: "INTERN_UNPAID", label: "Training / Unpaid Internship (Full Time)", compensationType: "unpaid" },
+  { value: "FREELANCE_PAID", label: "Freelance (Paid)", compensationType: "paid" },
+  { value: "FREELANCE_UNPAID", label: "Freelance (Unpaid)", compensationType: "unpaid" },
+];
+
+export const EMPLOYMENT_CATEGORIES: { value: EmploymentCategory; label: string }[] = [
+  { value: "Full-time", label: "Full-time" },
+  { value: "Part-time", label: "Part-time" },
+  { value: "Contract", label: "Contract" },
+  { value: "Temporary", label: "Temporary" },
+  { value: "Internship", label: "Training / Unpaid Internship" },
+  { value: "Freelance", label: "Freelance" },
 ];
 
 export const compensationTypeForJobType = (jobType?: OfferLetterJobType): "paid" | "unpaid" =>
   JOB_TYPES.find((t) => t.value === jobType)?.compensationType ?? "paid";
+
+export const isInternOfferJobType = (jobType?: OfferLetterJobType): boolean => jobType === "INTERN_UNPAID";
+
+export const isUnpaidOfferJobType = (jobType?: OfferLetterJobType): boolean =>
+  compensationTypeForJobType(jobType) === "unpaid";
+
+export function employmentCategoryFromOfferJobType(jobType?: OfferLetterJobType): EmploymentCategory {
+  switch (jobType) {
+    case "PT_25":
+      return "Part-time";
+    case "CONTRACT":
+      return "Contract";
+    case "TEMPORARY":
+      return "Temporary";
+    case "INTERN_UNPAID":
+      return "Internship";
+    case "FREELANCE_PAID":
+    case "FREELANCE_UNPAID":
+      return "Freelance";
+    default:
+      return "Full-time";
+  }
+}
+
+/** Collapses Freelance category + pay choice into one offer enum value. */
+export function offerJobTypeFromEmployment(
+  category: EmploymentCategory,
+  freelancePay: "paid" | "unpaid" = "paid"
+): OfferLetterJobType {
+  switch (category) {
+    case "Part-time":
+      return "PT_25";
+    case "Contract":
+      return "CONTRACT";
+    case "Temporary":
+      return "TEMPORARY";
+    case "Internship":
+      return "INTERN_UNPAID";
+    case "Freelance":
+      return freelancePay === "unpaid" ? "FREELANCE_UNPAID" : "FREELANCE_PAID";
+    default:
+      return "FT_40";
+  }
+}
+
+export function freelancePayFromOfferJobType(jobType?: OfferLetterJobType): "paid" | "unpaid" {
+  return jobType === "FREELANCE_UNPAID" ? "unpaid" : "paid";
+}
 
 export interface CtcBreakdown {
   base?: number;
@@ -269,6 +346,8 @@ export interface OfferLetterDefaultsResponse {
   /** When jobId is passed, backend may return the job's JD HTML. */
   positionOverviewHtml?: string;
   trainingOutcomesHtml?: string;
+  /** Suggested offer job type from the linked job posting (default only, not enforced). */
+  suggestedJobType?: OfferLetterJobType;
 }
 
 export async function getOfferLetterDefaults(

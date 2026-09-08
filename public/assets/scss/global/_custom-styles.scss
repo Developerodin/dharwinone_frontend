@@ -898,7 +898,7 @@ h6 {
 @apply border-0 #{!important};
 }
 
-.product-checkout{
+ .product-checkout{
   .basicsteps{
     .btn{
       &.active{
@@ -911,6 +911,9 @@ h6 {
         @apply bg-light w-[1.875rem] h-[1.875rem] flex items-center justify-center rounded-full me-2 #{!important};
       }
     }
+  }
+  .wizard-step-number {
+    @apply text-[#6b7280] dark:text-white/70 opacity-80 #{!important};
   }
 }
 .basicsteps {

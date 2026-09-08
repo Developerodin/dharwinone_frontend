@@ -1,4 +1,5 @@
 import type { Offer, UpdateOfferPayload } from "@/shared/lib/api/offers"
+import { isUnpaidOfferJobType } from "@/shared/lib/api/offers"
 import { buildEligibilityLinesFromForm, type OfferLetterFormFields } from "./OfferLetterGeneratorWorkspace"
 import { roleResponsibilityLinesFromHtml } from "@/shared/lib/ats/jobDescriptionHtml"
 import { letterDateStampYmd } from "./letter-date-stamp"
@@ -45,7 +46,7 @@ export function buildOfferLetterUpdatePayload(
     joiningDate: letterForm.joiningDate ? letterForm.joiningDate : null,
     letterDate: letterForm.letterDate?.trim() ? letterForm.letterDate.trim() : letterDateStampYmd(),
   }
-  if (letterForm.jobType !== "INTERN_UNPAID") {
+  if (!isUnpaidOfferJobType(letterForm.jobType)) {
     const g = Number(String(letterForm.annualGrossCtc).replace(/,/g, ""))
     const cb = offerForCtc?.ctcBreakdown
     if (Number.isFinite(g) && g >= 0) {

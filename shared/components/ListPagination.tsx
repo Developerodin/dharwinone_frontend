@@ -14,6 +14,8 @@ export type ListPaginationProps = {
   className?: string;
   /** 44px min touch targets on pager controls (mobile-friendly lists). */
   touchFriendly?: boolean;
+  /** When true, hide page controls when totalPages <= 1 (summary row still visible). */
+  hideWhenSinglePage?: boolean;
 };
 
 /**
@@ -29,6 +31,7 @@ export default function ListPagination({
   gotoInputId,
   className,
   touchFriendly = false,
+  hideWhenSinglePage = false,
 }: ListPaginationProps) {
   const touchClass = touchFriendly
     ? "[&_.page-link]:!min-h-11 [&_.page-link]:!min-w-11 [&_.page-link]:!inline-flex [&_.page-link]:!items-center [&_.page-link]:!justify-center [&_.ti-btn]:!min-h-11 [&_input.ti-form-control]:!min-h-11"
@@ -41,6 +44,9 @@ export default function ListPagination({
   const safeTotalPages = Math.max(0, totalPages);
   const atStart = page <= 1;
   const atEnd = page >= safeTotalPages || safeTotalPages === 0;
+  const showPager = !hideWhenSinglePage || safeTotalPages > 1;
+  const disabledNavClass = (disabled: boolean) =>
+    disabled ? "opacity-50 cursor-not-allowed" : "";
 
   return (
     <div className={`flex flex-wrap items-center gap-4 ${touchClass} ${className ?? ""}`}>
@@ -48,15 +54,17 @@ export default function ListPagination({
         Showing {start} to {end} of {totalResults} entries{" "}
         <i className="bi bi-arrow-right ms-2 font-semibold" />
       </div>
+      {showPager ? (
       <div className="ms-auto flex flex-wrap items-center gap-x-4 gap-y-2">
         <nav aria-label={ariaLabel} className="pagination-style-4">
           <ul className="ti-pagination mb-0">
             <li className={`page-item ${atStart ? "disabled" : ""}`}>
               <button
                 type="button"
-                className="page-link px-3 py-[0.375rem]"
+                className={`page-link px-3 py-[0.375rem] ${disabledNavClass(atStart)}`}
                 onClick={() => onPageChange(page - 1)}
                 disabled={atStart}
+                aria-disabled={atStart}
               >
                 Prev
               </button>
@@ -86,9 +94,10 @@ export default function ListPagination({
             <li className={`page-item ${atEnd ? "disabled" : ""}`}>
               <button
                 type="button"
-                className="page-link px-3 py-[0.375rem] text-primary"
+                className={`page-link px-3 py-[0.375rem] text-primary ${disabledNavClass(atEnd)}`}
                 onClick={() => onPageChange(page + 1)}
                 disabled={atEnd}
+                aria-disabled={atEnd}
               >
                 Next
               </button>
@@ -133,6 +142,7 @@ export default function ListPagination({
           </form>
         )}
       </div>
+      ) : null}
     </div>
   );
 }

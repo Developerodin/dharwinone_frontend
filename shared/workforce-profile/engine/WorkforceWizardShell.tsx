@@ -38,6 +38,7 @@ export function WorkforceWizardShell({
     submit,
     goNext,
     validationOverlay,
+    dismissValidationOverlay,
   } = useWizardContext();
 
   const stepRegionRef = useRef<HTMLDivElement>(null);
@@ -137,6 +138,7 @@ export function WorkforceWizardShell({
         testId="wizard-validation-overlay"
         titleId="wizard-validation-title"
         descId="wizard-validation-desc"
+        onDismiss={dismissValidationOverlay}
       />
     </div>
   );

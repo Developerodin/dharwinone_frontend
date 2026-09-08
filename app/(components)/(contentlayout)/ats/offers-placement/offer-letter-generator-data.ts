@@ -1,5 +1,7 @@
 /** Client-side templates for offer letter generator (preview + auto-fill). */
 
+import type { OfferLetterJobType } from "@/shared/lib/api/offers";
+
 export type EligibilityPresetKey =
   | 'opt_regular'
   | 'opt_stem'
@@ -402,41 +404,33 @@ export function fmtCurrencyParts(val: string, cur: string): { annual: string; mo
   return { annual: sym + annual, monthly: sym + monthly, sym, cur }
 }
 
-/** Default weekly hours per UI job type, used when an explicit value isn't supplied. */
-export function getDefaultWeeklyHours(jobTypeUi: 'fulltime' | 'parttime' | 'internship'): number {
-  return jobTypeUi === 'parttime' ? 20 : 40
+/** Default weekly hours per offer job type when an explicit value isn't supplied. */
+export function getDefaultWeeklyHours(jobType: OfferLetterJobType): number {
+  return jobType === "PT_25" ? 20 : 40;
 }
 
-export function getJobHoursLabel(
-  jobTypeUi: 'fulltime' | 'parttime' | 'internship',
-  weeklyHours?: number,
-): string {
-  const h = weeklyHours && weeklyHours > 0 ? weeklyHours : getDefaultWeeklyHours(jobTypeUi)
-  return `${h} hours per week`
+export function getJobHoursLabel(jobType: OfferLetterJobType, weeklyHours?: number): string {
+  const h = weeklyHours && weeklyHours > 0 ? weeklyHours : getDefaultWeeklyHours(jobType);
+  return `${h} hours per week`;
 }
 
 /** Job type label with hours derived from the Working hours field (never hardcoded). */
-export function getJobTypeLabelUi(
-  jobTypeUi: 'fulltime' | 'parttime' | 'internship',
-  weeklyHours?: number,
-): string {
-  if (jobTypeUi === 'internship') return 'Training / Unpaid Internship (Full Time)'
-  const h = weeklyHours && weeklyHours > 0 ? weeklyHours : getDefaultWeeklyHours(jobTypeUi)
-  if (jobTypeUi === 'fulltime') return `Full-Time (${h} Hours per Week)`
-  return `Part Time (${h} Hours per Week)`
-}
-
-/** Map API job type to UI pill value */
-export function apiJobTypeToUi(j: 'FT_40' | 'PT_25' | 'INTERN_UNPAID'): 'fulltime' | 'parttime' | 'internship' {
-  if (j === 'PT_25') return 'parttime'
-  if (j === 'INTERN_UNPAID') return 'internship'
-  return 'fulltime'
-}
-
-export function uiJobTypeToApi(j: 'fulltime' | 'parttime' | 'internship'): 'FT_40' | 'PT_25' | 'INTERN_UNPAID' {
-  if (j === 'parttime') return 'PT_25'
-  if (j === 'internship') return 'INTERN_UNPAID'
-  return 'FT_40'
+export function getJobTypeLabel(jobType: OfferLetterJobType, weeklyHours?: number): string {
+  if (jobType === "INTERN_UNPAID") return "Training / Unpaid Internship (Full Time)";
+  if (jobType === "FREELANCE_UNPAID") return "Freelance (Unpaid)";
+  const h = weeklyHours && weeklyHours > 0 ? weeklyHours : getDefaultWeeklyHours(jobType);
+  switch (jobType) {
+    case "PT_25":
+      return `Part Time (${h} Hours per Week)`;
+    case "CONTRACT":
+      return `Contract (${h} Hours per Week)`;
+    case "TEMPORARY":
+      return `Temporary (${h} Hours per Week)`;
+    case "FREELANCE_PAID":
+      return `Freelance (${h} Hours per Week)`;
+    default:
+      return `Full-Time (${h} Hours per Week)`;
+  }
 }
 
 export function escHtml(s: string): string {

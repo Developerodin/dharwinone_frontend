@@ -57,6 +57,7 @@ export interface Job {
   maxExperience?: number | null;
   /** Number of openings for this posting. */
   vacancies?: number | null;
+  applicationDeadline?: string | null;
   status: string;
   /** internal = ATS-created; external = mirrored from saved external listing */
   jobOrigin?: "internal" | "external";
@@ -205,6 +206,7 @@ export interface CreateJobPayload {
   minExperience?: number | null;
   maxExperience?: number | null;
   vacancies?: number | null;
+  applicationDeadline?: string | null;
   status?: string;
 }
 
@@ -225,6 +227,7 @@ export interface UpdateJobPayload {
   minExperience?: number | null;
   maxExperience?: number | null;
   vacancies?: number | null;
+  applicationDeadline?: string | null;
   status?: string;
 }
 
@@ -240,6 +243,7 @@ export async function deleteJob(id: string): Promise<void> {
 export interface BrowseJobsParams {
   search?: string;
   jobType?: string;
+  jobTypes?: string[];
   location?: string;
   experienceLevel?: string;
   jobOrigin?: "internal" | "external";
@@ -426,6 +430,7 @@ export interface PublicJobsListParams {
   search?: string;
   location?: string;
   jobType?: string;
+  jobTypes?: string[];
   experienceLevel?: string;
   jobOrigin?: "internal" | "external";
   sortBy?: string;
@@ -444,6 +449,7 @@ export interface PublicJob {
   salaryRange?: JobSalaryRange;
   experienceLevel?: string;
   createdAt?: string;
+  applicationDeadline?: string;
   status?: string;
   jobOrigin?: "internal" | "external";
   externalPlatformUrl?: string;
@@ -458,7 +464,18 @@ export interface PublicJobsListResponse {
 }
 
 export async function getPublicJobs(params?: PublicJobsListParams): Promise<PublicJobsListResponse> {
-  const { data } = await publicApiClient.get<PublicJobsListResponse>("/public/jobs", { params });
+  const query: Record<string, string | number> = {};
+  if (params?.title) query.title = params.title;
+  if (params?.search) query.search = params.search;
+  if (params?.location) query.location = params.location;
+  if (params?.jobTypes?.length) query.jobTypes = params.jobTypes.join(",");
+  else if (params?.jobType) query.jobType = params.jobType;
+  if (params?.experienceLevel) query.experienceLevel = params.experienceLevel;
+  if (params?.jobOrigin) query.jobOrigin = params.jobOrigin;
+  if (params?.sortBy) query.sortBy = params.sortBy;
+  if (params?.limit != null) query.limit = params.limit;
+  if (params?.page != null) query.page = params.page;
+  const { data } = await publicApiClient.get<PublicJobsListResponse>("/public/jobs", { params: query });
   return data;
 }
 
@@ -588,6 +605,42 @@ export async function addJobBookmark(
 
 export async function deleteJobBookmark(jobId: string, bookmarkId: string): Promise<void> {
   await apiClient.delete(`/jobs/${jobId}/bookmarks/${bookmarkId}`);
+}
+
+export async function listBookmarkedJobIds(): Promise<string[]> {
+  const { data } = await apiClient.get<{ ids: string[] }>("/jobs/bookmarked-ids");
+  return data.ids ?? [];
+}
+
+export async function unsaveMyJobBookmarks(jobId: string): Promise<{ removed: number }> {
+  const { data } = await apiClient.delete<{ removed: number }>(`/jobs/${jobId}/bookmarks/me`);
+  return data;
+}
+
+export interface JobAlertCriteria {
+  jobTypes?: string[];
+  location?: string;
+  experienceLevel?: string;
+  jobOrigin?: "" | "internal" | "external";
+  search?: string;
+}
+
+export interface JobAlertPreference {
+  enabled: boolean;
+  criteria: JobAlertCriteria;
+  channels: { email: boolean; inApp: boolean };
+}
+
+export async function getJobAlertPreference(): Promise<JobAlertPreference> {
+  const { data } = await apiClient.get<JobAlertPreference>("/jobs/job-alerts/me");
+  return data;
+}
+
+export async function updateJobAlertPreference(
+  payload: Partial<JobAlertPreference>
+): Promise<JobAlertPreference> {
+  const { data } = await apiClient.patch<JobAlertPreference>("/jobs/job-alerts/me", payload);
+  return data;
 }
 
 export interface JobStatsFunnelRow {

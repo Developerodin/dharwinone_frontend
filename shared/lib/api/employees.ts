@@ -51,6 +51,7 @@ export interface CandidateListItem {
   /** Denormalized title from job-application / referral flow; used when aligning HRMS position to applied role. */
   referralJobTitle?: string | null;
   compensationType?: 'paid' | 'unpaid';
+  employmentType?: 'Full-time' | 'Part-time' | 'Contract' | 'Temporary' | 'Internship' | 'Freelance' | null;
   recruiterFeedback?: string | null;
   recruiterRating?: number | null;
   recruiterNotes?: RecruiterNote[];
@@ -116,6 +117,7 @@ export interface ListCandidatesParams {
   agentIds?: string;
   employmentStatus?: "current" | "resigned" | "all" | "";
   compensationType?: "paid" | "unpaid";
+  employmentType?: "Full-time" | "Part-time" | "Contract" | "Temporary" | "Internship" | "Freelance";
   page?: number;
   limit?: number;
   sortBy?: string;

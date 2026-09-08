@@ -8,6 +8,7 @@ const baseFilters: EmployeeListFilterState = {
   agentIds: ['agent-1', 'agent-2'],
   employmentStatus: 'current',
   compensationType: 'paid',
+  employmentType: 'Contract',
 }
 
 describe('buildEmployeesListQueryParams', () => {
@@ -29,6 +30,7 @@ describe('buildEmployeesListQueryParams', () => {
       agentIds: 'agent-1,agent-2',
       employmentStatus: 'current',
       compensationType: 'paid',
+      employmentType: 'Contract',
     })
   })
 
@@ -40,6 +42,25 @@ describe('buildEmployeesListQueryParams', () => {
 
     expect(params.compensationType).toBeUndefined()
     expect(params.employmentStatus).toBe('current')
+  })
+
+  it('sends employmentType independently of compensationType', () => {
+    // The two are orthogonal: an unpaid freelancer is neither an intern nor a paid contractor,
+    // so selecting one must not imply or clear the other.
+    const params = buildEmployeesListQueryParams(
+      { ...baseFilters, compensationType: 'unpaid', employmentType: 'Freelance' },
+      {}
+    )
+
+    expect(params.compensationType).toBe('unpaid')
+    expect(params.employmentType).toBe('Freelance')
+  })
+
+  it('omits employmentType when filter is All', () => {
+    const params = buildEmployeesListQueryParams({ ...baseFilters, employmentType: '' }, {})
+
+    expect(params.employmentType).toBeUndefined()
+    expect(params.compensationType).toBe('paid')
   })
 
   it('export params mirror list filter keys without pagination or SOP count', () => {
@@ -62,12 +83,20 @@ describe('buildEmployeesListQueryParams', () => {
       agentIds: 'agent-1,agent-2',
       employmentStatus: 'current',
       compensationType: 'paid',
+      employmentType: 'Contract',
     })
     expect(exportParams.page).toBeUndefined()
     expect(exportParams.limit).toBeUndefined()
     expect(exportParams.includeOpenSopCount).toBeUndefined()
 
-    for (const key of ['search', 'agentIds', 'employmentStatus', 'compensationType', 'sortBy'] as const) {
+    for (const key of [
+      'search',
+      'agentIds',
+      'employmentStatus',
+      'compensationType',
+      'employmentType',
+      'sortBy',
+    ] as const) {
       expect(exportParams[key]).toEqual(listParams[key])
     }
   })

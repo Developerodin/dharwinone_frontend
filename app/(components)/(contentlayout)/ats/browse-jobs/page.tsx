@@ -4,23 +4,53 @@ import Seo from "@/shared/layout-components/seo/seo";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import React, { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { getPublicJobs, isExternalJob, type PublicJob } from "@/shared/lib/api/jobs";
-import { formatSalaryRange, mapExperienceLevel } from "@/shared/lib/ats/jobMappers";
+import {
+  getPublicJobs,
+  getJobAlertPreference,
+  updateJobAlertPreference,
+  isExternalJob,
+  type PublicJob,
+} from "@/shared/lib/api/jobs";
+import {
+  formatSalaryRange,
+  formatPostingDateMeta,
+  formatApplicationDeadlineMeta,
+  mapExperienceLevel,
+} from "@/shared/lib/ats/jobMappers";
 import {
   areBrowseJobsListQueryStringsEquivalent,
   buildBrowseJobsListQueryString,
   parseBrowseJobsListState,
   rememberBrowseJobsListQueryString,
 } from "@/shared/lib/ats/browseJobsListQuery";
+import { useAuth } from "@/shared/contexts/auth-context";
+import ListPagination from "@/shared/components/ListPagination";
 
 const JOB_TYPES = ["Full-time", "Part-time", "Contract", "Temporary", "Internship", "Freelance"];
 const EXPERIENCE_LEVELS = ["Entry Level", "Mid Level", "Senior Level", "Executive"];
 const PAGE_SIZE = 12;
 
+function normalizeJobOrigin(value: string): "" | "internal" | "external" {
+  return value === "internal" || value === "external" ? value : "";
+}
+
+function formatJobTypesLabel(jobTypes: string[]): string {
+  if (jobTypes.length === 0) return "All types";
+  if (jobTypes.length === 1) return jobTypes[0];
+  return `${jobTypes.length} selected`;
+}
+
+function deadlineUrgencyClass(urgency?: string): string {
+  if (urgency === "past") return "text-danger";
+  if (urgency === "near") return "text-warning";
+  return "";
+}
+
 export default function BrowseJobsPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { user } = useAuth();
   const initial = parseBrowseJobsListState(searchParams);
 
   const [jobs, setJobs] = useState<PublicJob[]>([]);
@@ -30,14 +60,39 @@ export default function BrowseJobsPage() {
   const [totalResults, setTotalResults] = useState(0);
   const [searchQuery, setSearchQuery] = useState(initial.search);
   const [debouncedSearch, setDebouncedSearch] = useState(initial.search);
-  const [jobType, setJobType] = useState(initial.jobType);
+  const [jobTypes, setJobTypes] = useState<string[]>(initial.jobTypes);
   const [location, setLocation] = useState(initial.location);
   const [experienceLevel, setExperienceLevel] = useState(initial.experienceLevel);
   const [sortBy, setSortBy] = useState(initial.sortBy);
   const [jobOrigin, setJobOrigin] = useState(initial.jobOrigin);
+  const [jobAlertsOn, setJobAlertsOn] = useState(false);
+  const [jobAlertsSaving, setJobAlertsSaving] = useState(false);
+  const [jobTypesOpen, setJobTypesOpen] = useState(false);
 
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevDebouncedSearchRef = useRef(initial.search);
+  const jobTypesDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setJobAlertsOn(false);
+      return;
+    }
+    getJobAlertPreference()
+      .then((pref) => setJobAlertsOn(!!pref.enabled))
+      .catch(() => setJobAlertsOn(false));
+  }, [user]);
+
+  useEffect(() => {
+    if (!jobTypesOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!jobTypesDropdownRef.current?.contains(event.target as Node)) {
+        setJobTypesOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [jobTypesOpen]);
 
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -59,7 +114,7 @@ export default function BrowseJobsPage() {
     const qs = buildBrowseJobsListQueryString({
       page,
       search: debouncedSearch,
-      jobType,
+      jobTypes,
       location,
       experienceLevel,
       sortBy,
@@ -73,7 +128,7 @@ export default function BrowseJobsPage() {
   }, [
     page,
     debouncedSearch,
-    jobType,
+    jobTypes,
     location,
     experienceLevel,
     sortBy,
@@ -96,7 +151,9 @@ export default function BrowseJobsPage() {
       prevDebouncedSearchRef.current = fromUrl.search;
       return fromUrl.search;
     });
-    setJobType((prev) => (prev === fromUrl.jobType ? prev : fromUrl.jobType));
+    setJobTypes((prev) =>
+      prev.join(",") === fromUrl.jobTypes.join(",") ? prev : fromUrl.jobTypes
+    );
     setLocation((prev) => (prev === fromUrl.location ? prev : fromUrl.location));
     setExperienceLevel((prev) => (prev === fromUrl.experienceLevel ? prev : fromUrl.experienceLevel));
     setSortBy((prev) => (prev === fromUrl.sortBy ? prev : fromUrl.sortBy));
@@ -109,12 +166,11 @@ export default function BrowseJobsPage() {
       limit: PAGE_SIZE,
       page,
       search: debouncedSearch.trim() || undefined,
-      jobType: jobType || undefined,
+      jobTypes: jobTypes.length ? jobTypes : undefined,
       location: location.trim() || undefined,
       experienceLevel: experienceLevel || undefined,
       sortBy,
-      jobOrigin:
-        jobOrigin === "internal" || jobOrigin === "external" ? (jobOrigin as "internal" | "external") : undefined,
+      jobOrigin: normalizeJobOrigin(jobOrigin) || undefined,
     })
       .then((res) => {
         const results = res.totalResults ?? 0;
@@ -129,7 +185,42 @@ export default function BrowseJobsPage() {
         setTotalResults(0);
       })
       .finally(() => setLoading(false));
-  }, [page, debouncedSearch, jobType, location, experienceLevel, sortBy, jobOrigin]);
+  }, [page, debouncedSearch, jobTypes, location, experienceLevel, sortBy, jobOrigin]);
+
+  const toggleJobType = (type: string) => {
+    setJobTypes((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+    );
+    setPage(1);
+  };
+
+  const clearJobTypes = () => {
+    setJobTypes([]);
+    setPage(1);
+  };
+
+  const handleJobAlertsToggle = async () => {
+    if (!user || jobAlertsSaving) return;
+    const next = !jobAlertsOn;
+    setJobAlertsSaving(true);
+    try {
+      await updateJobAlertPreference({
+        enabled: next,
+        criteria: {
+          jobTypes,
+          location: location.trim(),
+          experienceLevel,
+          jobOrigin: normalizeJobOrigin(jobOrigin),
+          search: debouncedSearch.trim(),
+        },
+      });
+      setJobAlertsOn(next);
+    } catch {
+      // leave toggle unchanged on failure
+    } finally {
+      setJobAlertsSaving(false);
+    }
+  };
 
   return (
     <Fragment>
@@ -137,40 +228,121 @@ export default function BrowseJobsPage() {
       <div className="container-fluid pt-6">
         <div className="box custom-box mb-4">
           <div className="box-body">
-            <div className="grid grid-cols-12 gap-4 items-end">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pb-3 mb-3 border-b border-defaultborder/60 dark:border-defaultborder/10">
+              <p className="text-sm text-defaulttextcolor/70 dark:text-white/60 mb-0 min-w-0 flex-1">
+                Get notified when new roles match your filters.
+              </p>
+              {user ? (
+                <button
+                  type="button"
+                  onClick={handleJobAlertsToggle}
+                  disabled={jobAlertsSaving}
+                  className={`ti-btn !mb-0 !h-auto !w-auto !min-h-11 !px-4 shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-70 ${
+                    jobAlertsOn
+                      ? "ti-btn-success"
+                      : "ti-btn-light border border-gray-200 dark:border-defaultborder/20"
+                  }`}
+                  aria-pressed={jobAlertsOn}
+                  aria-label={jobAlertsOn ? "Turn job alerts off" : "Turn job alerts on"}
+                  aria-busy={jobAlertsSaving}
+                >
+                  {jobAlertsSaving ? (
+                    <>
+                      <span
+                        className="spinner-border spinner-border-sm shrink-0"
+                        role="status"
+                        aria-hidden="true"
+                      />
+                      <span>Saving…</span>
+                    </>
+                  ) : (
+                    <>
+                      <i
+                        className={`bi ${jobAlertsOn ? "bi-bell-fill" : "bi-bell-slash"} text-[0.875rem] shrink-0`}
+                        aria-hidden
+                      />
+                      <span>{jobAlertsOn ? "Job alerts ON" : "Job alerts OFF"}</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <span className="text-xs text-defaulttextcolor/60 dark:text-white/50 shrink-0">
+                  Sign in to enable job alerts
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-12 gap-4 items-start">
               <div className="lg:col-span-3 col-span-12">
                 <label className="form-label">Search</label>
                 <input
                   type="text"
-                  className="form-control"
+                  className="form-control min-h-[2.75rem]"
                   placeholder="Title, company, location..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
-              <div className="lg:col-span-2 col-span-12">
-                <label className="form-label">Job Type</label>
-                <select
-                  className="form-select"
-                  value={jobType}
-                  onChange={(e) => {
-                    setJobType(e.target.value);
-                    setPage(1);
-                  }}
+              <div className="lg:col-span-2 col-span-12 relative" ref={jobTypesDropdownRef}>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="form-label mb-0" id="job-type-filter-label">
+                    Job Type
+                    {jobTypes.length > 0 ? ` (${jobTypes.length})` : ""}
+                  </label>
+                  {jobTypes.length > 0 && (
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline shrink-0 px-1 py-0.5"
+                      onClick={clearJobTypes}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="form-select text-start min-h-[2.75rem] flex items-center justify-between w-full"
+                  aria-expanded={jobTypesOpen}
+                  aria-controls="job-type-filter-panel"
+                  aria-labelledby="job-type-filter-label"
+                  onClick={() => setJobTypesOpen((o) => !o)}
                 >
-                  <option value="">All</option>
-                  {JOB_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                  <span className="truncate text-defaulttextcolor dark:text-white/90">
+                    {formatJobTypesLabel(jobTypes)}
+                  </span>
+                  <i className={`bi bi-chevron-${jobTypesOpen ? "up" : "down"} shrink-0`} aria-hidden />
+                </button>
+                {jobTypesOpen && (
+                  <div
+                    id="job-type-filter-panel"
+                    role="group"
+                    aria-labelledby="job-type-filter-label"
+                    className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border border-defaultborder dark:border-defaultborder/20 bg-white dark:bg-bodybg p-2 shadow-lg max-h-56 overflow-y-auto"
+                  >
+                    {JOB_TYPES.map((t) => {
+                      const checked = jobTypes.includes(t);
+                      return (
+                        <label
+                          key={t}
+                          className="flex items-center gap-3 min-h-[2.75rem] px-2 rounded hover:bg-defaultborder/10 dark:hover:bg-white/5 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            className="form-check-input !mt-0 shrink-0 border-defaultborder dark:border-white/30"
+                            checked={checked}
+                            onChange={() => toggleJobType(t)}
+                          />
+                          <span className="text-sm text-defaulttextcolor dark:text-white/80">{t}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <div className="lg:col-span-2 col-span-12">
                 <label className="form-label">Location</label>
                 <input
                   type="text"
-                  className="form-control"
+                  className="form-control min-h-[2.75rem]"
                   placeholder="City or region"
                   value={location}
                   onChange={(e) => {
@@ -182,7 +354,7 @@ export default function BrowseJobsPage() {
               <div className="lg:col-span-2 col-span-12">
                 <label className="form-label">Experience</label>
                 <select
-                  className="form-select"
+                  className="form-select min-h-[2.75rem]"
                   value={experienceLevel}
                   onChange={(e) => {
                     setExperienceLevel(e.target.value);
@@ -200,7 +372,7 @@ export default function BrowseJobsPage() {
               <div className="lg:col-span-2 col-span-12">
                 <label className="form-label">Sort</label>
                 <select
-                  className="form-select"
+                  className="form-select min-h-[2.75rem]"
                   value={sortBy}
                   onChange={(e) => {
                     setSortBy(e.target.value);
@@ -216,7 +388,7 @@ export default function BrowseJobsPage() {
               <div className="lg:col-span-1 col-span-12">
                 <label className="form-label">Listing</label>
                 <select
-                  className="form-select"
+                  className="form-select min-h-[2.75rem]"
                   value={jobOrigin}
                   onChange={(e) => {
                     setJobOrigin(e.target.value);
@@ -230,12 +402,6 @@ export default function BrowseJobsPage() {
               </div>
             </div>
           </div>
-        </div>
-
-        <div className="mb-4 text-defaulttextcolor dark:text-white/70">
-          {totalResults === 0
-            ? "No jobs"
-            : `Showing ${(page - 1) * PAGE_SIZE + 1}-${Math.min(page * PAGE_SIZE, totalResults)} of ${totalResults} job${totalResults !== 1 ? "s" : ""}`}
         </div>
 
         {loading ? (
@@ -253,7 +419,15 @@ export default function BrowseJobsPage() {
             {jobs.map((job, index) => {
               const id = job.id ?? "";
               const companyInitial = (job.organisation?.name || "J").charAt(0).toUpperCase();
+              const { relative: postedRelative } = formatPostingDateMeta(job.createdAt);
+              const deadlineMeta = formatApplicationDeadlineMeta(job.applicationDeadline);
               const metaParts = [
+                postedRelative && (
+                  <span key="posted" className="inline-flex items-center gap-1">
+                    <i className="bi bi-clock text-[0.75rem] opacity-70" aria-hidden />
+                    Posted {postedRelative}
+                  </span>
+                ),
                 job.location && (
                   <span key="loc" className="inline-flex items-center gap-1">
                     <i className="bi bi-geo-alt text-[0.75rem] opacity-70" />
@@ -278,6 +452,15 @@ export default function BrowseJobsPage() {
                     {formatSalaryRange(job.salaryRange)}
                   </span>
                 ),
+                deadlineMeta.label && (
+                  <span
+                    key="deadline"
+                    className={`inline-flex items-center gap-1 ${deadlineUrgencyClass(deadlineMeta.urgency)}`}
+                  >
+                    <i className="bi bi-calendar-event text-[0.75rem] opacity-70" aria-hidden />
+                    {deadlineMeta.label}
+                  </span>
+                ),
               ].filter(Boolean);
               return (
                 <Link
@@ -296,6 +479,9 @@ export default function BrowseJobsPage() {
                         <h5 className="font-semibold text-[1rem] text-defaulttextcolor dark:text-white group-hover:text-primary transition-colors mb-0">
                           {job.title}
                         </h5>
+                        <span className="badge bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 !rounded-md !px-2 !py-0.5 text-[0.65rem] font-semibold shrink-0">
+                          Open
+                        </span>
                         {isExternalJob(job) ? (
                           <span className="badge bg-info/15 text-info border border-info/30 !rounded-md !px-2 !py-0.5 text-[0.65rem] font-semibold shrink-0">
                             External
@@ -345,40 +531,16 @@ export default function BrowseJobsPage() {
 
         {!loading && totalResults > 0 && (
           <div className="mt-6 w-full border-t border-defaultborder dark:border-defaultborder/10 pt-4 pb-5 sm:pb-6">
-            <nav aria-label="Pagination" className="pagination-style-4 w-full">
-              <ul className="ti-pagination mb-0 flex flex-wrap items-center justify-center gap-1 sm:gap-2 max-w-full">
-                <li className={`page-item ${page <= 1 ? "disabled" : ""}`}>
-                  <button
-                    type="button"
-                    className="page-link min-h-[2.75rem] sm:min-h-0 flex items-center justify-center px-4"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page <= 1}
-                    aria-label={page > 1 ? `Previous page, page ${page - 1} of ${totalPages}` : "Previous page"}
-                  >
-                    Previous
-                  </button>
-                </li>
-                <li className="page-item shrink-0">
-                  <span
-                    className="page-link !text-defaulttextcolor dark:!text-white !bg-transparent whitespace-nowrap"
-                    aria-current="page"
-                  >
-                    Page {page} of {totalPages}
-                  </span>
-                </li>
-                <li className={`page-item ${page >= totalPages ? "disabled" : ""}`}>
-                  <button
-                    type="button"
-                    className="page-link !text-primary min-h-[2.75rem] sm:min-h-0 flex items-center justify-center px-4"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={page >= totalPages}
-                    aria-label={page < totalPages ? `Next page, page ${page + 1} of ${totalPages}` : "Next page"}
-                  >
-                    Next
-                  </button>
-                </li>
-              </ul>
-            </nav>
+            <ListPagination
+              page={page}
+              totalPages={totalPages}
+              totalResults={totalResults}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+              ariaLabel="Browse jobs page navigation"
+              gotoInputId="browse-jobs-goto-page"
+              hideWhenSinglePage
+            />
           </div>
         )}
       </div>

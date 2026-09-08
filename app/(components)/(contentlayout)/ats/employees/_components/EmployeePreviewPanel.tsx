@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 import Link from "next/link"
 import { resolveEmployeeJobTitleLabel } from "@/shared/lib/employee-job-title"
 import CandidateFeedbackPanel from "./CandidateFeedbackPanel"
+import EmployeeAuditPanel from "./EmployeeAuditPanel"
 import MatchingJobsPanel from "./MatchingJobsPanel"
 import {
   getCandidateRecruiterFeedback,
@@ -24,6 +25,7 @@ const PREVIEW_TABS = [
   { id: "documents", label: "Documents", icon: "ri-file-line" },
   { id: "salary", label: "Salary Slips", icon: "ri-money-dollar-box-line" },
   { id: "notes", label: "Notes & Feedback", icon: "ri-file-text-line" },
+  { id: "activity", label: "Activity", icon: "ri-history-line" },
   { id: "matching-jobs", label: "Matching Jobs", icon: "ri-target-line" },
 ] as const
 
@@ -453,25 +455,31 @@ export default function EmployeePreviewPanel({
                                       : 'bg-emerald-100 text-emerald-700 border-emerald-200'
                                   }`}
                                 >
-                                  {unpaid ? 'Unpaid Internship' : 'Paid'}
+                                  {unpaid ? 'Unpaid' : 'Paid'}
                                 </span>
                               )
                             })()}
                           </p>
                         </div>
-                        <div className="sm:col-span-2">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Employment type</label>
+                          <p className="mt-1 text-sm text-gray-900 dark:text-white">
+                            {(previewCandidate._raw?.employmentType as string | undefined) || '—'}
+                          </p>
+                        </div>
+                        <div>
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Training programs</label>
                           <p className="mt-1 text-sm text-gray-900 dark:text-white">
                             {trainingProgramsLabel(previewCandidate._raw?.assignedTrainingPrograms)}
                           </p>
                         </div>
-                        <div className="sm:col-span-2">
+                        <div>
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Projects</label>
                           <p className="mt-1 text-sm text-gray-900 dark:text-white">
                             {projectsAssignedLabel(previewCandidate._raw?.assignedProjects)}
                           </p>
                         </div>
-                        <div className="sm:col-span-2">
+                        <div>
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Short Bio</label>
                           <p className="mt-1 text-sm text-gray-900 dark:text-white">{previewCandidate.bio || previewCandidate._raw?.shortBio || '-'}</p>
                         </div>
@@ -786,6 +794,12 @@ export default function EmployeePreviewPanel({
                       }}
                     />
                   </div>
+                  )}
+
+                  {viewDetailTab === 'activity' && previewCandidate?.id && (
+                    <div role="tabpanel" id="employee-preview-panel-activity" aria-labelledby="employee-preview-tab-activity">
+                      <EmployeeAuditPanel entityId={previewCandidate.id} />
+                    </div>
                   )}
                 </div>
               </div>

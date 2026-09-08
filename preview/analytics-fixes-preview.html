@@ -1,0 +1,575 @@
+﻿<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ATS Analytics — UI/UX Fix Preview (All Widgets)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js"></script>
+  <style>
+    :root {
+      --bg: #111c43;
+      --surface: #1a233a;
+      --surface-2: #232f4b;
+      --border: rgba(255,255,255,.08);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --primary: #6366f1;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Poppins, system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+    .banner { background: linear-gradient(135deg, #1e3a5f 0%, #312e81 100%); border-bottom: 1px solid var(--border); padding: 24px 28px; }
+    .banner h1 { margin: 0 0 8px; font-size: 1.5rem; font-weight: 700; }
+    .banner p { margin: 0; color: #cbd5e1; max-width: 80ch; font-size: .9rem; }
+    .wrap { max-width: 1320px; margin: 0 auto; padding: 28px 24px 48px; }
+    .section-title { margin: 36px 0 16px; font-size: 1.05rem; font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+    .section-title::before { content: ""; width: 4px; height: 20px; border-radius: 2px; background: var(--primary); }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+    .toolbar label { font-size: .8125rem; color: var(--muted); }
+    .toolbar select, .toolbar button { font-family: inherit; font-size: .8125rem; border-radius: 8px; padding: 8px 14px; }
+    .toolbar select { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+    .toolbar .export-btn { background: transparent; border: 1px solid var(--primary); color: var(--primary); cursor: pointer; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px) { .kpi-grid { grid-template-columns: 1fr; } }
+    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; display: flex; justify-content: space-between; align-items: center; }
+    .kpi-title { font-size: .8125rem; color: var(--muted); margin: 0 0 4px; }
+    .kpi-value { font-size: 1.5rem; font-weight: 600; margin: 0; }
+    .kpi-delta { font-size: .6875rem; color: var(--success); margin-top: 4px; }
+    .kpi-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.25rem; opacity: .85; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+    @media (max-width: 960px) { .grid-2 { grid-template-columns: 1fr; } }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .card.full { grid-column: 1 / -1; }
+    .card-hd { padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: .95rem; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .card-sub { font-size: .75rem; color: var(--muted); font-weight: 400; margin-top: 4px; }
+    .card-bd { padding: 12px 16px 16px; }
+    .pill { font-size: .75rem; font-weight: 600; padding: 4px 10px; border-radius: 6px; background: rgba(99,102,241,.15); color: #a5b4fc; }
+    table { width: 100%; border-collapse: collapse; font-size: .8125rem; }
+    th, td { padding: 10px 12px; border: 1px solid var(--border); vertical-align: middle; }
+    th { background: rgba(255,255,255,.04); font-weight: 600; }
+    td.num, th.num { font-variant-numeric: tabular-nums; }
+    /* BEFORE: mimics prod — !text-end on th wins, text-end on td loses to global .table text-start */
+    .buggy th.num { text-align: right !important; }
+    .buggy td.num { text-align: left; }
+    /* AFTER: all left-aligned */
+    .fixed th, .fixed td { text-align: left; }
+    .badge { display: inline-block; font-size: .65rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
+    .badge.fix { background: #065f46; color: #6ee7b7; }
+    .badge.bug { background: #7f1d1d; color: #fca5a5; }
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    @media (max-width: 760px) { .compare { grid-template-columns: 1fr; } }
+    .compare h3 { margin: 0 0 10px; font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .modal-demo { border-radius: 12px; border: 1px solid var(--border); background: var(--surface); overflow: hidden; }
+    .modal-hd { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); gap: 12px; }
+    .modal-title { font-weight: 600; margin: 0; font-size: 1rem; }
+    .modal-count { color: var(--muted); font-size: .8125rem; font-weight: 400; }
+    .close-btn { width: 32px; height: 32px; border-radius: 6px; border: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 1.25rem; flex-shrink: 0; }
+    .close-btn.bad { background: transparent; color: #111; } /* ti-btn-ghost-dark */
+    .close-btn.good { background: rgba(255,255,255,.08); color: rgba(255,255,255,.85); }
+    .close-btn.good:hover { background: rgba(255,255,255,.14); color: #fff; }
+    .close-btn.good:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
+    .chart { min-height: 260px; }
+    .donut-wrap { display: flex; flex-direction: column; align-items: center; min-height: 280px; }
+    .donut-wrap svg { height: 280px; width: 100%; max-width: 320px; }
+    .donut-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 20px; margin-top: 4px; padding: 0 4px; }
+    .donut-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: rgba(226,232,240,.8); }
+    .donut-legend .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .legend-note { font-size: .75rem; color: var(--muted); margin: 10px 0 0; }
+    .audit-table { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: 12px; }
+    .audit-table th, .audit-table td { padding: 8px 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+    .audit-table th { background: var(--surface-2); }
+    .prio-critical { color: #fca5a5; font-weight: 600; }
+    .prio-high { color: #fdba74; font-weight: 600; }
+    .prio-medium { color: #fde047; }
+    .prio-low { color: var(--muted); }
+    code { background: #27272a; padding: 1px 5px; border-radius: 4px; font-size: .78em; }
+    .slider-demo { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--border); background: rgba(255,255,255,.02); font-size: .6875rem; color: var(--muted); }
+    .slider-track { flex: 1; height: 10px; background: rgba(255,255,255,.1); border-radius: 999px; position: relative; }
+    .slider-thumb { position: absolute; left: 60%; width: 28%; height: 100%; background: var(--primary); border-radius: 999px; }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    <h1>ATS Analytics — Full UI/UX Fix Preview</h1>
+    <p>Standalone artifact. No production source files modified. Shows <strong>before vs after</strong> for reported bugs plus the <strong>fixed state</strong> for all 14 page widgets in dark mode.</p>
+  </div>
+
+  <div class="wrap">
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div><label>Period: </label><select><option>All time</option><option>Last 30 days</option></select></div>
+      <button class="export-btn" type="button"><i class="ri-file-excel-2-line"></i> Export Excel</button>
+    </div>
+
+    <!-- KPI Cards (fixed state) -->
+    <h2 class="section-title">KPI Summary Cards (8 widgets)</h2>
+    <div class="kpi-grid">
+      <div class="kpi"><div><p class="kpi-title">Total Candidates</p><p class="kpi-value">142</p></div><span class="kpi-icon" style="background:#6366f1"><i class="ri-contacts-book-line"></i></span></div>
+      <div class="kpi"><div><p class="kpi-title">Total Jobs</p><p class="kpi-value">80</p></div><span class="kpi-icon" style="background:#6b7280"><i class="ri-briefcase-line"></i></span></div>
+      <div class="kpi"><div><p class="kpi-title">Active Jobs</p><p class="kpi-value">71</p></div><span class="kpi-icon" style="background:#06b6d4"><i class="ri-briefcase-4-line"></i></span></div>
+      <div class="kpi"><div><p class="kpi-title">Total Applications</p><p class="kpi-value">138</p><div class="kpi-delta">+12% vs prev month</div></div><span class="kpi-icon" style="background:#10b981"><i class="ri-file-list-3-line"></i></span></div>
+      <div class="kpi"><div><p class="kpi-title">Hired</p><p class="kpi-value">99</p><div class="kpi-delta">+8% vs prev month</div></div><span class="kpi-icon" style="background:#f59e0b"><i class="ri-user-star-line"></i></span></div>
+      <div class="kpi"><div><p class="kpi-title">Recruiters</p><p class="kpi-value">5</p></div><span class="kpi-icon" style="background:#0d9488"><i class="ri-team-line"></i></span></div>
+      <div class="kpi"><div><p class="kpi-title">Conversion Rate</p><p class="kpi-value">71.7%</p></div><span class="kpi-icon" style="background:#8b5cf6"><i class="ri-exchange-funds-line"></i></span></div>
+      <div class="kpi"><div><p class="kpi-title">Avg Profile Completion</p><p class="kpi-value">68%</p></div><span class="kpi-icon" style="background:#ec4899"><i class="ri-user-settings-line"></i></span></div>
+    </div>
+
+    <!-- Issue 1: Recruiter Leaderboard -->
+    <h2 class="section-title">Issue 1 — Recruiter Leaderboard alignment</h2>
+    <div class="compare">
+      <div>
+        <h3>Before (production)</h3>
+        <div class="card">
+          <div class="card-hd">Recruiter Leaderboard <span class="badge bug">misaligned</span></div>
+          <div class="card-bd">
+            <table class="buggy">
+              <thead><tr>
+                <th>Recruiter</th><th class="num">Total Activities</th><th class="num">Jobs Posted</th><th class="num">Screened</th><th class="num">Interviews</th>
+              </tr></thead>
+              <tbody>
+                <tr><td><b>Admin Admin</b></td><td class="num">84</td><td class="num">0</td><td class="num">0</td><td class="num">67</td></tr>
+                <tr><td><b>Himanshu Dave</b></td><td class="num">29</td><td class="num">0</td><td class="num">0</td><td class="num">29</td></tr>
+                <tr><td><b>Sarah Recruiter</b></td><td class="num">12</td><td class="num">3</td><td class="num">5</td><td class="num">4</td></tr>
+              </tbody>
+            </table>
+            <p class="legend-note">Headers use <code>!text-end</code> (wins). Body <code>text-end</code> loses to global <code>.table { text-start }</code> in <code>_tables.scss:21</code>.</p>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3>After (fixed)</h3>
+        <div class="card">
+          <div class="card-hd">Recruiter Leaderboard <span class="badge fix">fixed</span></div>
+          <div class="card-bd">
+            <table class="fixed">
+              <thead><tr>
+                <th>Recruiter</th><th class="num">Total Activities</th><th class="num">Jobs Posted</th><th class="num">Screened</th><th class="num">Interviews</th>
+              </tr></thead>
+              <tbody>
+                <tr><td><b>Admin Admin</b></td><td class="num">84</td><td class="num">0</td><td class="num">0</td><td class="num">67</td></tr>
+                <tr><td><b>Himanshu Dave</b></td><td class="num">29</td><td class="num">0</td><td class="num">0</td><td class="num">29</td></tr>
+                <tr><td><b>Sarah Recruiter</b></td><td class="num">12</td><td class="num">3</td><td class="num">5</td><td class="num">4</td></tr>
+              </tbody>
+            </table>
+            <p class="legend-note">All columns <code>!text-start</code> on th + td. Keep <code>tabular-nums</code> for numeric columns.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Issue 2: Top Jobs -->
+    <h2 class="section-title">Issue 2 — Top Jobs by Applications alignment</h2>
+    <div class="compare">
+      <div>
+        <h3>Before</h3>
+        <div class="card">
+          <div class="card-hd">Top Jobs by Applications</div>
+          <div class="card-bd">
+            <table class="buggy">
+              <thead><tr><th>#</th><th>Job Title</th><th>Organisation</th><th class="num">Applications</th></tr></thead>
+              <tbody>
+                <tr><td>1</td><td>Data analyst</td><td>Dharwin Business Solutions</td><td class="num">11</td></tr>
+                <tr><td>2</td><td>Business Analyst</td><td>Dharwin Business Solutions</td><td class="num">8</td></tr>
+                <tr><td>3</td><td>Full Stack Developer</td><td>Dharwin Business Solutions</td><td class="num">6</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3>After</h3>
+        <div class="card">
+          <div class="card-hd">Top Jobs by Applications <span class="badge fix">fixed</span></div>
+          <div class="card-bd">
+            <table class="fixed">
+              <thead><tr><th>#</th><th>Job Title</th><th>Organisation</th><th class="num">Applications</th></tr></thead>
+              <tbody>
+                <tr><td>1</td><td>Data analyst</td><td>Dharwin Business Solutions</td><td class="num">11</td></tr>
+                <tr><td>2</td><td>Business Analyst</td><td>Dharwin Business Solutions</td><td class="num">8</td></tr>
+                <tr><td>3</td><td>Full Stack Developer</td><td>Dharwin Business Solutions</td><td class="num">6</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Issue 3: Modal close -->
+    <h2 class="section-title">Issue 3 — Drill-down modal close (X) contrast</h2>
+    <div class="compare">
+      <div>
+        <h3>Before — dark theme</h3>
+        <div class="modal-demo">
+          <div class="modal-hd">
+            <p class="modal-title">Job type: Full-time <span class="modal-count">(80 records)</span></p>
+            <button class="close-btn bad" aria-label="Close">×</button>
+          </div>
+        </div>
+        <p class="legend-note"><code>ti-btn-ghost-dark</code> → <code>text-black</code> (<code>_buttons.scss:176</code>) on <code>dark:bg-bodybg</code> modal ≈ invisible.</p>
+      </div>
+      <div>
+        <h3>After — WCAG AA contrast</h3>
+        <div class="modal-demo">
+          <div class="modal-hd">
+            <p class="modal-title">Job type: Full-time <span class="modal-count">(80 records)</span></p>
+            <button class="close-btn good" aria-label="Close">×</button>
+          </div>
+        </div>
+        <p class="legend-note">Replace with <code>text-defaulttextcolor dark:text-white/85</code> + hover/focus states + <code>aria-label="Close"</code>.</p>
+      </div>
+    </div>
+
+    <!-- Issue 4: Donuts -->
+    <h2 class="section-title">Issue 4 — Donut chart percentage labels</h2>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-hd">Job Status Breakdown <span class="badge fix">fixed</span></div>
+        <div class="card-bd"><div id="jobDonut" class="chart"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-hd">Application Status Breakdown <span class="badge fix">fixed</span></div>
+        <div class="card-bd"><div id="appDonut" class="chart"></div></div>
+      </div>
+    </div>
+    <p class="legend-note">Fix mirrors <strong>Project Management analytics</strong> (<code>project-management/analytics/page.tsx</code>): custom SVG donut with <code>CALLOUT_SLICE_THRESHOLD = 5</code>. Slices &gt; 5% get in-slice % labels; slices ≤ 5% get outside callouts with polyline connector (anchor → elbow → label) and collision avoidance for adjacent small slices.</p>
+
+    <!-- Other charts (fixed state samples) -->
+    <h2 class="section-title">Other chart widgets (fixed-state samples)</h2>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-hd">
+          <div><div>Applications Over Time</div><div class="card-sub">Peak Jan 2026 (42)</div></div>
+          <span class="pill">138 total</span>
+        </div>
+        <div class="card-bd"><div id="appsLine" class="chart"></div></div>
+        <div class="slider-demo"><span>◀</span><div class="slider-track"><div class="slider-thumb"></div></div><span>▶</span> Nov 2025 – Jan 2026</div>
+      </div>
+      <div class="card">
+        <div class="card-hd">
+          <div><div>Application Funnel</div><div class="card-sub">Largest stage Hired (99)</div></div>
+          <span class="pill" style="background:rgba(16,185,129,.15);color:#6ee7b7">138 total</span>
+        </div>
+        <div class="card-bd"><div id="funnelBar" class="chart"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-hd">Job Type Distribution</div>
+        <div class="card-bd"><div id="jobTypeBar" class="chart"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-hd">
+          <div><div>Jobs Created Over Time</div><div class="card-sub">Peak Dec 2025 (18)</div></div>
+          <span class="pill">80 total</span>
+        </div>
+        <div class="card-bd"><div id="jobsLine" class="chart"></div></div>
+        <div class="slider-demo"><span>◀</span><div class="slider-track"><div class="slider-thumb"></div></div><span>▶</span> Oct 2025 – Dec 2025</div>
+      </div>
+      <div class="card full">
+        <div class="card-hd">Recruiter Activity by Type</div>
+        <div class="card-bd"><div id="recruiterBar" class="chart" style="min-height:220px"></div></div>
+      </div>
+    </div>
+
+    <!-- Audit summary table -->
+    <h2 class="section-title">Full widget audit summary</h2>
+    <table class="audit-table">
+      <thead>
+        <tr><th>Widget</th><th>Status</th><th>Priority</th><th>Finding / Fix</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Period selector</td><td>OK</td><td class="prio-low">Low</td><td>Add <code>aria-label="Analytics period"</code> on select.</td></tr>
+        <tr><td>Export Excel</td><td>OK</td><td class="prio-low">Low</td><td>Touch target adequate; no issues.</td></tr>
+        <tr><td>8× KPI StatCards</td><td>OK</td><td class="prio-low">Low</td><td>Layout and contrast good; delta badges readable.</td></tr>
+        <tr><td>Applications Over Time</td><td>Minor</td><td class="prio-medium">Medium</td><td>Tooltip <code>theme: 'light'</code> hardcoded — use dark-aware theme.</td></tr>
+        <tr><td>Application Funnel</td><td>OK</td><td class="prio-low">Low</td><td>Good data labels on bars; drill-down works.</td></tr>
+        <tr><td>Job Status Donut</td><td>Bug</td><td class="prio-high">High</td><td>Small slices (&lt;5%) missing labels — port PM analytics SVG callout pattern.</td></tr>
+        <tr><td>Application Status Donut</td><td>Bug</td><td class="prio-high">High</td><td>Same PM analytics callout pattern for slices ≤ 5%.</td></tr>
+        <tr><td>Job Type Distribution</td><td>Minor</td><td class="prio-medium">Medium</td><td>No data labels on bars; axis colors not dark-aware.</td></tr>
+        <tr><td>Jobs Created Over Time</td><td>Minor</td><td class="prio-medium">Medium</td><td>Same light tooltip theme issue.</td></tr>
+        <tr><td>Month Window Slider</td><td>OK</td><td class="prio-low">Low</td><td>Good ARIA; 32px nav buttons could be 44px for touch.</td></tr>
+        <tr><td>Recruiter Activity by Type</td><td>Minor</td><td class="prio-medium">Medium</td><td>No value labels on bars.</td></tr>
+        <tr><td>Recruiter Leaderboard</td><td>Bug</td><td class="prio-high">High</td><td>Header/body alignment mismatch — use <code>!text-start</code> everywhere.</td></tr>
+        <tr><td>Top Jobs table</td><td>Bug</td><td class="prio-high">High</td><td>Applications header right, values left — same root cause.</td></tr>
+        <tr><td>Drill-down Modal</td><td>Bug</td><td class="prio-critical">Critical</td><td>Close icon invisible in dark mode; missing <code>aria-label</code>.</td></tr>
+        <tr><td>Loading / Error / Empty</td><td>OK</td><td class="prio-low">Low</td><td>States present with helpful copy.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const palette = ['#6366f1','#10b981','#f59e0b','#ef4444','#06b6d4','#8b5cf6'];
+    const chartFont = 'Poppins, sans-serif';
+    const axisColor = '#94a3b8';
+    const gridColor = 'rgba(255,255,255,.08)';
+
+    /* PM analytics donut callout pattern — project-management/analytics/page.tsx */
+    const CALLOUT_SLICE_THRESHOLD = 5;
+    const CALLOUT_LEADER_R = 28;
+    const CALLOUT_LABEL_OFFSET = 20;
+    const CALLOUT_MIN_GAP = 20;
+    const DONUT_CX = 150, DONUT_CY = 150, DONUT_OUTER_R = 88, DONUT_INNER_R = 60;
+    const textColor = '#e2e8f0';
+    const mutedColor = '#94a3b8';
+    const sliceStroke = '#1a233a';
+    const leaderStroke = 'rgb(148, 163, 184)';
+
+    function polarToCartesian(cx, cy, radius, angleDeg) {
+      const rad = ((angleDeg - 90) * Math.PI) / 180;
+      return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+    }
+
+    function describeDonutSlice(cx, cy, outerR, innerR, startAngle, endAngle) {
+      const sweep = endAngle - startAngle;
+      if (sweep >= 359.99) {
+        return [
+          `M ${cx + outerR} ${cy}`,
+          `A ${outerR} ${outerR} 0 1 1 ${cx - outerR} ${cy}`,
+          `A ${outerR} ${outerR} 0 1 1 ${cx + outerR} ${cy}`,
+          `M ${cx + innerR} ${cy}`,
+          `A ${innerR} ${innerR} 0 1 0 ${cx - innerR} ${cy}`,
+          `A ${innerR} ${innerR} 0 1 0 ${cx + innerR} ${cy}`,
+        ].join(' ');
+      }
+      const startOuter = polarToCartesian(cx, cy, outerR, endAngle);
+      const endOuter = polarToCartesian(cx, cy, outerR, startAngle);
+      const startInner = polarToCartesian(cx, cy, innerR, startAngle);
+      const endInner = polarToCartesian(cx, cy, innerR, endAngle);
+      const largeArc = sweep <= 180 ? 0 : 1;
+      return [
+        `M ${startOuter.x} ${startOuter.y}`,
+        `A ${outerR} ${outerR} 0 ${largeArc} 0 ${endOuter.x} ${endOuter.y}`,
+        `L ${startInner.x} ${startInner.y}`,
+        `A ${innerR} ${innerR} 0 ${largeArc} 1 ${endInner.x} ${endInner.y}`,
+        'Z',
+      ].join(' ');
+    }
+
+    function formatSlicePercent(val) {
+      if (val <= 0) return '';
+      return val < 1 ? '<1%' : `${Math.round(val)}%`;
+    }
+
+    function buildDonutSlices(labels, series, colors, total) {
+      if (total <= 0) return [];
+      let cursor = 0;
+      const slices = [];
+      labels.forEach((label, index) => {
+        const count = series[index] ?? 0;
+        if (count <= 0) return;
+        const pct = (count / total) * 100;
+        const sweep = (count / total) * 360;
+        const startAngle = cursor;
+        const endAngle = cursor + sweep;
+        cursor = endAngle;
+        slices.push({
+          label, count, pct,
+          color: colors[index] ?? palette[index % palette.length],
+          startAngle, endAngle,
+          midAngle: startAngle + sweep / 2,
+        });
+      });
+      return slices;
+    }
+
+    function defaultCalloutIsRight(midAngle) {
+      return Math.cos(((midAngle - 90) * Math.PI) / 180) >= 0;
+    }
+
+    function areAdjacentDonutSlices(a, b) {
+      const gap = b.startAngle - a.endAngle;
+      return Math.abs(gap) < 0.5 || Math.abs(gap + 360) < 0.5 || Math.abs(gap - 360) < 0.5;
+    }
+
+    function resolveAdjacentCalloutSides(slices) {
+      const sorted = [...slices].sort((a, b) => a.startAngle - b.startAngle);
+      const sides = sorted.map((slice) => defaultCalloutIsRight(slice.midAngle));
+      const resolvePair = (i, j) => {
+        if (sides[i] !== sides[j]) return;
+        if (sorted[j].pct < sorted[i].pct) sides[j] = !sides[j];
+        else if (sorted[i].pct < sorted[j].pct) sides[i] = !sides[i];
+        else sides[j] = !sides[j];
+      };
+      for (let i = 1; i < sorted.length; i++) {
+        if (areAdjacentDonutSlices(sorted[i - 1], sorted[i])) resolvePair(i - 1, i);
+      }
+      if (sorted.length > 1 && areAdjacentDonutSlices(sorted[sorted.length - 1], sorted[0])) {
+        resolvePair(sorted.length - 1, 0);
+      }
+      return new Map(sorted.map((slice, index) => [slice, sides[index]]));
+    }
+
+    function resolveCalloutSide(items, minY, maxY) {
+      if (items.length < 2) return;
+      items.sort((a, b) => a.labelY - b.labelY);
+      for (let i = 1; i < items.length; i++) {
+        const prev = items[i - 1], curr = items[i];
+        if (curr.labelY - prev.labelY < CALLOUT_MIN_GAP) curr.labelY = prev.labelY + CALLOUT_MIN_GAP;
+      }
+      const overflow = items[items.length - 1].labelY - maxY;
+      if (overflow > 0) items.forEach((item) => { item.labelY -= overflow; });
+      const underflow = minY - items[0].labelY;
+      if (underflow > 0) items.forEach((item) => { item.labelY += underflow; });
+    }
+
+    function buildCalloutLayouts(smallSlices, cx, cy, outerR) {
+      const sideBySlice = resolveAdjacentCalloutSides(smallSlices);
+      const layouts = smallSlices.map((slice) => {
+        const anchor = polarToCartesian(cx, cy, outerR + 2, slice.midAngle);
+        const elbow = polarToCartesian(cx, cy, outerR + CALLOUT_LEADER_R, slice.midAngle);
+        const isRight = sideBySlice.get(slice) ?? defaultCalloutIsRight(slice.midAngle);
+        const labelX = isRight ? elbow.x + CALLOUT_LABEL_OFFSET : elbow.x - CALLOUT_LABEL_OFFSET;
+        return { slice, anchor, elbow, labelX, labelY: elbow.y, labelAnchor: isRight ? 'start' : 'end' };
+      });
+      const minY = cy - outerR - 36, maxY = cy + outerR + 36;
+      resolveCalloutSide(layouts.filter((l) => l.labelAnchor === 'start'), minY, maxY);
+      resolveCalloutSide(layouts.filter((l) => l.labelAnchor === 'end'), minY, maxY);
+      return layouts;
+    }
+
+    function renderPmDonutChart(container, labels, series, centerLabel) {
+      const colors = palette.slice(0, labels.length);
+      const total = series.reduce((a, b) => a + b, 0);
+      const slices = buildDonutSlices(labels, series, colors, total);
+      const calloutLayouts = buildCalloutLayouts(
+        slices.filter((s) => s.pct <= CALLOUT_SLICE_THRESHOLD),
+        DONUT_CX, DONUT_CY, DONUT_OUTER_R
+      );
+
+      const wrap = document.createElement('div');
+      wrap.className = 'donut-wrap';
+
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 300 300');
+
+      slices.forEach((slice) => {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', describeDonutSlice(DONUT_CX, DONUT_CY, DONUT_OUTER_R, DONUT_INNER_R, slice.startAngle, slice.endAngle));
+        path.setAttribute('fill', slice.color);
+        path.setAttribute('fill-rule', 'evenodd');
+        path.setAttribute('stroke', sliceStroke);
+        path.setAttribute('stroke-width', '3');
+        svg.appendChild(path);
+      });
+
+      const centerLbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      centerLbl.setAttribute('x', DONUT_CX); centerLbl.setAttribute('y', DONUT_CY - 8);
+      centerLbl.setAttribute('text-anchor', 'middle'); centerLbl.setAttribute('fill', mutedColor);
+      centerLbl.setAttribute('font-size', '11'); centerLbl.setAttribute('font-weight', '500');
+      centerLbl.textContent = centerLabel;
+      svg.appendChild(centerLbl);
+
+      const centerVal = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      centerVal.setAttribute('x', DONUT_CX); centerVal.setAttribute('y', DONUT_CY + 16);
+      centerVal.setAttribute('text-anchor', 'middle'); centerVal.setAttribute('fill', textColor);
+      centerVal.setAttribute('font-size', '22'); centerVal.setAttribute('font-weight', '700');
+      centerVal.textContent = String(total);
+      svg.appendChild(centerVal);
+
+      slices.forEach((slice) => {
+        if (slice.pct <= CALLOUT_SLICE_THRESHOLD) return;
+        const innerPoint = polarToCartesian(DONUT_CX, DONUT_CY, (DONUT_OUTER_R + DONUT_INNER_R) / 2, slice.midAngle);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', innerPoint.x); text.setAttribute('y', innerPoint.y);
+        text.setAttribute('text-anchor', 'middle'); text.setAttribute('dominant-baseline', 'middle');
+        text.setAttribute('fill', textColor); text.setAttribute('font-size', '11'); text.setAttribute('font-weight', '700');
+        text.textContent = formatSlicePercent(slice.pct);
+        svg.appendChild(text);
+      });
+
+      calloutLayouts.forEach(({ slice, anchor, elbow, labelX, labelY, labelAnchor }) => {
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        line.setAttribute('points', `${anchor.x},${anchor.y} ${elbow.x},${elbow.y} ${labelX},${labelY}`);
+        line.setAttribute('fill', 'none'); line.setAttribute('stroke', leaderStroke); line.setAttribute('stroke-width', '1.25');
+        g.appendChild(line);
+        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('cx', anchor.x); dot.setAttribute('cy', anchor.y); dot.setAttribute('r', '2.5'); dot.setAttribute('fill', slice.color);
+        g.appendChild(dot);
+        const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        lbl.setAttribute('x', labelX); lbl.setAttribute('y', labelY);
+        lbl.setAttribute('text-anchor', labelAnchor); lbl.setAttribute('dominant-baseline', 'middle');
+        lbl.setAttribute('fill', textColor); lbl.setAttribute('font-size', '10.5'); lbl.setAttribute('font-weight', '600');
+        lbl.textContent = formatSlicePercent(slice.pct);
+        g.appendChild(lbl);
+        svg.appendChild(g);
+      });
+
+      wrap.appendChild(svg);
+
+      const legend = document.createElement('div');
+      legend.className = 'donut-legend';
+      labels.forEach((label, index) => {
+        const count = series[index] ?? 0;
+        const pct = total > 0 ? (count / total) * 100 : 0;
+        const pctLabel = formatSlicePercent(pct);
+        const item = document.createElement('span');
+        item.innerHTML = `<span class="dot" style="background:${colors[index]}"></span>${pctLabel ? `${label} · ${pctLabel}` : label}`;
+        legend.appendChild(item);
+      });
+      wrap.appendChild(legend);
+
+      container.innerHTML = '';
+      container.appendChild(wrap);
+    }
+
+    renderPmDonutChart(document.querySelector('#jobDonut'),
+      ['Active','Closed','Archived','Draft'], [71, 5, 3, 1], 'Jobs');
+    renderPmDonutChart(document.querySelector('#appDonut'),
+      ['Applied','Interview','Hired','Rejected','Screening'], [22, 8, 99, 8, 1], 'Applications');
+
+    const lineOpts = (categories, color, name) => ({
+      chart: { type: 'line', height: 220, toolbar: { show: false }, background: 'transparent', fontFamily: chartFont },
+      series: [{ name, data: categories.map((_, i) => [12, 28, 42, 18, 35, 22][i] || 10) }],
+      stroke: { curve: 'smooth', width: 2.5 },
+      colors: [color],
+      xaxis: { categories, labels: { style: { colors: axisColor, fontSize: '11px' } } },
+      yaxis: { labels: { style: { colors: axisColor, fontSize: '11px' } } },
+      grid: { borderColor: gridColor, strokeDashArray: 4 },
+      tooltip: { theme: 'dark' },
+      markers: { size: 4, strokeColors: '#1a233a', strokeWidth: 2 }
+    });
+
+    new ApexCharts(document.querySelector('#appsLine'), lineOpts(['Sep','Oct','Nov','Dec','Jan','Feb'], '#6366f1', 'Applications')).render();
+    new ApexCharts(document.querySelector('#jobsLine'), lineOpts(['Aug','Sep','Oct','Nov','Dec','Jan'], '#6366f1', 'Jobs')).render();
+
+    new ApexCharts(document.querySelector('#funnelBar'), {
+      chart: { type: 'bar', height: 260, toolbar: { show: false }, background: 'transparent', fontFamily: chartFont },
+      series: [{ name: 'Applications', data: [22, 1, 8, 0, 99, 8] }],
+      plotOptions: { bar: { horizontal: true, distributed: true, borderRadius: 6, dataLabels: { position: 'center' } } },
+      dataLabels: { enabled: true, style: { colors: ['#fff'], fontSize: '12px', fontWeight: 600 } },
+      colors: ['#06b6d4','#6366f1','#8b5cf6','#f59e0b','#10b981','#ef4444'],
+      xaxis: { categories: ['Applied','Screening','Interview','Offered','Hired','Rejected'], labels: { style: { colors: axisColor } } },
+      yaxis: { labels: { style: { colors: axisColor } } },
+      grid: { borderColor: gridColor },
+      legend: { show: false },
+      tooltip: { theme: 'dark' }
+    }).render();
+
+    new ApexCharts(document.querySelector('#jobTypeBar'), {
+      chart: { type: 'bar', height: 240, toolbar: { show: false }, background: 'transparent', fontFamily: chartFont },
+      series: [{ name: 'Jobs', data: [80, 12, 5, 3] }],
+      plotOptions: { bar: { borderRadius: 4, columnWidth: '50%' } },
+      colors: ['#f59e0b'],
+      xaxis: { categories: ['Full-time','Part-time','Contract','Internship'], labels: { style: { colors: axisColor } } },
+      yaxis: { labels: { style: { colors: axisColor } } },
+      grid: { borderColor: gridColor },
+      tooltip: { theme: 'dark' }
+    }).render();
+
+    new ApexCharts(document.querySelector('#recruiterBar'), {
+      chart: { type: 'bar', height: 200, toolbar: { show: false }, background: 'transparent', fontFamily: chartFont },
+      series: [{ name: 'Activities', data: [3, 5, 96, 12, 8] }],
+      plotOptions: { bar: { borderRadius: 4, columnWidth: '50%' } },
+      colors: ['#8b5cf6'],
+      xaxis: { categories: ['Jobs Posted','Screened','Interviews','Notes','Feedback'], labels: { style: { colors: axisColor } } },
+      yaxis: { labels: { style: { colors: axisColor } } },
+      grid: { borderColor: gridColor },
+      tooltip: { theme: 'dark' }
+    }).render();
+  </script>
+</body>
+</html>

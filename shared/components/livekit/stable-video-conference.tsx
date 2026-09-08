@@ -6,7 +6,6 @@ import {
   useTracks,
   useSpeakingParticipants,
   ParticipantTile,
-  Chat,
   ChatIcon,
   ChatToggle,
   ControlBar,
@@ -17,7 +16,15 @@ import {
   type WidgetState,
   useConnectionState,
   useCreateLayoutContext,
+  useMaybeLayoutContext,
 } from "@livekit/components-react";
+import { MeetingChat } from "./meeting-chat";
+import { MeetingHandToastStack } from "./meeting-hand-toast";
+import { MeetingControlBarRaiseHand } from "./raise-hand-button";
+import {
+  participantDisplayName,
+  useMeetingRaiseHand,
+} from "@/shared/hooks/use-meeting-raise-hand";
 import { ConnectionState, Track } from "livekit-client";
 import { MEETING_CONTROL_BAR_RESPONSIVE_CSS } from "./meeting-control-bar-responsive.css";
 
@@ -36,8 +43,21 @@ const LEAVE_BUTTON_SELECTOR =
   ".lk-disconnect-button, [data-lk-disconnect], button[aria-label*='Leave'], button[aria-label*='Disconnect']";
 
 /** Portals ChatToggle into `.lk-control-bar` (after screen share, before leave). */
-function MeetingControlBarChatToggle() {
+function MeetingControlBarChatToggle({ narrow }: { narrow: boolean }) {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const layoutContext = useMaybeLayoutContext();
+  const chatOpen = layoutContext?.widget.state?.showChat === true;
+  const unreadCount = layoutContext?.widget.state?.unreadMessages ?? 0;
+  const hasUnread = !chatOpen && unreadCount > 0;
+  const unreadLabel =
+    unreadCount > 9
+      ? "9+ unread messages"
+      : `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`;
+  const chatToggleLabel = chatOpen
+    ? "Close chat"
+    : hasUnread
+      ? `Open chat, ${unreadLabel}`
+      : "Open chat";
 
   useEffect(() => {
     const tryInject = () => {
@@ -73,8 +93,14 @@ function MeetingControlBarChatToggle() {
   if (!slot) return null;
 
   return createPortal(
-    <ChatToggle aria-label="Toggle chat">
+    <ChatToggle aria-label={chatToggleLabel} aria-pressed={chatOpen}>
       <ChatIcon />
+      {!narrow && <span>Chat</span>}
+      {hasUnread && unreadCount > 1 && (
+        <span className="meeting-chat-unread-badge" aria-hidden="true">
+          {formatUnreadCount(unreadCount)}
+        </span>
+      )}
     </ChatToggle>,
     slot
   );
@@ -91,6 +117,10 @@ function useNarrowControlBar(breakpointPx = 760) {
     return () => mq.removeEventListener("change", update);
   }, [breakpointPx]);
   return narrow;
+}
+
+function formatUnreadCount(count: number): string {
+  return count > 9 ? "9+" : String(count);
 }
 
 /**
@@ -147,17 +177,31 @@ function gridColumns(count: number): number {
 function CamTile({
   trackRef,
   pinned,
+  handRaised,
   onTogglePin,
 }: {
   trackRef: TrackReferenceOrPlaceholder;
   pinned: boolean;
+  handRaised?: boolean;
   onTogglePin: () => void;
 }) {
+  const displayName = participantDisplayName(trackRef.participant);
+  const tileLabel = [
+    displayName,
+    handRaised ? "hand raised" : null,
+    trackRef.participant.isSpeaking ? "speaking" : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
   return (
     <div
       className="lk-cam-tile"
       data-pinned={pinned ? "true" : undefined}
+      data-hand-raised={handRaised ? "true" : undefined}
       data-lk-participant-identity={trackRef.participant.identity}
+      role="group"
+      aria-label={tileLabel}
     >
       <ParticipantTile trackRef={trackRef} />
       <button
@@ -189,6 +233,11 @@ function CamTile({
           )}
         </svg>
       </button>
+      {handRaised && (
+        <span className="meeting-tile-hand-badge" aria-hidden="true">
+          <i className="ri-hand" aria-hidden="true" />
+        </span>
+      )}
     </div>
   );
 }
@@ -345,6 +394,7 @@ export function StableVideoConference() {
   };
 
   const narrowControlBar = useNarrowControlBar();
+  const { participants, handStates } = useMeetingRaiseHand();
 
   // Chat is a right-anchored drawer over the stage. It stays mounted while
   // closed so `useChat`'s in-memory history and the unread counter survive a
@@ -440,6 +490,7 @@ export function StableVideoConference() {
                   key={tileKey(ref)}
                   trackRef={ref}
                   pinned={ref.participant.identity === pinnedIdentity}
+                  handRaised={handStates[ref.participant.identity] ?? false}
                   onTogglePin={() => togglePin(ref.participant.identity)}
                 />
               ))}
@@ -452,6 +503,7 @@ export function StableVideoConference() {
                 key={tileKey(mainCam)}
                 trackRef={mainCam}
                 pinned={mainCam.participant.identity === pinnedIdentity}
+                handRaised={handStates[mainCam.participant.identity] ?? false}
                 onTogglePin={() => togglePin(mainCam.participant.identity)}
               />
             </div>
@@ -461,6 +513,7 @@ export function StableVideoConference() {
                   key={tileKey(ref)}
                   trackRef={ref}
                   pinned={ref.participant.identity === pinnedIdentity}
+                  handRaised={handStates[ref.participant.identity] ?? false}
                   onTogglePin={() => togglePin(ref.participant.identity)}
                 />
               ))}
@@ -473,11 +526,14 @@ export function StableVideoConference() {
                 key={tileKey(ref)}
                 trackRef={ref}
                 pinned={ref.participant.identity === pinnedIdentity}
+                handRaised={handStates[ref.participant.identity] ?? false}
                 onTogglePin={() => togglePin(ref.participant.identity)}
               />
             ))}
           </div>
         )}
+
+        <MeetingHandToastStack participants={participants} />
 
         <aside
           ref={chatPanelRef}
@@ -485,8 +541,9 @@ export function StableVideoConference() {
           data-open={chatOpen ? "true" : undefined}
           data-offline={chatOffline ? "true" : undefined}
           aria-label="Meeting chat"
+          inert={!chatOpen ? true : undefined}
         >
-          <Chat />
+          <MeetingChat chatOpen={chatOpen} />
           {chatOffline && (
             <p className="lk-chat-offline" role="status">
               {connectionState === ConnectionState.Reconnecting
@@ -497,7 +554,8 @@ export function StableVideoConference() {
         </aside>
       </div>
       {controls}
-      <MeetingControlBarChatToggle />
+      <MeetingControlBarRaiseHand narrow={narrowControlBar} />
+      <MeetingControlBarChatToggle narrow={narrowControlBar} />
     </div>
     </LayoutContextProvider>
   );
@@ -570,6 +628,110 @@ const SVC_CSS = `
   transform: translateY(0);
 }
 .lk-pin-btn:hover { background: rgba(15,16,18,0.8); }
+
+.meeting-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.meeting-hand-toast-stack {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  width: min(420px, calc(100% - 2rem));
+  pointer-events: none;
+}
+.meeting-hand-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: 100%;
+  padding: 0.65rem 1rem;
+  border-radius: 12px;
+  background: rgba(11,13,14,0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0,230,195,0.35);
+  box-shadow: 0 8px 32px -8px rgba(0,0,0,0.65), inset 0 0 0 1px rgba(255,255,255,0.04);
+  color: var(--obs-fg, #f4f5f6);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  animation: meetingHandToastIn 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: auto;
+}
+.meeting-hand-toast-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(0,230,195,0.15);
+  color: var(--obs-accent, #00E6C3);
+  font-size: 14px;
+  line-height: 1;
+}
+.meeting-hand-toast-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes meetingHandToastIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes meetingHandToastFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.meeting-tile-hand-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(11,13,14,0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(0,230,195,0.35);
+  color: var(--obs-accent, #00E6C3);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.lk-control-bar .meeting-raise-hand-btn .ri-hand {
+  font-size: 16px;
+  line-height: 1;
+}
+.lk-control-bar .meeting-raise-hand-btn:focus-visible,
+.lk-control-bar .lk-button:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 2px;
+}
+
 .lk-pin-btn[aria-pressed="true"] {
   background: var(--obs-accent, #00E6C3);
   border-color: var(--obs-accent, #00E6C3);
@@ -788,6 +950,184 @@ const SVC_CSS = `
 }
 
 .lk-chat-panel .lk-chat-entry {
+.lk-chat-panel .lk-chat-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: fit-content;
+  max-width: 88%;
+}
+.lk-chat-panel .lk-chat-entry[data-lk-message-origin="remote"] {
+  align-self: flex-start;
+}
+.lk-chat-panel .lk-meta-data {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.lk-chat-panel .lk-chat-entry .lk-participant-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.lk-chat-panel .lk-timestamp { margin-left: auto; }
+.lk-chat-panel .lk-message-body {
+  width: auto;
+  max-width: none;
+  min-width: 2.5ch;
+  margin: 0;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.lk-chat-panel .lk-message-body .meeting-chat-link {
+  color: var(--obs-accent, #00E6C3);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+.lk-chat-panel .lk-message-body .meeting-chat-link:hover { text-decoration: underline; }
+.lk-chat-panel .lk-message-body .meeting-chat-link:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.lk-chat-panel .meeting-chat-form {
+  position: relative;
+  flex-wrap: wrap;
+}
+.lk-chat-panel .meeting-chat-form .meeting-chat-form-input-wrap {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.meeting-chat-form-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  padding: 0 0.35rem 0 0.75rem;
+}
+.meeting-chat-form-input-wrap:focus-within {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+.lk-chat-panel .meeting-chat-form-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+.lk-chat-panel .meeting-chat-form-input:focus { outline: none; }
+
+.meeting-emoji-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 18px;
+}
+.meeting-emoji-btn:hover,
+.meeting-emoji-btn[aria-expanded="true"] {
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+}
+.meeting-emoji-btn:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 1px;
+}
+.meeting-emoji-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.meeting-emoji-picker {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(100% + 0.35rem);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: min(40vh, 220px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.5rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(15,17,19,0.95);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.65);
+  scrollbar-width: thin;
+}
+.meeting-emoji-picker-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(44px, 1fr));
+  gap: 0.25rem;
+}
+.meeting-emoji-picker button {
+  min-width: 44px;
+  min-height: 44px;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 1.25rem;
+  cursor: pointer;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.meeting-emoji-picker button:hover { background: rgba(255,255,255,0.08); }
+.meeting-emoji-picker button:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 1px;
+  background: rgba(255,255,255,0.08);
+}
+
+.lk-chat-panel[data-offline="true"] .meeting-emoji-btn {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.meeting-chat-unread-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--obs-accent, #00E6C3);
+  color: #06231f;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px rgba(15,17,19,0.9);
+  pointer-events: none;
+}
+.lk-video-conference[data-unread="true"] #chat-button-slot .lk-button:has(.meeting-chat-unread-badge)::after {
+  display: none;
+}
+
   max-width: 88%;
   margin: 0;
   padding: 0.45rem 0.7rem;
@@ -912,6 +1252,10 @@ const SVC_CSS = `
 
 /* Phones: the drawer takes the full stage so the input is comfortably wide. */
 @media (max-width: 640px) {
+
+  .meeting-hand-toast-stack { top: 0.65rem; width: calc(100% - 1rem); }
+  .meeting-hand-toast { font-size: 13px; padding: 0.55rem 0.85rem; }
+  .meeting-emoji-picker { max-height: min(35vh, 200px); }
   .lk-chat-panel { width: 100%; padding: 0.5rem; }
   .lk-video-conference[data-chat-open="true"] .lk-layout-toggle {
     opacity: 0;
@@ -929,8 +1273,188 @@ const SVC_CSS = `
     transition: opacity 120ms linear, visibility 0s linear 120ms;
   }
   .lk-chat-panel[data-open="true"] { transition: opacity 120ms linear, visibility 0s; }
-  .lk-chat-panel .lk-chat-entry { animation: none; }
+  .lk-chat-panel .lk-chat-entry {
+.lk-chat-panel .lk-chat-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: fit-content;
+  max-width: 88%;
+}
+.lk-chat-panel .lk-chat-entry[data-lk-message-origin="remote"] {
+  align-self: flex-start;
+}
+.lk-chat-panel .lk-meta-data {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.lk-chat-panel .lk-chat-entry .lk-participant-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.lk-chat-panel .lk-timestamp { margin-left: auto; }
+.lk-chat-panel .lk-message-body {
+  width: auto;
+  max-width: none;
+  min-width: 2.5ch;
+  margin: 0;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.lk-chat-panel .lk-message-body .meeting-chat-link {
+  color: var(--obs-accent, #00E6C3);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+.lk-chat-panel .lk-message-body .meeting-chat-link:hover { text-decoration: underline; }
+.lk-chat-panel .lk-message-body .meeting-chat-link:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.lk-chat-panel .meeting-chat-form {
+  position: relative;
+  flex-wrap: wrap;
+}
+.lk-chat-panel .meeting-chat-form .meeting-chat-form-input-wrap {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.meeting-chat-form-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  padding: 0 0.35rem 0 0.75rem;
+}
+.meeting-chat-form-input-wrap:focus-within {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+.lk-chat-panel .meeting-chat-form-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+.lk-chat-panel .meeting-chat-form-input:focus { outline: none; }
+
+.meeting-emoji-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 18px;
+}
+.meeting-emoji-btn:hover,
+.meeting-emoji-btn[aria-expanded="true"] {
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+}
+.meeting-emoji-btn:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 1px;
+}
+.meeting-emoji-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.meeting-emoji-picker {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(100% + 0.35rem);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: min(40vh, 220px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.5rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(15,17,19,0.95);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.65);
+  scrollbar-width: thin;
+}
+.meeting-emoji-picker-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(44px, 1fr));
+  gap: 0.25rem;
+}
+.meeting-emoji-picker button {
+  min-width: 44px;
+  min-height: 44px;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 1.25rem;
+  cursor: pointer;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.meeting-emoji-picker button:hover { background: rgba(255,255,255,0.08); }
+.meeting-emoji-picker button:focus-visible {
+  outline: 2px solid var(--obs-accent, #00E6C3);
+  outline-offset: 1px;
+  background: rgba(255,255,255,0.08);
+}
+
+.lk-chat-panel[data-offline="true"] .meeting-emoji-btn {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.meeting-chat-unread-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--obs-accent, #00E6C3);
+  color: #06231f;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px rgba(15,17,19,0.9);
+  pointer-events: none;
+}
+.lk-video-conference[data-unread="true"] #chat-button-slot .lk-button:has(.meeting-chat-unread-badge)::after {
+  display: none;
+}
+ animation: none; }
   .lk-layout-toggle { transition: none; }
+  .meeting-hand-toast { animation: meetingHandToastFadeIn 200ms linear; }
+
   .lk-video-conference[data-chat-open="true"] .lk-layout-toggle { transform: none; opacity: 0; pointer-events: none; }
 }
 

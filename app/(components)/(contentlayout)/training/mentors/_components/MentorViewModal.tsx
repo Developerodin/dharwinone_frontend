@@ -1,20 +1,60 @@
 "use client"
 
 import React from 'react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import type { Mentor } from '@/shared/lib/api/mentors'
+import { getInitials } from '@/shared/lib/initials'
+import { closeHsOverlay } from '../../evaluation/_components/evaluation-overlay'
 
 export interface MentorViewModalProps {
   mentor: Mentor | null
   isLoading: boolean
+  canManageMentors?: boolean
   onClose: () => void
+}
+
+function MentorAvatar({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
+  const [imgFailed, setImgFailed] = React.useState(false)
+  const showImg = Boolean(imageUrl) && !imgFailed
+
+  if (showImg) {
+    return (
+      <img
+        src={imageUrl!}
+        alt={name}
+        className="w-20 h-20 rounded-full object-cover border-2 border-primary/30"
+        onError={() => setImgFailed(true)}
+      />
+    )
+  }
+
+  return (
+    <span
+      className="w-20 h-20 rounded-full flex items-center justify-center bg-primary/10 text-primary text-2xl font-semibold border-2 border-primary/30"
+      aria-hidden="true"
+    >
+      {getInitials(name)}
+    </span>
+  )
+}
+
+function dismissViewMentorModal(onClose: () => void) {
+  closeHsOverlay('#view-mentor-modal')
+  // Preline close can be async; strip leftover scrim before SPA navigation.
+  document.body.classList.remove('hs-overlay-body-open')
+  document.body.style.overflow = ''
+  document.querySelector('#view-mentor-modal-backdrop')?.remove()
+  onClose()
 }
 
 export default function MentorViewModal({
   mentor,
   isLoading,
+  canManageMentors = false,
   onClose,
 }: MentorViewModalProps) {
+  const router = useRouter()
+
   return (
     <div
       id="view-mentor-modal"
@@ -23,7 +63,7 @@ export default function MentorViewModal({
       <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out lg:!max-w-4xl lg:w-full m-3 lg:!mx-auto">
         <div className="ti-modal-content">
           <div className="ti-modal-header">
-            <h6 className="ti-modal-title flex items-center gap-2">
+            <h6 className="ti-modal-title flex items-center gap-2 text-defaulttextcolor dark:text-white/90">
               <i className="ri-eye-line text-primary"></i>
               Mentor Details
             </h6>
@@ -31,7 +71,7 @@ export default function MentorViewModal({
               type="button"
               className="hs-dropdown-toggle ti-modal-close-btn"
               data-hs-overlay="#view-mentor-modal"
-              onClick={onClose}
+              onClick={() => dismissViewMentorModal(onClose)}
             >
               <span className="sr-only">Close</span>
               <svg className="w-3.5 h-3.5" width="8" height="8" viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -48,14 +88,7 @@ export default function MentorViewModal({
             ) : mentor ? (
               <div className="space-y-6">
                 <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 dark:border-primary/30 rounded-lg">
-                  <img
-                    src={mentor.profileImageUrl || '/assets/images/faces/1.jpg'}
-                    alt={mentor.user?.name || 'Mentor'}
-                    className="w-20 h-20 rounded-full object-cover border-2 border-primary/30"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = '/assets/images/faces/1.jpg'
-                    }}
-                  />
+                  <MentorAvatar name={mentor.user?.name || 'Mentor'} imageUrl={mentor.profileImageUrl} />
                   <div className="flex-1">
                     <h6 className="font-bold text-gray-800 dark:text-white text-xl mb-1">{mentor.user?.name || 'Unknown'}</h6>
                     <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
@@ -248,21 +281,23 @@ export default function MentorViewModal({
               type="button"
               className="ti-btn ti-btn-light"
               data-hs-overlay="#view-mentor-modal"
-              onClick={onClose}
+              onClick={() => dismissViewMentorModal(onClose)}
             >
               Close
             </button>
-            {mentor && (
-              <Link
-                href={`/training/mentors/edit/?id=${encodeURIComponent(mentor.id)}`}
+            {mentor && canManageMentors && (
+              <button
+                type="button"
                 className="ti-btn ti-btn-primary"
                 onClick={() => {
-                  ;(window as any).HSOverlay?.close(document.querySelector('#view-mentor-modal'))
+                  const id = mentor.id
+                  dismissViewMentorModal(onClose)
+                  router.push(`/training/mentors/edit?id=${encodeURIComponent(id)}`)
                 }}
               >
                 <i className="ri-pencil-line me-1"></i>
                 Edit Mentor
-              </Link>
+              </button>
             )}
           </div>
         </div>

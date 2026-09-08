@@ -308,7 +308,7 @@ export default function ApplicationsPage() {
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<JobApplicationStatus | "">("");
+  const [statusFilters, setStatusFilters] = useState<JobApplicationStatus[]>([]);
   const [jobFilter, setJobFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -382,7 +382,7 @@ export default function ApplicationsPage() {
       excludeInternal: true,
     };
     if (debouncedSearch) params.q = debouncedSearch;
-    if (statusFilter) params.status = statusFilter;
+    if (statusFilters.length) params.statuses = statusFilters;
     if (jobFilter) params.jobId = jobFilter;
     if (departmentFilter.trim()) params.department = departmentFilter.trim();
     if (dateFrom) params.dateFrom = new Date(dateFrom).toISOString();
@@ -416,7 +416,7 @@ export default function ApplicationsPage() {
       .finally(() => {
         if (generation === fetchGenerationRef.current) setLoading(false);
       });
-  }, [page, sortBy, debouncedSearch, statusFilter, jobFilter, departmentFilter, dateFrom, dateTo]);
+  }, [page, sortBy, debouncedSearch, statusFilters, jobFilter, departmentFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     if (!user) {
@@ -460,9 +460,21 @@ export default function ApplicationsPage() {
     [router],
   );
 
+  const clearStatusFilters = () => {
+    setStatusFilters([]);
+    setPage(1);
+  };
+
+  const toggleStatusFilter = (status: JobApplicationStatus) => {
+    setStatusFilters((prev) =>
+      prev.includes(status) ? prev.filter((x) => x !== status) : [...prev, status]
+    );
+    setPage(1);
+  };
+
   const clearAllFilters = () => {
     setSearch("");
-    setStatusFilter("");
+    setStatusFilters([]);
     setJobFilter("");
     setDepartmentFilter("");
     setDateFrom("");
@@ -474,7 +486,7 @@ export default function ApplicationsPage() {
 
   const activeFilterCount =
     (search ? 1 : 0) +
-    (statusFilter ? 1 : 0) +
+    (statusFilters.length ? 1 : 0) +
     (jobFilter ? 1 : 0) +
     (departmentFilter ? 1 : 0) +
     (dateFrom ? 1 : 0) +
@@ -540,12 +552,9 @@ export default function ApplicationsPage() {
               <div className="flex flex-nowrap sm:flex-wrap gap-2 min-w-max sm:min-w-0">
               <button
                 type="button"
-                onClick={() => {
-                  setStatusFilter("");
-                  setPage(1);
-                }}
+                onClick={clearStatusFilters}
                 className={`shrink-0 text-xs px-3 py-2 sm:py-1.5 min-h-[2.5rem] sm:min-h-0 rounded-full border transition-colors ${
-                  statusFilter === ""
+                  statusFilters.length === 0
                     ? "bg-primary/10 border-primary/30 text-primary font-semibold"
                     : "bg-transparent border-gray-200 dark:border-white/10 text-[#8c9097] dark:text-white/60 hover:bg-gray-50 dark:hover:bg-white/5"
                 }`}
@@ -556,12 +565,9 @@ export default function ApplicationsPage() {
                 <button
                   key={s}
                   type="button"
-                  onClick={() => {
-                    setStatusFilter(s);
-                    setPage(1);
-                  }}
+                  onClick={() => toggleStatusFilter(s)}
                   className={`shrink-0 text-xs px-3 py-2 sm:py-1.5 min-h-[2.5rem] sm:min-h-0 rounded-full transition-colors ${
-                    statusFilter === s
+                    statusFilters.includes(s)
                       ? `${STATUS_STYLE[s]} font-semibold`
                       : "border border-gray-200 dark:border-white/10 text-[#8c9097] dark:text-white/60 hover:bg-gray-50 dark:hover:bg-white/5"
                   }`}
@@ -569,6 +575,15 @@ export default function ApplicationsPage() {
                   {s}
                 </button>
               ))}
+              {statusFilters.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearStatusFilters}
+                  className="shrink-0 text-xs px-3 py-2 sm:py-1.5 min-h-[2.5rem] sm:min-h-0 rounded-full border border-gray-200 dark:border-white/10 text-primary hover:bg-primary/5"
+                >
+                  Clear stages
+                </button>
+              )}
               </div>
             </div>
           </div>
@@ -982,6 +997,7 @@ export default function ApplicationsPage() {
                 onPageChange={setPage}
                 ariaLabel="Applications page navigation"
                 gotoInputId="applications-goto-page"
+                hideWhenSinglePage
               />
             </div>
           )}

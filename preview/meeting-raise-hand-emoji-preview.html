@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Meeting UI — Raise Hand + Chat Emoji Preview (Audit Only)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;1,9..144,400&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet" />
+  <style>
+    :root {
+      --obs-bg: #0B0D0E;
+      --obs-bg-2: #15181b;
+      --obs-bg-3: #1c2024;
+      --obs-fg: #f4f5f6;
+      --obs-fg-dim: #a8acb1;
+      --obs-fg-faint: #6b7075;
+      --obs-line: rgba(255,255,255,0.08);
+      --obs-line-2: rgba(255,255,255,0.14);
+      --obs-accent: #00E6C3;
+      --obs-accent-dim: #0a8c77;
+      --obs-warm: #FF8A65;
+      --obs-danger: #ff5252;
+      --obs-font-display: 'Fraunces', 'Times New Roman', serif;
+      --obs-font-body: 'Manrope', system-ui, sans-serif;
+      --obs-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--obs-font-body);
+      background: radial-gradient(ellipse at 30% 10%, #15181b 0%, var(--obs-bg) 55%, #06070a 100%);
+      color: var(--obs-fg);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    .banner {
+      padding: 20px 28px;
+      border-bottom: 1px solid var(--obs-line);
+      background: rgba(15,17,19,0.85);
+      backdrop-filter: blur(12px);
+    }
+    .banner h1 {
+      margin: 0 0 6px;
+      font-family: var(--obs-font-display);
+      font-size: 1.35rem;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+    }
+    .banner p { margin: 0; color: var(--obs-fg-dim); max-width: 90ch; font-size: 0.875rem; }
+    .banner .tag {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(255,138,101,0.15);
+      border: 1px solid rgba(255,138,101,0.35);
+      color: var(--obs-warm);
+      font-family: var(--obs-font-mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 28px;
+      border-bottom: 1px solid var(--obs-line);
+      background: rgba(11,13,14,0.6);
+    }
+    .controls-bar label {
+      font-family: var(--obs-font-mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--obs-fg-faint);
+      margin-right: 4px;
+    }
+    .state-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+    .state-tab {
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 8px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--obs-line);
+      background: rgba(255,255,255,0.04);
+      color: var(--obs-fg-dim);
+      cursor: pointer;
+      transition: all 160ms ease;
+    }
+    .state-tab:hover { background: rgba(255,255,255,0.08); color: var(--obs-fg); }
+    .state-tab[aria-selected="true"] {
+      background: linear-gradient(180deg, rgba(0,230,195,0.18), rgba(0,230,195,0.08));
+      border-color: rgba(0,230,195,0.4);
+      color: #d6fff6;
+    }
+
+    .viewport-wrap {
+      padding: 24px 28px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .viewport-label {
+      font-family: var(--obs-font-mono);
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--obs-fg-faint);
+    }
+    .viewport {
+      width: min(1440px, 100%);
+      height: min(900px, calc(100vh - 220px));
+      min-height: 520px;
+      border: 1px solid var(--obs-line);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 24px 80px -20px rgba(0,0,0,0.75);
+      position: relative;
+      background: radial-gradient(ellipse at top, #15181b 0%, var(--obs-bg) 60%, #06070a 100%);
+    }
+    @media (max-width: 1100px) {
+      .viewport { height: min(720px, calc(100vh - 200px)); }
+    }
+    @media (max-width: 760px) {
+      .viewport { border-radius: 0; border-left: 0; border-right: 0; width: 100%; }
+      .viewport-wrap { padding: 12px 0 24px; }
+    }
+
+    /* ---- Meeting room ---- */
+    .room {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: relative;
+      isolation: isolate;
+    }
+    .room::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/></svg>");
+      opacity: 0.025;
+      pointer-events: none;
+      mix-blend-mode: overlay;
+      z-index: 0;
+    }
+
+    .hud {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      z-index: 20;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 14px 18px;
+      background: linear-gradient(180deg, rgba(0,0,0,0.55) 0%, transparent 100%);
+      pointer-events: none;
+    }
+    .hud-pills { display: flex; gap: 8px; pointer-events: auto; }
+    .hud-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+      font-size: 13px;
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+    .hud-pill .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--obs-accent);
+      box-shadow: 0 0 8px var(--obs-accent);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .stage-wrap {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      position: relative;
+      z-index: 1;
+      padding: 52px 12px 0;
+    }
+    .grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(2, 1fr);
+      gap: 8px;
+      padding: 8px;
+      min-height: 0;
+    }
+    .tile {
+      position: relative;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: linear-gradient(145deg, #1a1d22 0%, #0f1114 100%);
+      box-shadow: 0 8px 24px -8px rgba(0,0,0,0.6);
+      min-height: 0;
+    }
+    .tile.speaking {
+      border-color: var(--obs-accent);
+      box-shadow: 0 0 0 1px var(--obs-accent), 0 8px 32px -4px rgba(0,230,195,0.25);
+    }
+    .tile-avatar {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--obs-font-display);
+      font-size: 2.5rem;
+      font-style: italic;
+      color: rgba(255,255,255,0.12);
+    }
+    .tile-name {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      font-family: var(--obs-font-mono);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: rgba(11,13,14,0.55);
+      backdrop-filter: blur(10px);
+    }
+    .tile-hand {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: rgba(0,230,195,0.2);
+      border: 1px solid rgba(0,230,195,0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: var(--obs-accent);
+      font-size: 16px;
+    }
+    .tile-hand.visible { display: flex; }
+
+    /* Chat drawer */
+    .chat-panel {
+      position: absolute;
+      top: 52px;
+      right: 0;
+      bottom: 88px;
+      width: min(360px, 100%);
+      z-index: 30;
+      padding: 8px 8px 8px 0;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      opacity: 0;
+      visibility: hidden;
+      transition: transform 260ms cubic-bezier(0.2,0.8,0.2,1), opacity 180ms, visibility 0s 180ms;
+    }
+    .chat-panel.open {
+      transform: translateX(0);
+      opacity: 1;
+      visibility: visible;
+      transition: transform 260ms cubic-bezier(0.2,0.8,0.2,1), opacity 180ms, visibility 0s;
+    }
+    .chat-inner {
+      flex: 1;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 0;
+      background: rgba(15,17,19,0.82);
+      backdrop-filter: blur(24px) saturate(140%);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      box-shadow: 0 12px 48px -12px rgba(0,0,0,0.7);
+      overflow: hidden;
+    }
+    .chat-hd {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      font-family: var(--obs-font-mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.6);
+    }
+    .chat-msgs {
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .chat-entry {
+      max-width: 88%;
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.055);
+      font-size: 13px;
+    }
+    .chat-entry.local {
+      align-self: flex-end;
+      background: rgba(0,230,195,0.13);
+      border-color: rgba(0,230,195,0.26);
+    }
+    .chat-entry .sender {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--obs-accent);
+      margin-bottom: 2px;
+    }
+    .chat-form {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      align-items: flex-end;
+      position: relative;
+    }
+    .chat-form-left {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .emoji-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: var(--obs-fg-dim);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      transition: background 160ms, border-color 160ms, color 160ms;
+    }
+    .emoji-btn:hover, .emoji-btn[aria-expanded="true"] {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(0,230,195,0.35);
+      color: var(--obs-accent);
+    }
+    .chat-input {
+      flex: 1;
+      min-width: 0;
+      min-height: 44px;
+      padding: 0 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font: inherit;
+      font-size: 14px;
+    }
+    .chat-send {
+      min-height: 44px;
+      padding: 0 16px;
+      border: 0;
+      border-radius: 12px;
+      background: var(--obs-accent);
+      color: #06231f;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .emoji-picker {
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 12px;
+      display: none;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 4px;
+      padding: 10px;
+      background: rgba(20,23,26,0.95);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--obs-line-2);
+      border-radius: 14px;
+      box-shadow: 0 12px 40px -8px rgba(0,0,0,0.8);
+      z-index: 40;
+    }
+    .emoji-picker.open { display: grid; }
+    .emoji-picker button {
+      width: 36px;
+      height: 36px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      font-size: 20px;
+      cursor: pointer;
+      transition: background 120ms;
+    }
+    .emoji-picker button:hover { background: rgba(255,255,255,0.1); }
+
+    /* Control bar */
+    .control-bar-wrap {
+      flex-shrink: 0;
+      padding: 0 12px 12px;
+      z-index: 25;
+      position: relative;
+    }
+    .control-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: nowrap;
+      gap: 6px;
+      padding: 8px 12px;
+      margin: 0 auto;
+      max-width: 100%;
+      background: rgba(15,17,19,0.72);
+      backdrop-filter: blur(24px) saturate(140%);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      box-shadow: 0 12px 48px -12px rgba(0,0,0,0.7);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+    .ctrl-btn {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-width: 44px;
+      min-height: 44px;
+      padding: 0 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.04);
+      color: #f4f5f6;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 160ms, border-color 160ms, color 160ms;
+      white-space: nowrap;
+    }
+    .ctrl-btn:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.14);
+    }
+    .ctrl-btn.active {
+      background: linear-gradient(180deg, rgba(0,230,195,0.18), rgba(0,230,195,0.08));
+      border-color: rgba(0,230,195,0.4);
+      color: #d6fff6;
+    }
+    .ctrl-btn.muted {
+      background: rgba(255,82,82,0.15);
+      border-color: rgba(255,82,82,0.35);
+      color: #ffb4b4;
+    }
+    .ctrl-btn.leave {
+      background: linear-gradient(180deg, rgba(255,82,82,0.95), rgba(220,40,40,0.95));
+      border-color: rgba(255,120,120,0.4);
+      color: #fff;
+      font-weight: 600;
+    }
+    .ctrl-btn i { font-size: 18px; }
+    .ctrl-label { display: inline; }
+    @media (max-width: 900px) {
+      .ctrl-label { display: none; }
+      .ctrl-btn { padding: 0; width: 44px; }
+    }
+    @media (max-width: 760px) {
+      .control-bar-wrap { padding: 0; }
+      .control-bar {
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+        border-bottom: 0;
+        justify-content: flex-start;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+      }
+    }
+
+    .raised-list {
+      position: absolute;
+      top: 56px;
+      left: 14px;
+      z-index: 15;
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 220px;
+    }
+    .raised-list.visible { display: flex; }
+    .raised-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 10px;
+      background: rgba(0,230,195,0.12);
+      border: 1px solid rgba(0,230,195,0.3);
+      font-size: 12px;
+      font-weight: 500;
+      animation: slideIn 200ms ease;
+    }
+    .raised-chip i { color: var(--obs-accent); }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-8px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    .notes {
+      max-width: 1440px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 28px 32px;
+      font-size: 12px;
+      color: var(--obs-fg-faint);
+    }
+    .notes strong { color: var(--obs-fg-dim); }
+
+    .state-panel { display: none; height: 100%; flex-direction: column; }
+    .state-panel.active { display: flex; }
+  </style>
+</head>
+<body>
+  <header class="banner">
+    <h1>Interview / Meeting — Raise Hand + Chat Emoji</h1>
+    <p>Isolated visual preview only. No production code changed. Matches Obsidian Studio tokens from <code>public-meeting-room-client</code> and <code>stable-video-conference</code>.</p>
+    <span class="tag">Audit preview — do not ship</span>
+  </header>
+
+  <div class="controls-bar">
+    <label for="state-tabs">Preview state</label>
+    <div class="state-tabs" id="state-tabs" role="tablist">
+      <button class="state-tab" role="tab" aria-selected="true" data-state="hand-lowered">1 · Hand lowered</button>
+      <button class="state-tab" role="tab" aria-selected="false" data-state="hand-raised">2 · Hand raised</button>
+      <button class="state-tab" role="tab" aria-selected="false" data-state="chat-emoji">3 · Chat + emoji btn</button>
+      <button class="state-tab" role="tab" aria-selected="false" data-state="picker-open">4 · Emoji picker open</button>
+    </div>
+  </div>
+
+  <div class="viewport-wrap">
+    <span class="viewport-label">Viewport 1440 × 900 (scales down on narrow desktop)</span>
+    <div class="viewport" id="viewport">
+      <!-- State 1: Hand lowered -->
+      <div class="state-panel active" data-panel="hand-lowered">
+        <div class="room">
+          <div class="hud">
+            <div class="hud-pills">
+              <span class="hud-pill"><span class="dot"></span><i class="ri-time-line"></i> 12:34</span>
+              <span class="hud-pill"><i class="ri-group-line"></i> 4 participants</span>
+            </div>
+          </div>
+          <div class="raised-list" id="raised-list-1"></div>
+          <div class="stage-wrap">
+            <div class="grid">
+              <div class="tile speaking"><div class="tile-avatar">S</div><span class="tile-name">Sarah Chen</span><span class="tile-hand"><i class="ri-hand"></i></span></div>
+              <div class="tile"><div class="tile-avatar">M</div><span class="tile-name">Marcus Lee</span><span class="tile-hand"><i class="ri-hand"></i></span></div>
+              <div class="tile"><div class="tile-avatar">You</div><span class="tile-name">You</span><span class="tile-hand"><i class="ri-hand"></i></span></div>
+              <div class="tile"><div class="tile-avatar">A</div><span class="tile-name">Alex Rivera</span><span class="tile-hand visible"><i class="ri-hand"></i></span></div>
+            </div>
+          </div>
+          <div class="control-bar-wrap">
+            <div class="control-bar">
+              <button class="ctrl-btn" type="button" title="Microphone"><i class="ri-mic-line"></i><span class="ctrl-label">Mic</span></button>
+              <button class="ctrl-btn" type="button" title="Camera"><i class="ri-vidicon-line"></i><span class="ctrl-label">Cam</span></button>
+              <button class="ctrl-btn" type="button" title="Share screen"><i class="ri-share-forward-line"></i><span class="ctrl-label">Share</span></button>
+              <button class="ctrl-btn" type="button" title="Raise hand" aria-pressed="false"><i class="ri-hand"></i><span class="ctrl-label">Raise hand</span></button>
+              <button class="ctrl-btn" type="button" title="Chat"><i class="ri-chat-3-line"></i><span class="ctrl-label">Chat</span></button>
+              <button class="ctrl-btn" type="button" title="Record"><i class="ri-record-circle-line"></i><span class="ctrl-label">Record</span></button>
+              <button class="ctrl-btn leave" type="button" title="Leave"><i class="ri-phone-line" style="transform:rotate(135deg)"></i><span class="ctrl-label">Leave</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- State 2: Hand raised -->
+      <div class="state-panel" data-panel="hand-raised">
+        <div class="room">
+          <div class="hud">
+            <div class="hud-pills">
+              <span class="hud-pill"><span class="dot"></span><i class="ri-time-line"></i> 12:34</span>
+              <span class="hud-pill"><i class="ri-group-line"></i> 4 participants</span>
+            </div>
+          </div>
+          <div class="raised-list visible">
+            <div class="raised-chip"><i class="ri-hand"></i> You raised hand</div>
+            <div class="raised-chip"><i class="ri-hand"></i> Alex Rivera</div>
+          </div>
+          <div class="stage-wrap">
+            <div class="grid">
+              <div class="tile speaking"><div class="tile-avatar">S</div><span class="tile-name">Sarah Chen</span><span class="tile-hand"><i class="ri-hand"></i></span></div>
+              <div class="tile"><div class="tile-avatar">M</div><span class="tile-name">Marcus Lee</span><span class="tile-hand"><i class="ri-hand"></i></span></div>
+              <div class="tile" style="outline:2px solid var(--obs-accent);outline-offset:-2px"><div class="tile-avatar">You</div><span class="tile-name">You</span><span class="tile-hand visible"><i class="ri-hand"></i></span></div>
+              <div class="tile"><div class="tile-avatar">A</div><span class="tile-name">Alex Rivera</span><span class="tile-hand visible"><i class="ri-hand"></i></span></div>
+            </div>
+          </div>
+          <div class="control-bar-wrap">
+            <div class="control-bar">
+              <button class="ctrl-btn" type="button"><i class="ri-mic-line"></i><span class="ctrl-label">Mic</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-vidicon-line"></i><span class="ctrl-label">Cam</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-share-forward-line"></i><span class="ctrl-label">Share</span></button>
+              <button class="ctrl-btn active" type="button" aria-pressed="true" title="Lower hand"><i class="ri-hand"></i><span class="ctrl-label">Lower hand</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-chat-3-line"></i><span class="ctrl-label">Chat</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-record-circle-line"></i><span class="ctrl-label">Record</span></button>
+              <button class="ctrl-btn leave" type="button"><i class="ri-phone-line" style="transform:rotate(135deg)"></i><span class="ctrl-label">Leave</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- State 3: Chat + emoji button -->
+      <div class="state-panel" data-panel="chat-emoji">
+        <div class="room">
+          <div class="hud">
+            <div class="hud-pills">
+              <span class="hud-pill"><span class="dot"></span><i class="ri-time-line"></i> 12:34</span>
+              <span class="hud-pill"><i class="ri-group-line"></i> 4 participants</span>
+            </div>
+          </div>
+          <div class="stage-wrap">
+            <div class="grid" style="opacity:0.92">
+              <div class="tile speaking"><div class="tile-avatar">S</div><span class="tile-name">Sarah Chen</span></div>
+              <div class="tile"><div class="tile-avatar">M</div><span class="tile-name">Marcus Lee</span></div>
+              <div class="tile"><div class="tile-avatar">You</div><span class="tile-name">You</span></div>
+              <div class="tile"><div class="tile-avatar">A</div><span class="tile-name">Alex Rivera</span></div>
+            </div>
+            <aside class="chat-panel open">
+              <div class="chat-inner">
+                <div class="chat-hd"><span>Meeting chat</span><button type="button" style="background:transparent;border:0;color:rgba(255,255,255,0.6);cursor:pointer;font-size:18px" aria-label="Close"><i class="ri-close-line"></i></button></div>
+                <div class="chat-msgs">
+                  <div class="chat-entry"><div class="sender">Sarah Chen</div>Welcome everyone — we'll start in a minute.</div>
+                  <div class="chat-entry local"><div class="sender">You</div>Thanks, joining now.</div>
+                </div>
+                <form class="chat-form" onsubmit="return false">
+                  <div class="chat-form-left">
+                    <button class="emoji-btn" type="button" aria-label="Insert emoji" title="Insert emoji"><i class="ri-emotion-happy-line"></i></button>
+                  </div>
+                  <input class="chat-input" type="text" placeholder="Type a message…" value="" />
+                  <button class="chat-send" type="submit">Send</button>
+                </form>
+              </div>
+            </aside>
+          </div>
+          <div class="control-bar-wrap">
+            <div class="control-bar">
+              <button class="ctrl-btn" type="button"><i class="ri-mic-line"></i><span class="ctrl-label">Mic</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-vidicon-line"></i><span class="ctrl-label">Cam</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-share-forward-line"></i><span class="ctrl-label">Share</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-hand"></i><span class="ctrl-label">Raise hand</span></button>
+              <button class="ctrl-btn active" type="button"><i class="ri-chat-3-line"></i><span class="ctrl-label">Chat</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-record-circle-line"></i><span class="ctrl-label">Record</span></button>
+              <button class="ctrl-btn leave" type="button"><i class="ri-phone-line" style="transform:rotate(135deg)"></i><span class="ctrl-label">Leave</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- State 4: Emoji picker open -->
+      <div class="state-panel" data-panel="picker-open">
+        <div class="room">
+          <div class="hud">
+            <div class="hud-pills">
+              <span class="hud-pill"><span class="dot"></span><i class="ri-time-line"></i> 12:34</span>
+              <span class="hud-pill"><i class="ri-group-line"></i> 4 participants</span>
+            </div>
+          </div>
+          <div class="stage-wrap">
+            <div class="grid" style="opacity:0.88">
+              <div class="tile"><div class="tile-avatar">S</div><span class="tile-name">Sarah Chen</span></div>
+              <div class="tile"><div class="tile-avatar">M</div><span class="tile-name">Marcus Lee</span></div>
+              <div class="tile"><div class="tile-avatar">You</div><span class="tile-name">You</span></div>
+              <div class="tile"><div class="tile-avatar">A</div><span class="tile-name">Alex Rivera</span></div>
+            </div>
+            <aside class="chat-panel open">
+              <div class="chat-inner">
+                <div class="chat-hd"><span>Meeting chat</span><button type="button" style="background:transparent;border:0;color:rgba(255,255,255,0.6);cursor:pointer;font-size:18px"><i class="ri-close-line"></i></button></div>
+                <div class="chat-msgs">
+                  <div class="chat-entry"><div class="sender">Sarah Chen</div>Welcome everyone — we'll start in a minute.</div>
+                  <div class="chat-entry local"><div class="sender">You</div>Thanks, joining now.</div>
+                </div>
+                <form class="chat-form" onsubmit="return false">
+                  <div class="emoji-picker open" role="listbox" aria-label="Emoji picker">
+                    <button type="button">👍</button><button type="button">❤️</button><button type="button">😂</button>
+                    <button type="button">😮</button><button type="button">😢</button><button type="button">🙏</button>
+                    <button type="button">👏</button><button type="button">🎉</button><button type="button">✅</button>
+                    <button type="button">👋</button><button type="button">💯</button><button type="button">🔥</button>
+                  </div>
+                  <div class="chat-form-left">
+                    <button class="emoji-btn" type="button" aria-expanded="true" aria-label="Insert emoji"><i class="ri-emotion-happy-line"></i></button>
+                  </div>
+                  <input class="chat-input" type="text" placeholder="Type a message…" value="Great to be here " />
+                  <button class="chat-send" type="submit">Send</button>
+                </form>
+              </div>
+            </aside>
+          </div>
+          <div class="control-bar-wrap">
+            <div class="control-bar">
+              <button class="ctrl-btn" type="button"><i class="ri-mic-line"></i><span class="ctrl-label">Mic</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-vidicon-line"></i><span class="ctrl-label">Cam</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-share-forward-line"></i><span class="ctrl-label">Share</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-hand"></i><span class="ctrl-label">Raise hand</span></button>
+              <button class="ctrl-btn active" type="button"><i class="ri-chat-3-line"></i><span class="ctrl-label">Chat</span></button>
+              <button class="ctrl-btn" type="button"><i class="ri-record-circle-line"></i><span class="ctrl-label">Record</span></button>
+              <button class="ctrl-btn leave" type="button"><i class="ri-phone-line" style="transform:rotate(135deg)"></i><span class="ctrl-label">Leave</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <p><strong>Responsive:</strong> Control bar uses horizontal scroll below 760px (matches <code>MEETING_CONTROL_BAR_RESPONSIVE_CSS</code>). Labels hide below 900px in this preview.</p>
+    <p><strong>Dark mode:</strong> Meeting UI is dark-only (Obsidian tokens). Light mode is not a product requirement for the room.</p>
+    <p><strong>Not shown:</strong> Live floating reactions on video tiles — no existing LiveKit data-channel protocol in codebase.</p>
+  </div>
+
+  <script>
+    document.querySelectorAll('.state-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const state = tab.dataset.state;
+        document.querySelectorAll('.state-tab').forEach((t) => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
+        document.querySelectorAll('.state-panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === state));
+      });
+    });
+  </script>
+</body>
+</html>

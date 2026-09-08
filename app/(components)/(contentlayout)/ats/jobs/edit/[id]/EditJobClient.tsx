@@ -18,6 +18,7 @@ import {
 } from '@/shared/lib/api/jobs'
 import { ROUTES } from '@/shared/lib/constants'
 import { normalizeTipTapHtmlFromApi } from '@/shared/lib/tiptapHtml'
+import { YmdFilterDateInput } from '@/shared/components/filters/YmdFilterDateInput'
 
 /**
  * Marker the Create / Edit flows insert when appending the Requirements & Qualifications
@@ -131,6 +132,7 @@ export default function EditJobClient() {
     minExperience: '',
     maxExperience: '',
     vacancies: '1',
+    applicationDeadline: '',
     education: '',
   })
   const [skillsInputValue, setSkillsInputValue] = useState('')
@@ -305,6 +307,9 @@ export default function EditJobClient() {
           minExperience: job.minExperience != null ? String(job.minExperience) : '',
           maxExperience: job.maxExperience != null ? String(job.maxExperience) : '',
           vacancies: job.vacancies != null ? String(job.vacancies) : '1',
+          applicationDeadline: job.applicationDeadline
+            ? String(job.applicationDeadline).slice(0, 10)
+            : '',
           education: '',
         })
         // Decode entity-encoded payloads (xss-clean middleware may return `&lt;p&gt;…`)
@@ -453,6 +458,9 @@ export default function EditJobClient() {
         minExperience: Number.isFinite(minExpNum) ? minExpNum : null,
         maxExperience: Number.isFinite(maxExpNum) ? maxExpNum : null,
         vacancies: Number.isFinite(vacanciesNum) ? vacanciesNum : null,
+        applicationDeadline: formData.applicationDeadline
+          ? new Date(formData.applicationDeadline).toISOString()
+          : null,
         status: formData.status?.value || 'Active',
       }
       await updateJob(jobId, payload)
@@ -601,7 +609,7 @@ export default function EditJobClient() {
                               type="number"
                               inputMode="numeric"
                               id="vacancies"
-                              className="form-control !rounded-md"
+                              className="form-control w-full !rounded-md"
                               placeholder="e.g., 5"
                               min={1}
                               max={10000}
@@ -610,6 +618,19 @@ export default function EditJobClient() {
                               onChange={(e) =>
                                 handleInputChange('vacancies', e.target.value.replace(/\D/g, ''))
                               }
+                            />
+                          </div>
+                          <div className="xl:col-span-3 md:col-span-6 col-span-12">
+                            <YmdFilterDateInput
+                              label="Application deadline (optional)"
+                              variant="form"
+                              inputId="applicationDeadline"
+                              value={formData.applicationDeadline}
+                              onCommit={(sanitized) => handleInputChange('applicationDeadline', sanitized)}
+                              portalId="ats-jobs-datepicker-portal-application-deadline-edit"
+                              popperClassName="!z-[9999]"
+                              inputClassName="form-control w-full !rounded-md"
+                              labelClassName="form-label"
                             />
                           </div>
                         </div>

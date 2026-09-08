@@ -4,6 +4,8 @@ export type EmployeeListFilterState = {
   agentIds: string[]
   employmentStatus: 'current' | 'resigned' | 'all'
   compensationType: '' | 'paid' | 'unpaid'
+  /** Employment category. Orthogonal to compensationType — a Freelance hire may be either. */
+  employmentType: '' | 'Full-time' | 'Part-time' | 'Contract' | 'Temporary' | 'Internship' | 'Freelance'
 }
 
 export type BuildEmployeesListQueryOptions = {
@@ -40,6 +42,7 @@ export function buildEmployeesListQueryParams(
   if (filters.agentIds?.length) params.agentIds = filters.agentIds.join(',')
   params.employmentStatus = filters.employmentStatus
   if (filters.compensationType) params.compensationType = filters.compensationType
+  if (filters.employmentType) params.employmentType = filters.employmentType
 
   return params
 }

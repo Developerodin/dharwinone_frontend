@@ -13,6 +13,7 @@ import { normalizeTipTapHtmlFromApi } from '@/shared/lib/tiptapHtml'
 import { resolveTemplateVars, type TemplateVarContext } from '@/shared/lib/ats/templateVars'
 import { getPhoneCountry, getPhoneValidationError, formatPhoneForApi } from '@/shared/lib/phoneCountries'
 import { PhoneCountrySelect } from '@/shared/components/PhoneCountrySelect'
+import { YmdFilterDateInput } from '@/shared/components/filters/YmdFilterDateInput'
 import { usePmReactSelectStyles } from '@/shared/hooks/usePmReactSelectStyles'
 const Select = dynamic(() => import("react-select"), { ssr: false })
 import CreatableSelect from 'react-select/creatable'
@@ -51,6 +52,7 @@ const CreateJob = () => {
     minExperience: '',
     maxExperience: '',
     vacancies: '1',
+    applicationDeadline: '',
     education: '',
   })
 
@@ -323,6 +325,9 @@ const CreateJob = () => {
         ...(Number.isFinite(minExpNum) ? { minExperience: minExpNum } : {}),
         ...(Number.isFinite(maxExpNum) ? { maxExperience: maxExpNum } : {}),
         ...(Number.isFinite(vacanciesNum) ? { vacancies: vacanciesNum } : {}),
+        ...(formData.applicationDeadline
+          ? { applicationDeadline: new Date(formData.applicationDeadline).toISOString() }
+          : {}),
         status: formData.status?.value || 'Active',
       }
       await createJob(payload)
@@ -699,7 +704,7 @@ const CreateJob = () => {
                         <input
                           type="number"
                           inputMode="numeric"
-                          className="form-control"
+                          className="form-control w-full"
                           id="vacancies"
                           placeholder="e.g., 5"
                           min={1}
@@ -711,6 +716,19 @@ const CreateJob = () => {
                           }
                         />
                         <p className="text-muted text-xs mt-1">Whole number, minimum 1.</p>
+                      </div>
+
+                      <div className="xl:col-span-4 md:col-span-6 col-span-12">
+                        <YmdFilterDateInput
+                          label="Application deadline (optional)"
+                          variant="form"
+                          inputId="applicationDeadline"
+                          value={formData.applicationDeadline}
+                          onCommit={(sanitized) => handleInputChange('applicationDeadline', sanitized)}
+                          portalId="ats-jobs-datepicker-portal-application-deadline-create"
+                          popperClassName="!z-[9999]"
+                          labelClassName="form-label"
+                        />
                       </div>
 
                       {/* Skills */}

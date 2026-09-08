@@ -14,6 +14,7 @@ interface PathAccessRule {
 }
 
 const EMPLOYEES_PATH_PREFIXES = ["ats.employees:", "ats.candidates:"];
+const MENTORS_PATH_PREFIXES = ["training.mentors:", "mentors:"];
 
 /**
  * Action-aware rules for Employees routes. Longest path wins (add/import before list).
@@ -45,6 +46,8 @@ const PATH_ACCESS_ACTIONS: Record<string, PathAccessRule> = {
    * and non-view combos must never render the tab per the Meeting module permission spec.
    */
   "/communication/meetings": { permissionPrefixes: ["communication.meetings:"], anyOf: ["view"] },
+  "/training/mentors/add": { permissionPrefixes: MENTORS_PATH_PREFIXES, anyOf: ["create"] },
+  "/training/mentors/edit": { permissionPrefixes: MENTORS_PATH_PREFIXES, anyOf: ["edit"] },
   "/ats/employees": {
     permissionPrefixes: EMPLOYEES_PATH_PREFIXES,
     anyOf: ["view", "create", "edit", "delete"],

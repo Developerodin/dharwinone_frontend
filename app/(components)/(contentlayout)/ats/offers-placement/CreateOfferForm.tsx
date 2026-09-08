@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { createOffer, getOfferLetterDefaults, JOB_TYPES, compensationTypeForJobType, listOffers, type Offer, type OfferLetterJobType } from "@/shared/lib/api/offers";
+import { createOffer, getOfferLetterDefaults, listOffers, type Offer, type OfferLetterJobType, EMPLOYMENT_CATEGORIES, employmentCategoryFromOfferJobType, freelancePayFromOfferJobType, isInternOfferJobType, isUnpaidOfferJobType, offerJobTypeFromEmployment, type EmploymentCategory } from "@/shared/lib/api/offers";
 import { listJobApplications, type JobApplication } from "@/shared/lib/api/jobApplications";
 import {
   isJobApplicationEligibleForOffer,
@@ -92,11 +92,13 @@ export function CreateOfferForm({
   const applyJobDefaults = async (positionTitle: string, jobId?: string) => {
     try {
       const defaults = await getOfferLetterDefaults(positionTitle, jobId);
-      setForm((prev) =>
-        prev.rolesText.trim()
-          ? prev
-          : { ...prev, rolesText: (defaults.roleResponsibilities ?? []).join("\n") }
-      );
+      setForm((prev) => ({
+        ...prev,
+        ...(defaults.suggestedJobType ? { jobType: defaults.suggestedJobType } : {}),
+        ...(prev.rolesText.trim()
+          ? {}
+          : { rolesText: (defaults.roleResponsibilities ?? []).join("\n") }),
+      }));
     } catch {
       // leave empty; user can type
     }
@@ -126,6 +128,10 @@ export function CreateOfferForm({
     try {
       const d = await getOfferLetterDefaults(positionTitle, jobId);
       trainingText = d.trainingOutcomes.join("\n");
+      setForm((prev) => ({
+        ...prev,
+        ...(d.suggestedJobType ? { jobType: d.suggestedJobType } : {}),
+      }));
     } catch {
       // leave empty; user can type
     }
@@ -151,9 +157,10 @@ export function CreateOfferForm({
       setError("Invalid job application selected");
       return;
     }
-    const isUnpaid = form.jobType === "INTERN_UNPAID";
+    const isUnpaid = isUnpaidOfferJobType(form.jobType);
+    const isIntern = isInternOfferJobType(form.jobType);
     if (!isUnpaid && !Number(form.gross)) {
-      setError("Enter gross CTC, or set job type to Training / Unpaid internship if there is no salary.");
+      setError("Enter gross CTC, or choose an unpaid job type (Training internship or Unpaid freelance).");
       return;
     }
     const roleResponsibilities = form.rolesText
@@ -169,7 +176,7 @@ export function CreateOfferForm({
       .map((s) => s.trim())
       .filter(Boolean);
     const weeklyHours: number =
-      form.jobType === "PT_25" ? 20 : form.jobType === "FT_40" ? 40 : form.weeklyHours;
+      form.weeklyHours > 0 ? form.weeklyHours : form.jobType === "PT_25" ? 20 : 40;
 
     const selectedApp = findJobApplicationById(jobApplications, form.jobApplicationId);
     const bypassAck = await resolveOfferInterviewBypassAck(selectedApp, confirm);
@@ -196,7 +203,7 @@ export function CreateOfferForm({
         weeklyHours,
         workLocation: form.workLocation.trim() || undefined,
         roleResponsibilities: roleResponsibilities.length ? roleResponsibilities : undefined,
-        trainingOutcomes: isUnpaidSubmit && trainingOutcomes.length > 0 ? trainingOutcomes : undefined,
+        trainingOutcomes: isIntern && trainingOutcomes.length > 0 ? trainingOutcomes : undefined,
         compensationNarrative: form.compensationNarrative.trim() || undefined,
         academicAlignmentNote: form.academicNote.trim() || undefined,
         employmentEligibilityLines: employmentEligibilityLines.length ? employmentEligibilityLines : undefined,
@@ -219,7 +226,20 @@ export function CreateOfferForm({
     }
   };
 
-  const isUnpaid = form.jobType === "INTERN_UNPAID";
+  const isUnpaid = isUnpaidOfferJobType(form.jobType);
+  const isIntern = isInternOfferJobType(form.jobType);
+  const employmentCategory = employmentCategoryFromOfferJobType(form.jobType);
+  const freelancePay = freelancePayFromOfferJobType(form.jobType);
+
+  const setEmploymentCategory = (category: EmploymentCategory, payChoice?: "paid" | "unpaid") => {
+    const pay = category === "Freelance" ? (payChoice ?? freelancePay) : "paid";
+    const v = offerJobTypeFromEmployment(category, pay);
+    setForm((f) => ({
+      ...f,
+      jobType: v,
+      weeklyHours: v === "PT_25" ? 20 : v === "FT_40" ? 40 : f.weeklyHours,
+    }));
+  };
   const isModal = variant === "modal";
 
   return (
@@ -381,22 +401,37 @@ export function CreateOfferForm({
             <label className="form-label">Job type</label>
             <select
               className="form-control"
-              value={form.jobType}
-              onChange={(e) => {
-                const v = e.target.value as OfferLetterJobType;
-                setForm((f) => ({
-                  ...f,
-                  jobType: v,
-                  weeklyHours: v === "PT_25" ? 20 : v === "FT_40" ? 40 : f.weeklyHours,
-                }));
-              }}
+              value={employmentCategory}
+              onChange={(e) => setEmploymentCategory(e.target.value as EmploymentCategory)}
             >
-              {JOB_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
+              {EMPLOYMENT_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
             </select>
+            {employmentCategory === "Freelance" ? (
+              <div className="flex flex-wrap gap-4 mt-2" role="group" aria-label="Freelance compensation">
+                <label className="inline-flex items-center gap-2 min-h-[44px] cursor-pointer">
+                  <input
+                    type="radio"
+                    name="freelance-pay-modal"
+                    checked={freelancePay === "paid"}
+                    onChange={() => setEmploymentCategory("Freelance", "paid")}
+                  />
+                  Paid
+                </label>
+                <label className="inline-flex items-center gap-2 min-h-[44px] cursor-pointer">
+                  <input
+                    type="radio"
+                    name="freelance-pay-modal"
+                    checked={freelancePay === "unpaid"}
+                    onChange={() => setEmploymentCategory("Freelance", "unpaid")}
+                  />
+                  Unpaid
+                </label>
+              </div>
+            ) : null}
           </div>
           <div>
             <label className="form-label">Compensation</label>
@@ -406,7 +441,7 @@ export function CreateOfferForm({
             </div>
           </div>
           <div>
-            <label className="form-label">Weekly hours (intern)</label>
+            <label className="form-label">Weekly hours</label>
             {(() => {
               const isPreset = form.weeklyHours === 40 || form.weeklyHours === 20;
               const showCustom = weeklyHoursOther || !isPreset;
@@ -415,7 +450,6 @@ export function CreateOfferForm({
                   <select
                     className="form-control"
                     value={showCustom ? "other" : String(form.weeklyHours)}
-                    disabled={!isUnpaid}
                     onChange={(e) => {
                       const v = e.target.value;
                       if (v === "other") {
@@ -437,7 +471,6 @@ export function CreateOfferForm({
                       max={168}
                       className="form-control mt-2"
                       placeholder="Weekly hours"
-                      disabled={!isUnpaid}
                       value={form.weeklyHours || ""}
                       onChange={(e) =>
                         setForm((f) => ({ ...f, weeklyHours: Number(e.target.value) || 0 }))
@@ -505,25 +538,40 @@ export function CreateOfferForm({
             <label className="form-label">Job type</label>
             <select
               className="form-control"
-              value={form.jobType}
-              onChange={(e) => {
-                const v = e.target.value as OfferLetterJobType;
-                setForm((f) => ({
-                  ...f,
-                  jobType: v,
-                  weeklyHours: v === "PT_25" ? 20 : v === "FT_40" ? 40 : f.weeklyHours,
-                }));
-              }}
+              value={employmentCategory}
+              onChange={(e) => setEmploymentCategory(e.target.value as EmploymentCategory)}
             >
-              {JOB_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
+              {EMPLOYMENT_CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
             </select>
+            {employmentCategory === "Freelance" ? (
+              <div className="flex flex-wrap gap-4 mt-2" role="group" aria-label="Freelance compensation">
+                <label className="inline-flex items-center gap-2 min-h-[44px] cursor-pointer">
+                  <input
+                    type="radio"
+                    name="freelance-pay-page"
+                    checked={freelancePay === "paid"}
+                    onChange={() => setEmploymentCategory("Freelance", "paid")}
+                  />
+                  Paid
+                </label>
+                <label className="inline-flex items-center gap-2 min-h-[44px] cursor-pointer">
+                  <input
+                    type="radio"
+                    name="freelance-pay-page"
+                    checked={freelancePay === "unpaid"}
+                    onChange={() => setEmploymentCategory("Freelance", "unpaid")}
+                  />
+                  Unpaid
+                </label>
+              </div>
+            ) : null}
           </div>
           <div>
-            <label className="form-label">Weekly hours (intern)</label>
+            <label className="form-label">Weekly hours</label>
             {(() => {
               const isPreset = form.weeklyHours === 40 || form.weeklyHours === 20;
               const showCustom = weeklyHoursOther || !isPreset;
@@ -532,7 +580,6 @@ export function CreateOfferForm({
                   <select
                     className="form-control"
                     value={showCustom ? "other" : String(form.weeklyHours)}
-                    disabled={!isUnpaid}
                     onChange={(e) => {
                       const v = e.target.value;
                       if (v === "other") {
@@ -554,7 +601,6 @@ export function CreateOfferForm({
                       max={168}
                       className="form-control mt-2"
                       placeholder="Weekly hours"
-                      disabled={!isUnpaid}
                       value={form.weeklyHours || ""}
                       onChange={(e) =>
                         setForm((f) => ({ ...f, weeklyHours: Number(e.target.value) || 0 }))
@@ -590,7 +636,7 @@ export function CreateOfferForm({
             placeholder="Suggested from job title; edit as needed"
           />
         </div>
-        {isUnpaid && (
+        {isIntern && (
           <div>
             <label className="form-label">Training &amp; learning outcomes (one per line)</label>
             <textarea
@@ -601,17 +647,19 @@ export function CreateOfferForm({
           </div>
         )}
         {!isUnpaid && (
+          <div>
+            <label className="form-label">Compensation paragraph (optional; USD/INR uses gross above)</label>
+            <textarea
+              className="form-control text-xs min-h-[70px]"
+              value={form.compensationNarrative}
+              onChange={(e) => setForm((f) => ({ ...f, compensationNarrative: e.target.value }))}
+              placeholder="Leave blank to auto-build from gross CTC and currency on generate"
+            />
+          </div>
+        )}
+        {!isIntern && (
           <>
-            <div>
-              <label className="form-label">Compensation paragraph (optional; USD/INR uses gross above)</label>
-              <textarea
-                className="form-control text-xs min-h-[70px]"
-                value={form.compensationNarrative}
-                onChange={(e) => setForm((f) => ({ ...f, compensationNarrative: e.target.value }))}
-                placeholder="Leave blank to auto-build from gross CTC and currency on generate"
-              />
-            </div>
-            <p className="text-xs text-gray-500">Supervisor (printed on full-time / part-time letters)</p>
+            <p className="text-xs text-gray-500">Supervisor (printed on paid and freelance letters)</p>
             <div className="grid grid-cols-2 gap-2">
               <input
                 className="form-control"

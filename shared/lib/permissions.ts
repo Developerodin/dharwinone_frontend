@@ -163,6 +163,15 @@ export const ACTION_PERMISSIONS: Record<string, ActionRule> = Object.freeze({
     anyOf: ["create", "edit", "delete"],
   },
 
+  view_training_mentors: {
+    prefixes: ["training.mentors", "mentors"],
+    anyOf: ["view", "create", "edit", "delete"],
+  },
+  manage_training_mentors: {
+    prefixes: ["training.mentors", "mentors"],
+    anyOf: ["create", "edit", "delete"],
+  },
+
   view_recruiters: {
     prefixes: ["ats.recruiters", "recruiters"],
     anyOf: ["view", "create", "edit", "delete"],
@@ -404,6 +413,30 @@ export interface MeetingActionVisibility {
  *   - Any single management permission (create/edit/delete) does NOT widen the list —
  *     only the full VIEW+CREATE+EDIT+DELETE combination sees every meeting (admin-like).
  */
+/** Backend `requirePermissions('meetings.record')` aliases (see permissions.js). */
+const MEETINGS_RECORD_KEYS = new Set([
+  "meetings.record",
+  "meetings:record",
+  "mentors.manage",
+  "training.manage",
+]);
+
+/** True when the user may start/stop LiveKit meeting recordings (authenticated rooms). */
+export function userCanRecordMeeting(
+  user:
+    | {
+        permissions?: string[] | null;
+        isAdministrator?: boolean;
+        isPlatformSuperUser?: boolean;
+      }
+    | null
+    | undefined
+): boolean {
+  if (!user) return false;
+  if (user.isPlatformSuperUser || user.isAdministrator) return true;
+  return (user.permissions ?? []).some((p) => MEETINGS_RECORD_KEYS.has(p));
+}
+
 export function getMeetingActionVisibility(rawPermissions: string[]): MeetingActionVisibility {
   const has = (action: "view" | "create" | "edit" | "delete") =>
     hasCommunicationFeatureAction(rawPermissions, "meetings", action);

@@ -15,7 +15,7 @@ import {
 } from "@/shared/lib/ats/candidateSelection";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { PublicJobApplyModal } from "@/shared/components/ats/PublicJobApplyModal";
-import { formatSalaryRange, mapExperienceLevel } from "@/shared/lib/ats/jobMappers";
+import { formatSalaryRange, mapExperienceLevel, formatPostingDateMeta, formatApplicationDeadlineMeta, isApplicationDeadlinePast } from "@/shared/lib/ats/jobMappers";
 import {
   formatJobDescriptionForDisplay,
   BROWSE_JOB_DETAIL_PROSE_CLASS,
@@ -195,10 +195,20 @@ export default function BrowseJobDetailsPage() {
     }
   };
 
-  const canApply = job?.status === "Active" && !existingApplication;
+  const canApply =
+    job?.status === "Active" &&
+    !existingApplication &&
+    !isApplicationDeadlinePast(job?.applicationDeadline);
+  const deadlinePassed =
+    job?.status === "Active" &&
+    !existingApplication &&
+    isApplicationDeadlinePast(job?.applicationDeadline);
   const isLoggedIn = Boolean(user);
   const canWithdraw =
     existingApplication && WITHDRAWABLE_STATUSES.includes(existingApplication.status);
+
+  const { relative: postedRelative } = formatPostingDateMeta(job?.createdAt);
+  const deadlineMeta = formatApplicationDeadlineMeta(job?.applicationDeadline);
 
   if (jobLoading || !jobId) {
     return (
@@ -311,6 +321,13 @@ export default function BrowseJobDetailsPage() {
               ? "Apply for this role"
               : "Apply — create your account"}
         </button>
+      ) : deadlinePassed ? (
+        <div className="rounded-xl border border-rose-200/80 bg-rose-50/90 px-4 py-3 text-sm text-rose-900 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-200">
+          <span className="flex items-center gap-2">
+            <i className="ri-calendar-close-line text-lg" aria-hidden />
+            The application deadline for this role has passed.
+          </span>
+        </div>
       ) : job.status !== "Active" ? (
         <div className="rounded-xl border border-stone-200 bg-stone-100/80 px-4 py-3 text-sm text-stone-600 dark:border-white/10 dark:bg-white/[0.05] dark:text-stone-400">
           <span className="flex items-center gap-2">
@@ -514,6 +531,26 @@ export default function BrowseJobDetailsPage() {
                   {job.experienceLevel ? (
                     <GlanceRow icon="ri-line-chart-line" label="Experience">
                       {mapExperienceLevel(job.experienceLevel)}
+                    </GlanceRow>
+                  ) : null}
+                  {postedRelative ? (
+                    <GlanceRow icon="ri-time-line" label="Posted">
+                      {postedRelative}
+                    </GlanceRow>
+                  ) : null}
+                  {deadlineMeta.label ? (
+                    <GlanceRow icon="ri-calendar-event-line" label="Deadline">
+                      <span
+                        className={
+                          deadlineMeta.urgency === "past"
+                            ? "text-rose-700 dark:text-rose-300"
+                            : deadlineMeta.urgency === "near"
+                              ? "text-amber-700 dark:text-amber-300"
+                              : undefined
+                        }
+                      >
+                        {deadlineMeta.label}
+                      </span>
                     </GlanceRow>
                   ) : null}
                   {job.salaryRange && (job.salaryRange.min != null || job.salaryRange.max != null) ? (

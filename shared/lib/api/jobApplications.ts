@@ -73,6 +73,8 @@ export interface JobApplicationsListParams {
   candidateId?: string;
   recruiterId?: string;
   status?: JobApplicationStatus;
+  /** OR filter across pipeline stages */
+  statuses?: JobApplicationStatus[];
   /** Text search across candidate name/email and job title (server-side regex). */
   q?: string;
   /** Match candidate's Employee.department (case-insensitive exact match). */
@@ -102,7 +104,12 @@ export interface JobApplicationsListResponse {
 }
 
 export async function listJobApplications(params?: JobApplicationsListParams): Promise<JobApplicationsListResponse> {
-  const { data } = await apiClient.get<JobApplicationsListResponse>("/job-applications", { params });
+  const query: Record<string, string | number | boolean | undefined> = { ...params };
+  if (params?.statuses?.length) {
+    query.statuses = params.statuses.join(",");
+    delete query.status;
+  }
+  const { data } = await apiClient.get<JobApplicationsListResponse>("/job-applications", { params: query });
   return data;
 }
 

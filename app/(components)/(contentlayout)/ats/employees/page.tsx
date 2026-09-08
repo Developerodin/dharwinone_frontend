@@ -9,7 +9,11 @@ import CallNowButton from '@/shared/components/CallNowButton'
 import CandidatesFilterPanel from './_components/CandidatesFilterPanel'
 import EmployeePreviewPanel from './_components/EmployeePreviewPanel'
 import { setChatUiContext } from '@/shared/lib/chatUiContext'
-import type { EmployeeCompensationType, EmployeeEmploymentStatus } from '@/shared/schemas/employeeFilter.generated'
+import type {
+  EmployeeCompensationType,
+  EmployeeEmploymentStatus,
+  EmployeeEmploymentType,
+} from '@/shared/schemas/employeeFilter.generated'
 import {
   listCandidates,
   getCandidateFilterAgents,
@@ -231,6 +235,8 @@ interface FilterState {
   /** Default: current */
   employmentStatus: EmployeeEmploymentStatus
   compensationType: '' | EmployeeCompensationType
+  /** Employment category. Orthogonal to compensationType — a Freelance hire may be either. */
+  employmentType: '' | EmployeeEmploymentType
 }
 
 // Note type for candidate notes
@@ -428,6 +434,7 @@ const Candidates = () => {
     agentIds: [],
     employmentStatus: 'current',
     compensationType: '',
+    employmentType: '',
   })
   /** React-controlled filters panel — Preline HSOverlay often misses registration after SPA navigation */
   const [employeesFilterPanelOpen, setEmployeesFilterPanelOpen] = useState(false)
@@ -456,11 +463,12 @@ const Candidates = () => {
       activeFilters: {
         employmentStatus: filters.employmentStatus,
         compensationType: filters.compensationType,
+        employmentType: filters.employmentType,
         search: debouncedEmployeeSearch.trim() || null,
       },
     })
     return () => setChatUiContext(null)
-  }, [filters.employmentStatus, filters.compensationType, debouncedEmployeeSearch])
+  }, [filters.employmentStatus, filters.compensationType, filters.employmentType, debouncedEmployeeSearch])
 
   useEffect(() => {
     if (!employeesToolbarMenu) return
@@ -1685,7 +1693,8 @@ const Candidates = () => {
           const candidate = row.original as CandidateDisplay
           const resigned = isCandidateResigned(candidate)
           const isUnpaid = candidate._raw?.compensationType === 'unpaid'
-          const compensationLabel = isUnpaid ? 'Unpaid Internship' : 'Paid'
+          const compensationLabel = isUnpaid ? 'Unpaid' : 'Paid'
+          const employmentType = candidate._raw?.employmentType as string | undefined
           const jd = candidate._raw?.joiningDate as string | undefined
           const joinDisplay =
             jd && !Number.isNaN(new Date(jd).getTime())
@@ -1728,6 +1737,14 @@ const Candidates = () => {
                   >
                     {compensationLabel}
                   </span>
+                  {employmentType ? (
+                    <span
+                      className="inline-flex items-center rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                      title={`Employment type: ${employmentType}`}
+                    >
+                      {employmentType}
+                    </span>
+                  ) : null}
                   {resigned && (
                     <span
                       className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-red-600 text-white shadow-sm"
@@ -2071,6 +2088,7 @@ const Candidates = () => {
       agentIds: [],
       employmentStatus: 'current',
       compensationType: '',
+      employmentType: '',
     })
     setEmployeeSearch('')
     setSearchAgent('')
@@ -2089,12 +2107,14 @@ const Candidates = () => {
     filters.agentIds.length > 0 ||
     filters.employmentStatus !== 'current' ||
     !!filters.compensationType ||
+    !!filters.employmentType ||
     debouncedEmployeeSearch.trim() !== ''
 
   const activeFilterCount =
     filters.agentIds.length +
     (filters.employmentStatus !== 'current' ? 1 : 0) +
     (filters.compensationType ? 1 : 0) +
+    (filters.employmentType ? 1 : 0) +
     (debouncedEmployeeSearch.trim() ? 1 : 0)
 
   const employmentScopeLabel = useMemo(() => {

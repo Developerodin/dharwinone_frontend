@@ -65,6 +65,35 @@
   color: #8c9097;
 }
 
+.dismiss {
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin: -0.6rem -0.6rem -0.6rem 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #8c9097;
+  cursor: pointer;
+  border-radius: 0.5rem;
+}
+
+.dismiss:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #4d5875;
+}
+
+:global(.dark) .dismiss {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+:global(.dark) .dismiss:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+}
+
 :global(.dark) .desc {
   color: rgba(255, 255, 255, 0.5);
 }

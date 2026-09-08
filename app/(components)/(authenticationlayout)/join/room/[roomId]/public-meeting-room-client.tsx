@@ -17,7 +17,8 @@ import * as livekitApi from "@/shared/lib/api/livekit";
 import { endMeetingPublic } from "@/shared/lib/api/meetings";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { WaitingParticipantsPanel } from "@/shared/components/livekit/waiting-participants-panel";
-import { RecordingButton } from "@/shared/components/livekit/recording-button";
+import { MeetingRecordingHostControls } from "@/shared/components/livekit/meeting-recording-host-controls";
+import { RecordingParticipantBanner } from "@/shared/components/livekit/recording-participant-banner";
 import { MEETING_CONTROL_BAR_RESPONSIVE_CSS } from "@/shared/components/livekit/meeting-control-bar-responsive.css";
 import { useLiveKitBenignErrorSuppression } from "@/shared/lib/livekit-benign-logs";
 
@@ -1146,9 +1147,7 @@ function PublicRoomContent({
   const appliedInitialMediaRef = useRef(false);
   const initialMediaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const participants = useParticipants();
-  const [recordingSlot, setRecordingSlot] = useState<HTMLElement | null>(null);
   const [endMeetingSlot, setEndMeetingSlot] = useState<HTMLElement | null>(null);
-  const [recordingToast, setRecordingToast] = useState(false);
   // Reason-specific leave/disconnect toast text (null = hidden). Avoids telling a
   // removed/disconnected participant the whole "Meeting ended".
   const [meetingEndedToast, setMeetingEndedToast] = useState<string | null>(null);
@@ -1308,33 +1307,6 @@ function PublicRoomContent({
     };
   }, [room, initialAudioEnabled, initialVideoEnabled]);
 
-  // Inject recording button into control bar (beside the disconnect/leave button)
-  useEffect(() => {
-    const tryInject = () => {
-      const bar = document.querySelector(".lk-control-bar");
-      if (!bar) return false;
-      let slot = document.getElementById("recording-button-slot");
-      if (!slot) {
-        slot = document.createElement("div");
-        slot.id = "recording-button-slot";
-        slot.style.cssText = "display:flex;align-items:center;order:90;";
-        const leaveBtn = bar.querySelector(".lk-disconnect-button, [data-lk-disconnect], button[aria-label*='Leave'], button[aria-label*='Disconnect']");
-        if (leaveBtn) {
-          bar.insertBefore(slot, leaveBtn);
-        } else {
-          bar.appendChild(slot);
-        }
-      }
-      setRecordingSlot(slot);
-      return true;
-    };
-    if (tryInject()) return;
-    const timer = setInterval(() => {
-      if (tryInject()) clearInterval(timer);
-    }, 300);
-    return () => clearInterval(timer);
-  }, []);
-
   // Inject "End meeting" button slot into the control bar, after the Leave button.
   useEffect(() => {
     const tryInject = () => {
@@ -1379,13 +1351,6 @@ function PublicRoomContent({
     document.addEventListener("click", onLeaveClickCapture, true);
     return () => document.removeEventListener("click", onLeaveClickCapture, true);
   }, [onLeave]);
-
-  // Recording started toast (auto-dismiss)
-  useEffect(() => {
-    if (!recordingToast) return;
-    const t = setTimeout(() => setRecordingToast(false), 3000);
-    return () => clearTimeout(t);
-  }, [recordingToast]);
 
   useEffect(() => {
     if (waitingParticipantIdentities) {
@@ -1808,13 +1773,6 @@ function PublicRoomContent({
           gap: 0.5rem !important;
           padding: 0.75rem;
         }
-        #recording-button-slot .lk-button {
-          position: relative;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.375rem;
-        }
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.4; }
@@ -1839,6 +1797,7 @@ function PublicRoomContent({
         }
       `}} />
       <div className="room-meeting-container relative flex flex-col h-full min-h-0 w-full">
+        <RecordingParticipantBanner roomName={roomName} usePublicStatusApi />
         <MeetingScheduleCountdown
           meetingEndAtIso={meetingEndAtIso}
           isHost={isHost}
@@ -1850,17 +1809,13 @@ function PublicRoomContent({
           {(remountKey) => <StableVideoConference key={remountKey} />}
         </VideoConferenceBoundary>
         <RoomAudioRenderer />
-        {isHost &&
-          recordingSlot &&
-          createPortal(
-            <RecordingButton
-              roomName={roomName}
-              hostEmail={participantEmail || undefined}
-              controlBar
-              onRecordingStarted={() => setRecordingToast(true)}
-            />,
-            recordingSlot
-          )}
+        <MeetingRecordingHostControls
+          enabled={isHost}
+          roomName={roomName}
+          hostEmail={participantEmail || undefined}
+          hostOnlyNotice
+          isHost={isHost}
+        />
         {isHost &&
           endMeetingSlot &&
           createPortal(
@@ -1886,34 +1841,6 @@ function PublicRoomContent({
             </button>,
             endMeetingSlot
           )}
-        {recordingToast && isHost && (
-          <div
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] flex items-center gap-2 px-4 py-2.5 rounded-full"
-            style={{
-              background: "rgba(11,13,14,0.82)",
-              backdropFilter: "blur(20px) saturate(140%)",
-              WebkitBackdropFilter: "blur(20px) saturate(140%)",
-              border: "1px solid rgba(255,82,82,0.35)",
-              boxShadow: "0 12px 32px -8px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,82,82,0.15)",
-              color: "#fff",
-              fontFamily: "var(--obs-font-mono, ui-monospace, monospace)",
-              fontSize: "11px",
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-            }}
-            role="alert"
-          >
-            <span
-              className="inline-block w-2 h-2 rounded-full"
-              style={{
-                background: "#ff5252",
-                boxShadow: "0 0 10px #ff5252",
-                animation: "obsPulse 1.4s ease-in-out infinite",
-              }}
-            />
-            Recording in progress
-          </div>
-        )}
         {meetingEndedToast && (
           <div
             className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] flex items-center gap-2 px-4 py-2.5 rounded-full"
@@ -2708,6 +2635,9 @@ export default function PublicMeetingRoomClient() {
               </h1>
               <p className="obs-lobby__subtitle">
                 Check your name and devices. Mic and camera can be toggled inside the call &mdash; we just need at least one to begin.
+              </p>
+              <p className="obs-lobby__subtitle" style={{ marginTop: "0.75rem", color: "#fca5a5" }}>
+                This session may be recorded.
               </p>
             </header>
 

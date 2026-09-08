@@ -1,20 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
+import { formatYmdLocal } from "@/shared/lib/leave-date-range";
 import { useWorkforceStore } from "../state/workforce.store";
 import { useWizardContext } from "../engine/WizardContext";
 import wizardUi from "../engine/workforce-wizard.module.css";
+import styles from "./qualification-step.module.css";
 
 let rowCounter = 0;
 const newId = () => `x-${Date.now()}-${++rowCounter}`;
 
-const todayISO = (): string => new Date().toISOString().slice(0, 10);
+const todayYmd = (): string => formatYmdLocal(new Date());
 
 const validateDateRange = (start: string, end: string): boolean =>
   !start || !end || start <= end;
 
 const validateNotFutureDate = (end: string): boolean =>
-  !end || end <= todayISO();
+  !end || end <= todayYmd();
 
 export function ExperienceStep() {
   const experiences = useWorkforceStore((s) => s.experience.experiences);
@@ -24,6 +27,12 @@ export function ExperienceStep() {
   const { issuesByField } = useWizardContext();
   const [expOpen, setExpOpen] = useState(false);
 
+  useEffect(() => {
+    if (experiences.length > 0) {
+      setExpOpen(true);
+    }
+  }, [experiences.length]);
+
   const startErr =
     issuesByField["experience.experiences[].startDate"]?.[0]?.message ?? null;
   const expErr =
@@ -31,22 +40,24 @@ export function ExperienceStep() {
   const dateErr = startErr || expErr;
 
   return (
-    <div className="p-4">
-      <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">03</p>
-      <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
+    <div className={styles.step}>
+      <p className={styles.sectionEyebrow}>03</p>
+      <div className={styles.sectionHead}>
         <button
           type="button"
+          id="experience-toggle"
           onClick={() => setExpOpen((v) => !v)}
-          className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0"
+          className={styles.skillsToggle}
           aria-expanded={expOpen}
+          aria-controls="experience-section"
         >
           <i
-            className={`ri-arrow-right-s-line text-xl leading-none text-[#8c9097] transition-transform duration-150 ${
-              expOpen ? "rotate-90" : ""
+            className={`ri-arrow-right-s-line ${styles.skillsToggleIcon} ${
+              expOpen ? styles.skillsToggleIconOpen : ""
             }`}
             aria-hidden="true"
           />
-          <span>Experience :</span>
+          <span className={styles.sectionTitle}>Experience :</span>
         </button>
         <button
           type="button"
@@ -67,119 +78,130 @@ export function ExperienceStep() {
           + Add Experience
         </button>
       </div>
-      {dateErr && <div className="text-red-500 text-sm mb-3">{dateErr}</div>}
+      {dateErr && <div className={styles.sectionError}>{dateErr}</div>}
 
-      {expOpen &&
-        experiences.map((exp, index) => (
-        <div
-          key={exp.id}
-          className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3"
-        >
-          <button
-            type="button"
-            onClick={() => removeExperienceRow(exp.id)}
-            className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
-          >
-            ✕
-          </button>
+      <div id="experience-section" hidden={!expOpen}>
+        {experiences.map((exp, index) => (
+          <div key={exp.id} className={styles.card}>
+            <button
+              type="button"
+              onClick={() => removeExperienceRow(exp.id)}
+              className={styles.cardRemove}
+              aria-label={`Remove work experience ${index + 1}`}
+            >
+              <i className="ri-close-line" aria-hidden="true" />
+            </button>
 
-          <div className="xl:col-span-6 col-span-12">
-            <label className="form-label">
-              Company Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              className="form-control w-full !rounded-md"
-              placeholder="Company Name"
-              value={exp.company}
-              onChange={(e) => updateExperienceRow(exp.id, { company: e.target.value })}
-            />
-          </div>
-
-          <div className="xl:col-span-6 col-span-12">
-            <label className="form-label">
-              Role/Designation <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              className="form-control w-full !rounded-md"
-              placeholder="Role/Designation"
-              value={exp.role}
-              onChange={(e) => updateExperienceRow(exp.id, { role: e.target.value })}
-            />
-          </div>
-
-          <div className="xl:col-span-6 col-span-12">
-            <label className="form-label">
-              Start Date <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              className={`form-control w-full !rounded-md${startErr ? " border-red-500" : ""}`}
-              value={exp.startDate}
-              onChange={(e) => updateExperienceRow(exp.id, { startDate: e.target.value })}
-            />
-          </div>
-
-          <div className="xl:col-span-6 col-span-12">
-            <label className="form-label">
-              End Date {!exp.currentlyWorking && <span className="text-red-500">*</span>}
-            </label>
-            <input
-              type="date"
-              className={`form-control w-full !rounded-md${expErr && !exp.currentlyWorking ? " border-red-500" : ""}`}
-              value={exp.endDate}
-              onChange={(e) => updateExperienceRow(exp.id, { endDate: e.target.value })}
-              disabled={exp.currentlyWorking}
-            />
-          </div>
-
-          <div className="xl:col-span-12 col-span-12">
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id={`currentlyWorking-${index}`}
-                checked={exp.currentlyWorking}
-                onChange={(e) =>
-                  updateExperienceRow(exp.id, {
-                    currentlyWorking: e.target.checked,
-                    endDate: e.target.checked ? "" : exp.endDate,
-                  })
-                }
-                className="form-checkbox h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-              />
-              <label
-                htmlFor={`currentlyWorking-${index}`}
-                className="ml-2 text-sm text-gray-700 dark:text-gray-300"
-              >
-                Currently working here
+            <div className={`${styles.field} ${styles.col6}`}>
+              <label className={styles.label} htmlFor={`company-${exp.id}`}>
+                Company Name <span className={styles.required}>*</span>
               </label>
+              <input
+                id={`company-${exp.id}`}
+                type="text"
+                className={styles.input}
+                placeholder="Company Name"
+                value={exp.company}
+                onChange={(e) => updateExperienceRow(exp.id, { company: e.target.value })}
+              />
+            </div>
+
+            <div className={`${styles.field} ${styles.col6}`}>
+              <label className={styles.label} htmlFor={`role-${exp.id}`}>
+                Role/Designation <span className={styles.required}>*</span>
+              </label>
+              <input
+                id={`role-${exp.id}`}
+                type="text"
+                className={styles.input}
+                placeholder="Role/Designation"
+                value={exp.role}
+                onChange={(e) => updateExperienceRow(exp.id, { role: e.target.value })}
+              />
+            </div>
+
+            <div className={`${styles.field} ${styles.col6}`}>
+              <YmdFilterDateInput
+                label="Start Date *"
+                inputId={`start-date-${exp.id}`}
+                portalId={`experience-start-datepicker-${exp.id}`}
+                popperClassName="!z-[10050]"
+                value={exp.startDate}
+                maxDate={exp.endDate || undefined}
+                labelClassName={styles.label}
+                inputClassName={`${styles.input}${startErr ? ` ${styles.inputError}` : ""}`}
+                onCommit={(ymd) => updateExperienceRow(exp.id, { startDate: ymd })}
+              />
+            </div>
+
+            <div className={`${styles.field} ${styles.col6}`}>
+              <YmdFilterDateInput
+                label={`End Date${exp.currentlyWorking ? "" : " *"}`}
+                inputId={`end-date-${exp.id}`}
+                portalId={`experience-end-datepicker-${exp.id}`}
+                popperClassName="!z-[10050]"
+                value={exp.endDate}
+                minDate={exp.startDate || undefined}
+                maxDate={todayYmd()}
+                disabled={exp.currentlyWorking}
+                labelClassName={styles.label}
+                inputClassName={`${styles.input}${
+                  expErr && !exp.currentlyWorking ? ` ${styles.inputError}` : ""
+                }`}
+                onCommit={(ymd) => updateExperienceRow(exp.id, { endDate: ymd })}
+              />
+            </div>
+
+            <div className={`${styles.field} ${styles.col12}`}>
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id={`currentlyWorking-${exp.id}`}
+                  checked={exp.currentlyWorking}
+                  onChange={(e) =>
+                    updateExperienceRow(exp.id, {
+                      currentlyWorking: e.target.checked,
+                      endDate: e.target.checked ? "" : exp.endDate,
+                    })
+                  }
+                  className="form-checkbox h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                />
+                <label
+                  htmlFor={`currentlyWorking-${exp.id}`}
+                  className="ml-2 text-sm text-gray-700 dark:text-gray-300"
+                >
+                  Currently working here
+                </label>
+              </div>
+            </div>
+
+            {exp.startDate && exp.endDate && !validateDateRange(exp.startDate, exp.endDate) && (
+              <p className={`${styles.fieldError} ${styles.col12}`}>
+                Start date cannot be ahead of end date
+              </p>
+            )}
+            {exp.endDate && !validateNotFutureDate(exp.endDate) && (
+              <p className={`${styles.fieldError} ${styles.col12}`}>
+                End date cannot be in the future
+              </p>
+            )}
+
+            <div className={`${styles.field} ${styles.col12}`}>
+              <label className={styles.label} htmlFor={`description-${exp.id}`}>
+                Responsibilities / Description
+              </label>
+              <textarea
+                id={`description-${exp.id}`}
+                className={styles.textarea}
+                rows={3}
+                placeholder="Responsibilities / Description"
+                value={exp.description}
+                onChange={(e) => updateExperienceRow(exp.id, { description: e.target.value })}
+              />
             </div>
           </div>
-
-          {exp.startDate && exp.endDate && !validateDateRange(exp.startDate, exp.endDate) && (
-            <div className="text-red-500 text-sm mt-2 col-span-12">
-              Start date cannot be ahead of end date
-            </div>
-          )}
-          {exp.endDate && !validateNotFutureDate(exp.endDate) && (
-            <div className="text-red-500 text-sm mt-2 col-span-12">
-              End date cannot be in the future
-            </div>
-          )}
-
-          <div className="xl:col-span-12 col-span-12">
-            <label className="form-label">Responsibilities / Description</label>
-            <textarea
-              className="form-control w-full !rounded-md"
-              rows={3}
-              placeholder="Responsibilities / Description"
-              value={exp.description}
-              onChange={(e) => updateExperienceRow(exp.id, { description: e.target.value })}
-            />
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

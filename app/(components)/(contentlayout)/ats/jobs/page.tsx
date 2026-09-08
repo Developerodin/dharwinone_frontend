@@ -10,6 +10,7 @@ import { DROPDOWN_ITEM, PortalDropdown } from './_components/PortalDropdown'
 import JobPreviewPanel from './_components/JobPreviewPanel'
 import JobShareModal from './_components/JobShareModal'
 import ListPagination from '@/shared/components/ListPagination'
+import { CompanyWebsiteLink } from '@/shared/components/ats/CompanyWebsiteLink'
 import { useFeaturePermissions } from '@/shared/hooks/use-feature-permissions'
 import { useAuth } from '@/shared/contexts/auth-context'
 import { hasSalesAgentRole } from '@/shared/lib/roles'
@@ -26,6 +27,8 @@ import {
   listJobBookmarks,
   addJobBookmark,
   deleteJobBookmark,
+  listBookmarkedJobIds,
+  unsaveMyJobBookmarks,
   searchJobFacet,
   type JobBookmarkNote,
   type JobFacet,
@@ -52,6 +55,7 @@ import {
   formatJobDescriptionForDisplay,
   JOB_DESCRIPTION_PROSE_CLASS,
 } from '@/shared/lib/ats/jobDescriptionHtml'
+import { useConfirm } from '@/shared/components/ui/useConfirm'
 
 const AsyncSelect = dynamic(() => import('react-select/async'), { ssr: false })
 
@@ -173,6 +177,7 @@ const COLUMN_VISIBILITY: Record<string, string> = {
 
 const Jobs = () => {
   const { canView, canCreate, canEdit, canDelete, isLoading: permissionsLoading } = useFeaturePermissions("ats.jobs")
+  const { confirm: askConfirm, confirmDialog } = useConfirm()
   const { roleNames } = useAuth()
   const isSalesAgent = hasSalesAgentRole(roleNames)
   const [jobsData, setJobsData] = useState<DisplayJob[]>([])
@@ -219,6 +224,22 @@ const Jobs = () => {
   })
 
   const [bookmarkedJobs, setBookmarkedJobs] = useState<Set<string>>(new Set())
+  const [bookmarkTogglingId, setBookmarkTogglingId] = useState<string | null>(null)
+  const bookmarkHydrationRef = useRef(0)
+  const bookmarkUserTouchedRef = useRef(false)
+
+  useEffect(() => {
+    const generation = ++bookmarkHydrationRef.current
+    listBookmarkedJobIds()
+      .then((ids) => {
+        if (generation !== bookmarkHydrationRef.current || bookmarkUserTouchedRef.current) return
+        setBookmarkedJobs(new Set(ids))
+      })
+      .catch(() => {
+        if (generation !== bookmarkHydrationRef.current || bookmarkUserTouchedRef.current) return
+        setBookmarkedJobs(new Set())
+      })
+  }, [])
   const [previewJob, setPreviewJob] = useState<any>(null)
   const [companyModal, setCompanyModal] = useState<any>(null)
   const [bookmarkNotesJobId, setBookmarkNotesJobId] = useState<string | null>(null)
@@ -616,17 +637,40 @@ const Jobs = () => {
     }
   }
 
-  const handleBookmark = (id: string) => {
-    if (!bookmarkedJobs.has(id)) {
-      const newBookmarked = new Set(bookmarkedJobs)
-      newBookmarked.add(id)
-      setBookmarkedJobs(newBookmarked)
-    }
+  const openBookmarkNotesPanel = (id: string) => {
     setBookmarkNotesJobId(id)
-    fetchBookmarkNotes(id)
+    void fetchBookmarkNotes(id)
     setTimeout(() => {
       ;(window as any).HSOverlay?.open(document.querySelector('#bookmark-notes-panel'))
     }, 100)
+  }
+
+  const handleUnsaveBookmark = async (id: string) => {
+    bookmarkUserTouchedRef.current = true
+    setBookmarkTogglingId(id)
+    try {
+      await unsaveMyJobBookmarks(id)
+      setBookmarkedJobs((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      setBookmarkNotes((prev) => prev.filter((n) => n.jobId !== id))
+      if (bookmarkNotesJobId === id) setBookmarkNotesJobId(null)
+      ;(window as any).HSOverlay?.close(document.querySelector('#bookmark-notes-panel'))
+    } catch (err: any) {
+      alert(err?.response?.data?.message || 'Failed to remove bookmark')
+    } finally {
+      setBookmarkTogglingId(null)
+    }
+  }
+
+  const handleBookmark = (id: string) => {
+    bookmarkUserTouchedRef.current = true
+    if (!bookmarkedJobs.has(id)) {
+      setBookmarkedJobs((prev) => new Set(prev).add(id))
+    }
+    openBookmarkNotesPanel(id)
   }
 
   const getJobNotes = (jobId: string) => {
@@ -635,8 +679,31 @@ const Jobs = () => {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   }
 
+  const handleRemoveBookmarkRequest = async (id: string) => {
+    const noteCount = getJobNotes(id).length
+    const noteLabel = noteCount === 1 ? '1 note' : `${noteCount} notes`
+    const confirmed = await askConfirm({
+      title: 'Remove bookmark?',
+      message: (
+        <>
+          This will remove the job from your saved list
+          {noteCount > 0
+            ? ` and permanently delete ${noteLabel}.`
+            : '.'}
+          {' '}This action cannot be undone.
+        </>
+      ),
+      confirmLabel: 'Remove bookmark',
+      cancelLabel: 'Keep bookmark',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    await handleUnsaveBookmark(id)
+  }
+
   const handleAddNote = async () => {
     if (!bookmarkNotesJobId || !newNote.text.trim()) return
+    bookmarkUserTouchedRef.current = true
     setBookmarkSubmitting(true)
     try {
       const created = await addJobBookmark(bookmarkNotesJobId, {
@@ -644,6 +711,7 @@ const Jobs = () => {
         visibility: newNote.visibility,
       })
       setBookmarkNotes((prev) => [...prev, created])
+      setBookmarkedJobs((prev) => new Set(prev).add(bookmarkNotesJobId))
       setNewNote({ text: '', visibility: 'public' })
     } catch (err: any) {
       alert(err?.response?.data?.message || 'Failed to add note')
@@ -963,6 +1031,25 @@ const Jobs = () => {
         },
       },
       {
+        Header: 'Status',
+        accessor: 'status',
+        disableSortBy: true,
+        Cell: ({ row }: any) => {
+          const status = row.original.status || '—'
+          const cls =
+            status === 'Active'
+              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+              : status === 'Closed' || status === 'Archived'
+                ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30'
+                : 'bg-stone-500/15 text-stone-700 dark:text-stone-300 border-stone-500/30'
+          return (
+            <span className={`badge border !rounded-md !px-2 !py-1 text-xs font-medium ${cls}`}>
+              {status}
+            </span>
+          )
+        },
+      },
+      {
         Header: 'Origin',
         accessor: 'jobOrigin',
         disableSortBy: true,
@@ -1039,13 +1126,14 @@ const Jobs = () => {
               <button
                 type="button"
                 onClick={() => handleBookmark(row.original.id)}
+                disabled={bookmarkTogglingId === row.original.id}
                 className={`hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ${bookmarkedJobs.has(row.original.id) ? 'ti-btn-warning' : 'ti-btn-light'}`}
               >
                 <i className={bookmarkedJobs.has(row.original.id) ? 'ri-bookmark-fill' : 'ri-bookmark-line'}></i>
                 <span
                   className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
                   role="tooltip">
-                  {bookmarkedJobs.has(row.original.id) ? 'View Notes' : 'Bookmark Job'}
+                  {bookmarkedJobs.has(row.original.id) ? 'View notes' : 'Bookmark Job'}
                 </span>
               </button>
             </div>
@@ -1091,7 +1179,7 @@ const Jobs = () => {
     ]
       return canDelete && !isSalesAgent ? [checkboxColumn, ...restColumns] : restColumns
     },
-    [selectedRows, bookmarkedJobs, canDelete, canEdit, callingJobId, isSalesAgent]
+    [selectedRows, bookmarkedJobs, bookmarkTogglingId, canDelete, canEdit, callingJobId, isSalesAgent]
   )
 
   const data = useMemo(() => jobsData, [jobsData])
@@ -1849,6 +1937,7 @@ const Jobs = () => {
                 onPageChange={setCurrentPage}
                 ariaLabel="Jobs page navigation"
                 gotoInputId="jobs-goto-page"
+                hideWhenSinglePage
               />
             </div>
           </div>
@@ -1894,31 +1983,27 @@ const Jobs = () => {
                       const founded = ci.founded != null ? String(ci.founded) : ''
                       const website = (ci.website as string) || ''
                       return (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                          <div>
+                        <div className="mt-4 grid min-w-0 grid-cols-2 gap-4 md:grid-cols-4">
+                          <div className="min-w-0">
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Industry</div>
-                            <div className="font-semibold text-gray-800 dark:text-white">{industry || '—'}</div>
+                            <div className="font-semibold text-gray-800 dark:text-white break-words">{industry || '—'}</div>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Company Size</div>
-                            <div className="font-semibold text-gray-800 dark:text-white">{size ? `${size} employees` : '—'}</div>
+                            <div className="font-semibold text-gray-800 dark:text-white break-words">{size ? `${size} employees` : '—'}</div>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Founded</div>
                             <div className="font-semibold text-gray-800 dark:text-white">{founded || '—'}</div>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Website</div>
                             {website ? (
-                              <a
-                                href={/^https?:\/\//i.test(website) ? website : `https://${website}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-semibold text-primary hover:underline flex items-center gap-1"
-                              >
-                                {website}
-                                <i className="ri-external-link-line text-sm"></i>
-                              </a>
+                              <CompanyWebsiteLink
+                                website={website}
+                                className="font-semibold"
+                                showExternalIcon
+                              />
                             ) : (
                               <div className="font-semibold text-gray-800 dark:text-white">—</div>
                             )}
@@ -2085,7 +2170,9 @@ const Jobs = () => {
                 const jobDetails = getBookmarkJobDetails()
                 return jobDetails ? (
                   <div className="p-4 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 dark:border-primary/30 rounded-lg">
-                    <h6 className="font-bold text-gray-800 dark:text-white text-lg mb-2">{jobDetails.jobTitle}</h6>
+                    <h6 className="mb-2 min-w-0 break-words font-bold text-gray-800 dark:text-white text-lg">
+                      {jobDetails.jobTitle}
+                    </h6>
                     <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                       <span className="flex items-center gap-1">
                         <i className="ri-building-line"></i>
@@ -2211,12 +2298,32 @@ const Jobs = () => {
                   )}
                 </div>
               </div>
+
+              {bookmarkedJobs.has(bookmarkNotesJobId) && (
+                <div className="border-t border-gray-200 pt-4 dark:border-defaultborder/10">
+                  <button
+                    type="button"
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 disabled:opacity-60"
+                    onClick={() => void handleRemoveBookmarkRequest(bookmarkNotesJobId)}
+                    disabled={bookmarkTogglingId === bookmarkNotesJobId}
+                    aria-label="Remove bookmark and delete all notes"
+                  >
+                    <i className="ri-bookmark-off-line text-base" aria-hidden />
+                    {bookmarkTogglingId === bookmarkNotesJobId ? 'Removing bookmark…' : 'Remove bookmark'}
+                  </button>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Removes this job from your saved list and deletes all notes.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-8 text-gray-500">No job selected</div>
           )}
         </div>
       </div>
+
+      {confirmDialog}
 
       <JobShareModal
         shareJob={shareJob}

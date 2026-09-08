@@ -303,6 +303,7 @@ function areAdjacentDonutSlices(a: DonutSlice, b: DonutSlice): boolean {
   return Math.abs(gap) < 0.5 || Math.abs(gap + 360) < 0.5 || Math.abs(gap - 360) < 0.5
 }
 
+/** When donut-adjacent small slices share a side, flip the thinner one to the opposite side. */
 function resolveAdjacentCalloutSides(slices: DonutSlice[]): Map<DonutSlice, boolean> {
   const sorted = [...slices].sort((a, b) => a.startAngle - b.startAngle)
   const sides = sorted.map((slice) => defaultCalloutIsRight(slice.midAngle))

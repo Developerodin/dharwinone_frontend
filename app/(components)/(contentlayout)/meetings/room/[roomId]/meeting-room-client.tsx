@@ -7,12 +7,12 @@ import {
   useParticipants,
 } from "@livekit/components-react";
 import { StableVideoConference } from "@/shared/components/livekit/stable-video-conference";
-import { createPortal } from "react-dom";
 import "@livekit/components-styles";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useRouter, useParams } from "next/navigation";
 import { ConnectionState, DisconnectReason, RoomEvent } from "livekit-client";
-import { RecordingButton } from "@/shared/components/livekit/recording-button";
+import { MeetingRecordingHostControls } from "@/shared/components/livekit/meeting-recording-host-controls";
+import { RecordingParticipantBanner } from "@/shared/components/livekit/recording-participant-banner";
 import { MEETING_CONTROL_BAR_RESPONSIVE_CSS } from "@/shared/components/livekit/meeting-control-bar-responsive.css";
 import { WaitingRoom } from "@/shared/components/livekit/waiting-room";
 import { WaitingParticipantsPanel } from "@/shared/components/livekit/waiting-participants-panel";
@@ -20,6 +20,7 @@ import * as livekitApi from "@/shared/lib/api/livekit";
 import { updateMeeting } from "@/shared/lib/api/meetings";
 import { endCallByRoom, updateCall } from "@/shared/lib/api/chat";
 import { useAuth } from "@/shared/contexts/auth-context";
+import { userCanRecordMeeting } from "@/shared/lib/permissions";
 import { useLiveKitBenignErrorSuppression } from "@/shared/lib/livekit-benign-logs";
 
 const MAX_RECONNECT_ATTEMPTS = 5;
@@ -57,6 +58,7 @@ function RoomContent({
   hasPermissionError,
   roomName,
   isHost,
+  canRecordMeeting,
   isChatCall,
   waitingParticipantIdentities,
 }: {
@@ -68,6 +70,7 @@ function RoomContent({
   hasPermissionError: boolean;
   roomName: string;
   isHost: boolean;
+  canRecordMeeting: boolean;
   isChatCall?: boolean;
   waitingParticipantIdentities?: string[];
 }) {
@@ -200,8 +203,6 @@ function RoomContent({
   }, [room, initialAudioEnabled, initialVideoEnabled]);
 
   const participants = useParticipants();
-  const [recordingSlot, setRecordingSlot] = useState<HTMLElement | null>(null);
-  const [recordingToast, setRecordingToast] = useState(false);
   // Message shown in the leave/disconnect toast. null = hidden. Text varies by reason
   // so a participant who simply left is not told the whole "Meeting ended".
   const [meetingEndedToast, setMeetingEndedToast] = useState<string | null>(null);
@@ -228,40 +229,6 @@ function RoomContent({
     const s = totalSeconds % 60;
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
-
-  // Inject recording button into control bar (beside the disconnect/leave button)
-  useEffect(() => {
-    const tryInject = () => {
-      const bar = document.querySelector(".lk-control-bar");
-      if (!bar) return false;
-      let slot = document.getElementById("recording-button-slot");
-      if (!slot) {
-        slot = document.createElement("div");
-        slot.id = "recording-button-slot";
-        slot.style.cssText = "display:flex;align-items:center;order:90;";
-        const leaveBtn = bar.querySelector(".lk-disconnect-button, [data-lk-disconnect], button[aria-label*='Leave'], button[aria-label*='Disconnect']");
-        if (leaveBtn) {
-          bar.insertBefore(slot, leaveBtn);
-        } else {
-          bar.appendChild(slot);
-        }
-      }
-      setRecordingSlot(slot);
-      return true;
-    };
-    if (tryInject()) return;
-    const timer = setInterval(() => {
-      if (tryInject()) clearInterval(timer);
-    }, 300);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Recording started toast (auto-dismiss)
-  useEffect(() => {
-    if (!recordingToast) return;
-    const t = setTimeout(() => setRecordingToast(false), 3000);
-    return () => clearTimeout(t);
-  }, [recordingToast]);
 
   useEffect(() => {
     if (waitingParticipantIdentities) {
@@ -625,12 +592,8 @@ function RoomContent({
         .room-meeting-container .lk-disconnect-button:hover {
           background: rgba(239,68,68,0.35) !important;
         }
-        #recording-button-slot .lk-button {
-          position: relative;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.375rem;
+        .room-meeting-container:has(.recording-participant-banner) .meeting-room-top-bar {
+          top: 2.75rem;
         }
         .room-meeting-container .lk-participant-name {
           background: rgba(0,0,0,0.6);
@@ -654,8 +617,9 @@ function RoomContent({
         }
       `}} />
       <div className="room-meeting-container relative">
+        <RecordingParticipantBanner roomName={roomName} />
         {/* Top bar: call info */}
-        <div className="absolute top-0 left-0 right-0 z-[100] flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/70 via-black/40 to-transparent pointer-events-none">
+        <div className="meeting-room-top-bar absolute top-0 left-0 right-0 z-[100] flex items-center justify-between px-5 py-3 bg-gradient-to-b from-black/70 via-black/40 to-transparent pointer-events-none">
           <div className="flex items-center gap-3 pointer-events-auto">
             <span className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 backdrop-blur-md text-white text-sm font-medium tabular-nums border border-white/10">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -671,27 +635,10 @@ function RoomContent({
 
         <StableVideoConference />
         <RoomAudioRenderer />
-        {recordingSlot && !isChatCall &&
-          createPortal(
-            <RecordingButton
-              roomName={roomName}
-              controlBar
-              onRecordingStarted={() => setRecordingToast(true)}
-            />,
-            recordingSlot
-          )}
-        {recordingToast && (
-          <div
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] px-4 py-3 rounded-xl bg-emerald-600/95 text-white text-sm font-medium shadow-xl flex items-center gap-2"
-            role="alert"
-          >
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-white/20">
-              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-            </span>
-            <i className="ti ti-record text-base" />
-            <span>Recording started</span>
-          </div>
-        )}
+        <MeetingRecordingHostControls
+          enabled={isHost && canRecordMeeting && !isChatCall}
+          roomName={roomName}
+        />
         {meetingEndedToast && (
           <div
             className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] px-4 py-3 rounded-xl bg-gray-800/95 text-white text-sm font-medium shadow-xl flex items-center gap-2"
@@ -798,6 +745,8 @@ export default function MeetingRoomClient() {
   const participantEmail = useMemo(() => {
     return searchParams.get("email") || user?.email || null;
   }, [searchParams, user]);
+
+  const canRecordMeeting = useMemo(() => userCanRecordMeeting(user), [user]);
 
   const audioEnabled = useMemo(
     () => searchParams.get("audio") !== "0",
@@ -920,12 +869,17 @@ export default function MeetingRoomClient() {
   }, [roomId, participantName, participantEmail]);
 
   const handleAdmitted = useCallback(async (newToken: string) => {
-    // Participant was admitted, update token and reconnect
     setToken(newToken);
     setIsInWaitingRoom(false);
-    setIsHost(true); // Admitted participants get host-like permissions
+    try {
+      const roomName = decodeURIComponent(roomId);
+      const data = await livekitApi.getLiveKitToken(roomName, participantName, participantEmail || undefined);
+      setIsHost(Boolean(data.isHost));
+    } catch {
+      setIsHost(false);
+    }
     setReconnectKey((prev) => prev + 1);
-  }, []);
+  }, [roomId, participantName, participantEmail]);
 
   if (isLoading) {
     return (
@@ -1068,6 +1022,7 @@ export default function MeetingRoomClient() {
         hasPermissionError={hasPermissionError}
         roomName={decodeURIComponent(roomId)}
         isHost={isHost}
+        canRecordMeeting={canRecordMeeting}
         isChatCall={fromChat}
       />
     </LiveKitRoom>

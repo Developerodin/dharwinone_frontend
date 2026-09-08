@@ -347,8 +347,9 @@ export function ProfilePhotoUploader({
             disabled={disabled || uploading}
             className="ti-btn ti-btn-danger ti-btn-sm"
             title="Remove profile picture"
+            aria-label="Remove profile picture"
           >
-            <i className="ri-delete-bin-line" />
+            <i className="ri-delete-bin-line" aria-hidden="true" />
           </button>
         ) : null}
       </div>
