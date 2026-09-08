@@ -104,10 +104,10 @@ export interface JobApplicationsListResponse {
 }
 
 export async function listJobApplications(params?: JobApplicationsListParams): Promise<JobApplicationsListResponse> {
-  const query: Record<string, string | number | boolean | undefined> = { ...params };
-  if (params?.statuses?.length) {
-    query.statuses = params.statuses.join(",");
-    delete query.status;
+  const { statuses, ...rest } = params ?? {};
+  const query: Record<string, string | number | boolean | undefined> = { ...rest };
+  if (statuses?.length) {
+    query.statuses = statuses.join(",");
   }
   const { data } = await apiClient.get<JobApplicationsListResponse>("/job-applications", { params: query });
   return data;
