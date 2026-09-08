@@ -22,6 +22,91 @@ export interface JobListQueryInput {
   experienceBounds: { min: number; max: number };
 }
 
+/**
+ * Filters <-> URL query string, so a refresh or a shared link restores the same list.
+ * Only non-default values are written, keeping an untouched list on a clean URL.
+ *
+ * Multi-value facets are comma-joined, matching how `serializeJobsListParams` already sends
+ * them to the API -- so a facet value containing a comma cannot round-trip. If that ever
+ * matters, both sides need to switch to repeated keys together.
+ */
+const JOB_FILTER_LIST_SEP = ",";
+
+/** Accepts URLSearchParams or Next's ReadonlyURLSearchParams. */
+type QueryReader = { get(key: string): string | null };
+
+/** `?status=archived` and `?status=Archived` both work; `all` is passed through. */
+export function normalizeJobStatusParam(raw: string | null | undefined, fallback: string): string {
+  const value = raw?.trim();
+  if (!value) return fallback;
+  if (value.toLowerCase() === "all") return "all";
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
+export function readJobFiltersFromQuery(
+  params: QueryReader,
+  defaults: JobSidebarFilters
+): JobSidebarFilters {
+  const list = (key: string, fallback: string[]): string[] => {
+    const raw = params.get(key);
+    if (raw == null) return fallback;
+    const values = raw
+      .split(JOB_FILTER_LIST_SEP)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return values.length ? values : fallback;
+  };
+  const num = (key: string, fallback: number): number => {
+    const raw = params.get(key);
+    if (raw == null || raw.trim() === "") return fallback;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  return {
+    jobTitle: list("titles", defaults.jobTitle),
+    company: list("companies", defaults.company),
+    location: list("locations", defaults.location),
+    experience: [num("expMin", defaults.experience[0]), num("expMax", defaults.experience[1])],
+    salary: [num("salMin", defaults.salary[0]), num("salMax", defaults.salary[1])],
+    salaryNotSpecified: params.get("salaryNotSpecified") === "true",
+    status: normalizeJobStatusParam(params.get("status"), defaults.status),
+    postingDate: params.get("postingDate")?.trim() || defaults.postingDate,
+  };
+}
+
+export function writeJobFiltersToQuery(
+  params: URLSearchParams,
+  filters: JobSidebarFilters,
+  defaults: JobSidebarFilters
+): void {
+  const setList = (key: string, values: string[]) => {
+    if (values.length) params.set(key, values.join(JOB_FILTER_LIST_SEP));
+    else params.delete(key);
+  };
+  const setNum = (key: string, value: number, fallback: number) => {
+    if (value !== fallback) params.set(key, String(value));
+    else params.delete(key);
+  };
+
+  setList("titles", filters.jobTitle);
+  setList("companies", filters.company);
+  setList("locations", filters.location);
+  setNum("expMin", filters.experience[0], defaults.experience[0]);
+  setNum("expMax", filters.experience[1], defaults.experience[1]);
+  setNum("salMin", filters.salary[0], defaults.salary[0]);
+  setNum("salMax", filters.salary[1], defaults.salary[1]);
+
+  if (filters.salaryNotSpecified) params.set("salaryNotSpecified", "true");
+  else params.delete("salaryNotSpecified");
+
+  if (filters.status && filters.status !== defaults.status) params.set("status", filters.status);
+  else params.delete("status");
+
+  if (filters.postingDate) params.set("postingDate", filters.postingDate);
+  else params.delete("postingDate");
+}
+
 export function isSalaryFilterActive(
   filters: JobSidebarFilters,
   bounds: { min: number; max: number }
@@ -99,10 +184,4 @@ export function buildJobExportParams(input: JobListQueryInput): Omit<JobsListPar
     limit: input.limit ?? 10,
   });
   return params;
-}
-
-export function filterJobFacetOptions(options: string[], query: string): string[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return options.filter((option) => option.toLowerCase().includes(q));
 }

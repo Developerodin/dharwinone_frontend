@@ -1,7 +1,7 @@
 "use client"
-import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from 'react'
-import { createPortal } from 'react-dom'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { YmdFilterDateInput } from '@/shared/components/filters/YmdFilterDateInput'
+import { DROPDOWN_ITEM, PortalDropdown } from './PortalDropdown'
 
 interface FilterState {
   jobTitle: string[]
@@ -28,8 +28,17 @@ interface JobsFilterPanelProps {
   searchLocation: string
   setSearchLocation: (v: string) => void
   filteredJobTitles: string[]
+  jobTitleSearching: boolean
+  companySearching: boolean
+  locationSearching: boolean
   filteredCompanies: string[]
   filteredLocations: string[]
+  /**
+   * Only drive the "N available" counters. These still come from getJobFilterOptions, which
+   * samples the first FILTER_OPTIONS_MAX (500) jobs, so the counts under-report past that.
+   * The option lists themselves are searched server-side and are not capped. If the counts
+   * ever need to be exact, give them a $group/$count query per facet like the facet search.
+   */
   uniqueJobTitles: string[]
   uniqueCompanies: string[]
   uniqueLocations: string[]
@@ -53,10 +62,6 @@ const INPUT_PLAIN = `${INPUT_BASE} !px-3`
 const SELECT_BASE = `form-select !h-9 !py-1.5 !ps-3 !pe-8 !text-[0.8125rem] !rounded-lg !border-defaultborder/70 dark:!border-white/10 w-full`
 const SECTION_TITLE =
   'text-[0.75rem] font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-gray-400'
-const DROPDOWN_MENU =
-  'max-h-44 overflow-y-auto rounded-xl border border-defaultborder/70 bg-white py-1 shadow-2xl dark:border-white/15 dark:bg-bodybg ring-1 ring-black/5'
-const DROPDOWN_ITEM =
-  'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium transition-colors'
 const CHIP =
   'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.7rem] font-medium max-w-full'
 
@@ -95,60 +100,6 @@ function parseDigits(value: string): number | null {
   return Number(digits)
 }
 
-/** Renders dropdown at document.body level to escape overflow:hidden clipping. */
-function PortalDropdown({
-  open,
-  inputRef,
-  children,
-}: {
-  open: boolean
-  inputRef: React.RefObject<HTMLInputElement>
-  children: React.ReactNode
-}) {
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 })
-  const [ready, setReady] = useState(false)
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => setMounted(true), [])
-
-  useLayoutEffect(() => {
-    if (!open || !inputRef.current) {
-      setReady(false)
-      return
-    }
-    const r = inputRef.current.getBoundingClientRect()
-    setPos({ top: r.bottom + 2, left: r.left, width: r.width })
-    setReady(true)
-  }, [open, inputRef])
-
-  useEffect(() => {
-    if (!open) return
-    const update = () => {
-      if (!inputRef.current) return
-      const r = inputRef.current.getBoundingClientRect()
-      setPos({ top: r.bottom + 2, left: r.left, width: r.width })
-    }
-    window.addEventListener('scroll', update, true)
-    window.addEventListener('resize', update)
-    return () => {
-      window.removeEventListener('scroll', update, true)
-      window.removeEventListener('resize', update)
-    }
-  }, [open, inputRef])
-
-  if (!mounted || !open || !ready) return null
-
-  return createPortal(
-    <div
-      style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
-      className={DROPDOWN_MENU}
-    >
-      {children}
-    </div>,
-    document.body
-  )
-}
-
 const JobsFilterPanel: React.FC<JobsFilterPanelProps> = ({
   layoutOpen,
   onCloseLayout,
@@ -163,6 +114,9 @@ const JobsFilterPanel: React.FC<JobsFilterPanelProps> = ({
   searchLocation,
   setSearchLocation,
   filteredJobTitles,
+  jobTitleSearching,
+  companySearching,
+  locationSearching,
   filteredCompanies,
   filteredLocations,
   uniqueJobTitles,
@@ -520,6 +474,10 @@ const JobsFilterPanel: React.FC<JobsFilterPanelProps> = ({
                       </button>
                     )
                   })
+                ) : jobTitleSearching ? (
+                  <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                    Searching&hellip;
+                  </div>
                 ) : (
                   <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                     No matches for &ldquo;{jobTitleQueryTrimmed}&rdquo;
@@ -602,6 +560,10 @@ const JobsFilterPanel: React.FC<JobsFilterPanelProps> = ({
                       </button>
                     )
                   })
+                ) : companySearching ? (
+                  <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                    Searching&hellip;
+                  </div>
                 ) : (
                   <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                     No matches for &ldquo;{companyQueryTrimmed}&rdquo;
@@ -684,6 +646,10 @@ const JobsFilterPanel: React.FC<JobsFilterPanelProps> = ({
                       </button>
                     )
                   })
+                ) : locationSearching ? (
+                  <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                    Searching&hellip;
+                  </div>
                 ) : (
                   <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                     No matches for &ldquo;{locationQueryTrimmed}&rdquo;

@@ -165,6 +165,29 @@ export async function getJobFilterOptions(
   return data;
 }
 
+export type JobFacet = "title" | "company" | "location";
+
+/**
+ * Server-side lookup for one filter facet. `getJobFilterOptions` only ever sees the
+ * first page of jobs, so filtering its result client-side silently hid matches once
+ * the tenant grew past that cap.
+ */
+export async function searchJobFacet(
+  facet: JobFacet,
+  q: string,
+  extra?: { status?: string; jobOrigin?: string },
+  config?: { signal?: AbortSignal }
+): Promise<string[]> {
+  const params: Record<string, string | number> = { facet, q };
+  if (extra?.status) params.status = extra.status;
+  if (extra?.jobOrigin) params.jobOrigin = extra.jobOrigin;
+  const { data } = await apiClient.get<{ values: string[] }>("/jobs/filter-options/facet", {
+    params,
+    ...(config?.signal ? { signal: config.signal } : {}),
+  });
+  return data.values ?? [];
+}
+
 export async function getJobById(id: string): Promise<Job> {
   const { data } = await apiClient.get<Job>(`/jobs/${id}`);
   return data;

@@ -2,10 +2,11 @@
 import Seo from '@/shared/layout-components/seo/seo'
 import React, { Fragment, useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
-import { useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTable, useSortBy } from 'react-table'
 import Link from 'next/link'
 import JobsFilterPanel from './_components/JobsFilterPanel'
+import { DROPDOWN_ITEM, PortalDropdown } from './_components/PortalDropdown'
 import JobPreviewPanel from './_components/JobPreviewPanel'
 import JobShareModal from './_components/JobShareModal'
 import ListPagination from '@/shared/components/ListPagination'
@@ -25,13 +26,16 @@ import {
   listJobBookmarks,
   addJobBookmark,
   deleteJobBookmark,
+  searchJobFacet,
   type JobBookmarkNote,
+  type JobFacet,
   type JobFilterOptions,
 } from '@/shared/lib/api/jobs'
 import {
   buildJobExportParams,
   buildJobListParams,
-  filterJobFacetOptions,
+  readJobFiltersFromQuery,
+  writeJobFiltersToQuery,
   type JobSidebarFilters,
 } from '@/shared/lib/ats/job-list-filters'
 import {
@@ -63,8 +67,65 @@ const DEFAULT_EXPERIENCE_RANGE = { min: 0, max: 20 }
 
 interface FilterState extends JobSidebarFilters {}
 
+/**
+ * Debounced server-side facet lookup. These lists used to be filtered in the browser out of
+ * `getJobFilterOptions`, which only ever returns the first page of jobs -- so past that cap a
+ * matching title simply never appeared. Empty query still yields no options, as before.
+ */
+function useJobFacetSearch(
+  facet: JobFacet,
+  query: string,
+  status: string,
+  jobOrigin: '' | 'internal' | 'external'
+): { options: string[]; searching: boolean } {
+  const q = query.trim()
+  // Options are stamped with the request they answered, so a stale or aborted response can
+  // never overwrite a newer one, and "searching" is derived rather than set from the effect.
+  const key = `${facet}|${status}|${jobOrigin}|${q}`
+  const [result, setResult] = useState<{ key: string; options: string[] }>({ key: '', options: [] })
+
+  useEffect(() => {
+    if (!q) return undefined
+
+    let cancelled = false
+    const ac = new AbortController()
+    const timer = window.setTimeout(() => {
+      searchJobFacet(facet, q, { status, jobOrigin }, { signal: ac.signal })
+        .then((values) => {
+          if (!cancelled) setResult({ key, options: values })
+        })
+        .catch(() => {
+          if (!cancelled) setResult({ key, options: [] })
+        })
+    }, 300)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      ac.abort()
+    }
+  }, [facet, q, status, jobOrigin, key])
+
+  const ready = result.key === key
+  return { options: q && ready ? result.options : [], searching: Boolean(q) && !ready }
+}
+
 const salaryRangesConst = DEFAULT_SALARY_RANGE
 const experienceRangesConst = DEFAULT_EXPERIENCE_RANGE
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+
+/** The untouched list. Anything differing from this is what gets written to the URL. */
+const DEFAULT_JOB_FILTERS: JobSidebarFilters = {
+  jobTitle: [],
+  company: [],
+  experience: [experienceRangesConst.min, experienceRangesConst.max],
+  location: [],
+  salary: [salaryRangesConst.min, salaryRangesConst.max],
+  salaryNotSpecified: false,
+  status: 'Active',
+  postingDate: '',
+}
 
 type BookmarkNote = JobBookmarkNote
 
@@ -118,16 +179,37 @@ const Jobs = () => {
   const [jobsListFetching, setJobsListFetching] = useState(true)
   const jobsEverLoadedRef = useRef(false)
   const fetchGenerationRef = useRef(0)
-  const [listJobOrigin, setListJobOrigin] = useState<'' | 'internal' | 'external'>('')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  // Every list control is seeded once from the URL, so a refresh or a shared link rebuilds
+  // the same view. The effect further down writes them back as they change.
+  const [listJobOrigin, setListJobOrigin] = useState<'' | 'internal' | 'external'>(() => {
+    const raw = searchParams.get('origin')
+    return raw === 'internal' || raw === 'external' ? raw : ''
+  })
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const [currentPage, setCurrentPage] = useState(() => {
+    const raw = Number(searchParams.get('page'))
+    return Number.isInteger(raw) && raw >= 1 ? raw : 1
+  })
+  const [pageSize, setPageSize] = useState(() => {
+    const raw = Number(searchParams.get('limit'))
+    return PAGE_SIZE_OPTIONS.includes(raw) ? raw : 10
+  })
   const [totalResults, setTotalResults] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
-  const [sortBy, setSortBy] = useState<string>(DEFAULT_JOB_SORT_API)
-  const [debouncedJobNameSearch, setDebouncedJobNameSearch] = useState('')
+  const initialSortOption = searchParams.get('sort')?.trim() || 'newest-first'
+  const [sortBy, setSortBy] = useState<string>(() => sortOptionToApiSortBy(initialSortOption))
+  // Seeded alongside `jobNameSearch`; if it started empty the debounce would fire on mount
+  // and the "scope changed" effect would throw away the page seeded from ?page=.
+  const [debouncedJobNameSearch, setDebouncedJobNameSearch] = useState(
+    () => searchParams.get('q')?.trim() || ''
+  )
   /** Quick search — job name only (toolbar input). */
-  const [jobNameSearch, setJobNameSearch] = useState('')
+  const [jobNameSearch, setJobNameSearch] = useState(() => searchParams.get('q')?.trim() || '')
+  const [jobNameFocused, setJobNameFocused] = useState(false)
+  const jobNameInputRef = useRef<HTMLInputElement>(null)
   const [filterOptions, setFilterOptions] = useState<JobFilterOptions>({
     titles: [],
     companies: [],
@@ -151,35 +233,14 @@ const Jobs = () => {
   const [shareEmailError, setShareEmailError] = useState<string | null>(null)
   const [showEmailInput, setShowEmailInput] = useState(false)
   /** Default: newest jobs first (matches postingDate / createdAt). */
-  const [selectedSort, setSelectedSort] = useState<string>('newest-first')
+  const [selectedSort, setSelectedSort] = useState<string>(initialSortOption)
   const [jobsFilterPanelOpen, setJobsFilterPanelOpen] = useState(false)
   const closeJobsFilterPanel = () => setJobsFilterPanelOpen(false)
 
-  const searchParams = useSearchParams()
-  // URL ?status=Draft|Archived|Active|... routes directly into the new status filter.
-  // Default keeps prior behavior: show Active jobs only.
-  const rawStatusParam = searchParams.get('status')?.trim()
-  const initialStatusFilter = rawStatusParam && rawStatusParam.toLowerCase() !== 'all'
-    ? (rawStatusParam.charAt(0).toUpperCase() + rawStatusParam.slice(1).toLowerCase())
-    : (rawStatusParam?.toLowerCase() === 'all' ? 'all' : 'Active')
-
-  const [filters, setFilters] = useState<FilterState>({
-    jobTitle: [],
-    company: [],
-    experience: [experienceRangesConst.min, experienceRangesConst.max],
-    location: [],
-    salary: [salaryRangesConst.min, salaryRangesConst.max],
-    salaryNotSpecified: false,
-    status: initialStatusFilter,
-    postingDate: ''
-  })
-
-  const experienceRanges = useMemo(
-    () => ({
-      min: filterOptions.experience.min ?? experienceRangesConst.min,
-      max: filterOptions.experience.max ?? experienceRangesConst.max,
-    }),
-    [filterOptions.experience.min, filterOptions.experience.max]
+  // Seeded from the URL: ?status=Draft|Archived|all routes straight into the status filter,
+  // and every other facet restores the same way. Default stays Active-only.
+  const [filters, setFilters] = useState<FilterState>(() =>
+    readJobFiltersFromQuery(searchParams, DEFAULT_JOB_FILTERS)
   )
 
   const listQueryInput = useMemo(
@@ -191,9 +252,9 @@ const Jobs = () => {
       listJobOrigin,
       filters,
       salaryBounds: salaryRangesConst,
-      experienceBounds: experienceRanges,
+      experienceBounds: experienceRangesConst,
     }),
-    [currentPage, pageSize, sortBy, debouncedJobNameSearch, listJobOrigin, filters, experienceRanges]
+    [currentPage, pageSize, sortBy, debouncedJobNameSearch, listJobOrigin, filters]
   )
 
   const fetchJobs = useCallback(async (signal?: AbortSignal) => {
@@ -205,7 +266,10 @@ const Jobs = () => {
       if (generation !== fetchGenerationRef.current) return
       setJobsData((res.results ?? []).map(mapJobToDisplay))
       setTotalResults(res.totalResults ?? 0)
-      setTotalPages(res.totalPages ?? 0)
+      const pages = res.totalPages ?? 0
+      setTotalPages(pages)
+      // A bookmarked ?page= can outlive the rows it pointed at; land on the last real page.
+      if (pages > 0 && listQueryInput.page > pages) setCurrentPage(pages)
     } catch (err: unknown) {
       if (generation !== fetchGenerationRef.current) return
       const aborted =
@@ -251,10 +315,52 @@ const Jobs = () => {
     return () => window.clearTimeout(timer)
   }, [jobNameSearch])
 
+  // Changing what is being listed sends you back to page 1 -- but only on a real change.
+  // Compare the scope itself rather than counting effect runs: StrictMode mounts effects
+  // twice in dev, so a "skip the first run" flag fires on the second pass and would throw
+  // away the page seeded from ?page=.
+  const listScopeKey = useMemo(
+    () => JSON.stringify([filters, listJobOrigin, debouncedJobNameSearch, sortBy, pageSize]),
+    [filters, listJobOrigin, debouncedJobNameSearch, sortBy, pageSize]
+  )
+  const lastListScopeRef = useRef(listScopeKey)
   useEffect(() => {
+    if (lastListScopeRef.current === listScopeKey) return
+    lastListScopeRef.current = listScopeKey
     setCurrentPage(1)
     setSelectedRows(new Set())
-  }, [filters, listJobOrigin, debouncedJobNameSearch, sortBy, pageSize])
+  }, [listScopeKey])
+
+  // Mirror the whole list view into the URL so a refresh or a shared link restores it.
+  // Defaults are omitted, so an untouched list keeps a clean /ats/jobs.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams.toString())
+    writeJobFiltersToQuery(next, filters, DEFAULT_JOB_FILTERS)
+
+    const setParam = (key: string, value: string | null) => {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
+    setParam('page', currentPage > 1 ? String(currentPage) : null)
+    setParam('limit', pageSize !== 10 ? String(pageSize) : null)
+    setParam('q', jobNameSearch.trim() || null)
+    setParam('origin', listJobOrigin || null)
+    setParam('sort', selectedSort && selectedSort !== 'newest-first' ? selectedSort : null)
+
+    const qs = next.toString()
+    if (qs === searchParams.toString()) return
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [
+    currentPage,
+    pageSize,
+    jobNameSearch,
+    listJobOrigin,
+    selectedSort,
+    filters,
+    pathname,
+    router,
+    searchParams,
+  ])
 
   useEffect(() => {
     setSelectedRows(new Set())
@@ -269,20 +375,6 @@ const Jobs = () => {
   useEffect(() => {
     void fetchFilterOptions()
   }, [fetchFilterOptions])
-
-  useEffect(() => {
-    setFilters((prev) => {
-      const isStillDefault =
-        prev.experience[0] === experienceRangesConst.min &&
-        prev.experience[1] === experienceRangesConst.max
-      const needsSync =
-        prev.experience[0] !== experienceRanges.min || prev.experience[1] !== experienceRanges.max
-      if (isStillDefault && needsSync) {
-        return { ...prev, experience: [experienceRanges.min, experienceRanges.max] }
-      }
-      return prev
-    })
-  }, [experienceRanges.min, experienceRanges.max])
 
   // Deep-link: ?view=<jobId> opens preview; fetch by id when job is not on the current page.
   const autoOpenedViewIdRef = useRef<string | null>(null)
@@ -1015,19 +1107,32 @@ const Jobs = () => {
   const uniqueJobTitles = filterOptions.titles
   const uniqueStatuses = filterOptions.statuses
 
-  const filteredJobTitles = useMemo(
-    () => filterJobFacetOptions(uniqueJobTitles, searchJobTitle),
-    [uniqueJobTitles, searchJobTitle]
+  // Toolbar quick-search typeahead. Same server-side facet lookup the filter panel uses.
+  const { options: jobNameSuggestions, searching: jobNameSearching } = useJobFacetSearch(
+    'title',
+    jobNameSearch,
+    filters.status,
+    listJobOrigin
   )
+  const showJobNameSuggestions = jobNameFocused && jobNameSearch.trim().length > 0
 
-  const filteredCompanies = useMemo(
-    () => filterJobFacetOptions(uniqueCompanies, searchCompany),
-    [uniqueCompanies, searchCompany]
+  const { options: filteredJobTitles, searching: jobTitleSearching } = useJobFacetSearch(
+    'title',
+    searchJobTitle,
+    filters.status,
+    listJobOrigin
   )
-
-  const filteredLocations = useMemo(
-    () => filterJobFacetOptions(uniqueLocations, searchLocation),
-    [uniqueLocations, searchLocation]
+  const { options: filteredCompanies, searching: companySearching } = useJobFacetSearch(
+    'company',
+    searchCompany,
+    filters.status,
+    listJobOrigin
+  )
+  const { options: filteredLocations, searching: locationSearching } = useJobFacetSearch(
+    'location',
+    searchLocation,
+    filters.status,
+    listJobOrigin
   )
 
   const handleMultiSelectChange = (key: 'jobTitle' | 'company' | 'location', value: string) => {
@@ -1060,15 +1165,14 @@ const Jobs = () => {
     setSearchCompany('')
     setSearchLocation('')
     setListJobOrigin('')
+    // Same object the URL codec treats as "default", so a reset always produces a clean URL.
     setFilters({
+      ...DEFAULT_JOB_FILTERS,
       jobTitle: [],
       company: [],
-      experience: [experienceRangesConst.min, experienceRangesConst.max],
       location: [],
-      salary: [salaryRangesConst.min, salaryRangesConst.max],
-      salaryNotSpecified: false,
-      status: 'Active',
-      postingDate: ''
+      experience: [...DEFAULT_JOB_FILTERS.experience],
+      salary: [...DEFAULT_JOB_FILTERS.salary],
     })
   }
 
@@ -1216,13 +1320,51 @@ const Jobs = () => {
                 <div className="relative flex-1 min-w-[10rem] sm:min-w-[12rem] sm:max-w-xs me-2">
                   <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-defaulttextcolor/50 text-[0.875rem]" aria-hidden />
                   <input
+                    ref={jobNameInputRef}
                     type="search"
                     className="form-control !h-8 !py-1 !ps-8 !pe-3 !text-[0.75rem] !rounded-lg w-full"
                     placeholder="Search by job name…"
                     value={jobNameSearch}
-                    onChange={(e) => setJobNameSearch(e.target.value)}
+                    autoComplete="off"
+                    aria-autocomplete="list"
                     aria-label="Search by job name"
+                    onChange={(e) => setJobNameSearch(e.target.value)}
+                    onFocus={() => setJobNameFocused(true)}
+                    onBlur={() => setJobNameFocused(false)}
                   />
+                  <PortalDropdown open={showJobNameSuggestions} inputRef={jobNameInputRef}>
+                    {jobNameSuggestions.length > 0 ? (
+                      jobNameSuggestions.map((title) => (
+                        <button
+                          key={title}
+                          type="button"
+                          role="option"
+                          aria-selected={jobNameSearch === title}
+                          className={`${DROPDOWN_ITEM} hover:bg-primary/10 dark:hover:bg-primary/15 ${
+                            jobNameSearch === title
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-gray-800 dark:text-gray-200'
+                          }`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setJobNameSearch(title)
+                            setJobNameFocused(false)
+                          }}
+                        >
+                          <i className="ri-search-line text-[0.7rem] opacity-50" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate">{title}</span>
+                        </button>
+                      ))
+                    ) : jobNameSearching ? (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                        Searching&hellip;
+                      </div>
+                    ) : (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                        No matches for &ldquo;{jobNameSearch.trim()}&rdquo;
+                      </div>
+                    )}
+                  </PortalDropdown>
                 </div>
                 <button
                   type="button"
@@ -1249,7 +1391,7 @@ const Jobs = () => {
                   onChange={(e) => setPageSize(Number(e.target.value))}
                   aria-label="Jobs per page"
                 >
-                  {[10, 25, 50, 100].map((size) => (
+                  {PAGE_SIZE_OPTIONS.map((size) => (
                     <option key={size} value={size}>
                       Show {size}
                     </option>
@@ -1387,6 +1529,9 @@ const Jobs = () => {
               filteredJobTitles={filteredJobTitles}
               filteredCompanies={filteredCompanies}
               filteredLocations={filteredLocations}
+              jobTitleSearching={jobTitleSearching}
+              companySearching={companySearching}
+              locationSearching={locationSearching}
               uniqueJobTitles={uniqueJobTitles}
               uniqueCompanies={uniqueCompanies}
               uniqueLocations={uniqueLocations}
@@ -1397,7 +1542,7 @@ const Jobs = () => {
               handleExperienceRangeChange={handleExperienceRangeChange}
               handleResetFilters={handleResetFilters}
               salaryRangesConst={salaryRangesConst}
-              experienceRangesConst={experienceRanges}
+              experienceRangesConst={experienceRangesConst}
             />
 
             <div className="box-body !p-0 flex-1 flex flex-col overflow-hidden relative">
