@@ -7,7 +7,7 @@ import { useAuth } from '@/shared/contexts/auth-context'
 import { useFeaturePermissions } from '@/shared/hooks/use-feature-permissions'
 import { appendJoinIdentityToUrl } from '@/shared/lib/join-room-url'
 import { useTable, useSortBy } from 'react-table'
-import { createMeeting, listMeetings, getMeeting, getMeetingRecordings, updateMeeting, deleteMeeting, exportInterviewsExcel, internalTransferEmployee, type Meeting, type CreateMeetingPayload, type MeetingRecording, type UpdateMeetingPayload } from '@/shared/lib/api/meetings'
+import { createMeeting, listMeetings, getMeeting, getMeetingRecordings, updateMeeting, deleteMeeting, exportInterviewsExcel, internalTransferEmployee, type Meeting, type CreateMeetingPayload, type MeetingRecording, type UpdateMeetingPayload, type InterviewScorecard, type RubricCriterionId } from '@/shared/lib/api/meetings'
 import { buildInterviewExportParams, buildInterviewListParams } from '@/shared/lib/ats/interview-list-query'
 import ListPagination from '@/shared/components/ListPagination'
 import Swal from 'sweetalert2'
@@ -86,11 +86,56 @@ interface InterviewTableRow {
   status: string
   /** Interview result: pending, selected, rejected */
   interviewResult: 'pending' | 'selected' | 'rejected'
+  /** Saved rubric scores, so the result modal reads them back for whoever opens it next. */
+  interviewScorecard?: InterviewScorecard
   /** Public join URL for the interview (copy link) */
   publicMeetingUrl: string
   meetingId: string
 }
 
+
+/**
+ * Interview rubric (PRD 5.4). Ids MUST match backend src/constants/interviewRubric.js —
+ * an unknown id is rejected by Joi and 400s the whole result update.
+ */
+const RUBRIC_CRITERIA: ReadonlyArray<{ id: RubricCriterionId; label: string }> = [
+  { id: 'technical', label: 'Technical Skills' },
+  { id: 'communication', label: 'Communication' },
+  { id: 'problemSolving', label: 'Problem Solving' },
+  { id: 'cultureFit', label: 'Culture Fit' },
+  { id: 'experience', label: 'Relevant Experience' },
+]
+
+const RUBRIC_SCALE = [1, 2, 3, 4, 5] as const
+
+type RubricRatingMap = Partial<Record<RubricCriterionId, number>>
+
+const scorecardToRatingMap = (scorecard?: InterviewScorecard): RubricRatingMap => {
+  const map: RubricRatingMap = {}
+  for (const r of scorecard?.ratings || []) {
+    if (r?.criterion) map[r.criterion] = r.rating
+  }
+  return map
+}
+
+/** Average of the criteria actually scored — skipped criteria don't drag the score down. */
+const rubricAverage = (ratings: RubricRatingMap): number | null => {
+  const values = RUBRIC_CRITERIA.map((c) => ratings[c.id]).filter((v): v is number => typeof v === 'number')
+  if (!values.length) return null
+  return values.reduce((a, b) => a + b, 0) / values.length
+}
+
+const scoredByLabel = (scorecard?: InterviewScorecard): string => {
+  const by = scorecard?.scoredBy
+  const name = by && typeof by === 'object' ? by.name || by.email : ''
+  const when = scorecard?.scoredAt
+    ? new Date(scorecard.scoredAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : ''
+  if (name && when) return `Scored by ${name} · ${when}`
+  if (name) return `Scored by ${name}`
+  if (when) return `Scored ${when}`
+  return ''
+}
 
 /** Per-column visibility for lg+ table view (below lg uses card list). table-fixed + max-w-0 truncates cell content. */
 const COLUMN_VISIBILITY: Record<string, string> = {
@@ -124,6 +169,9 @@ const COLUMN_WIDTH_COMPACT: Record<string, string> = {
 }
 
 const CENTERED_TABLE_COLUMNS = new Set(['checkbox', 'status', 'interviewResult', 'id'])
+
+const INTERVIEW_BADGE_BASE_CLASS =
+  'inline-flex items-center justify-center border px-3.5 py-0.5 rounded-full font-medium min-w-[5.5rem]'
 
 function useMinWidth(minWidth: number): boolean {
   const [matches, setMatches] = useState(false)
@@ -202,6 +250,7 @@ function meetingToTableRow(m: Meeting, viewerTz?: string): InterviewTableRow {
     },
     status: m.status || 'Scheduled',
     interviewResult: (m.interviewResult || 'pending') as 'pending' | 'selected' | 'rejected',
+    interviewScorecard: m.interviewScorecard,
     publicMeetingUrl: m.publicMeetingUrl || (typeof window !== 'undefined' ? `${window.location.origin}/join/room?room=${encodeURIComponent(m.meetingId || '')}` : ''),
     meetingId: m.meetingId || '',
   }
@@ -343,6 +392,8 @@ export default function InterviewsClient() {
   // Interview result modal: row being edited + selected value
   const [resultModalInterview, setResultModalInterview] = useState<InterviewTableRow | null>(null)
   const [resultModalSelected, setResultModalSelected] = useState<'pending' | 'selected' | 'rejected'>('pending')
+  const [resultModalRatings, setResultModalRatings] = useState<RubricRatingMap>({})
+  const [resultModalComment, setResultModalComment] = useState('')
   const [resultUpdating, setResultUpdating] = useState(false)
 
   // Copy interview link feedback
@@ -790,13 +841,27 @@ export default function InterviewsClient() {
   const openResultModal = useCallback((row: InterviewTableRow) => {
     setResultModalInterview(row)
     setResultModalSelected(row.interviewResult || 'pending')
+    setResultModalRatings(scorecardToRatingMap(row.interviewScorecard))
+    setResultModalComment(row.interviewScorecard?.comment || '')
     ;(window as any).HSOverlay?.open(document.querySelector('#interview-result-modal'))
   }, [])
 
   const closeResultModal = useCallback(() => {
     setResultModalInterview(null)
     setResultModalSelected('pending')
+    setResultModalRatings({})
+    setResultModalComment('')
     ;(window as any).HSOverlay?.close(document.querySelector('#interview-result-modal'))
+  }, [])
+
+  /** Click the rating you already gave to clear it — a skipped criterion is absent, not a 0. */
+  const setRubricRating = useCallback((criterion: RubricCriterionId, rating: number) => {
+    setResultModalRatings((prev) => {
+      const next = { ...prev }
+      if (next[criterion] === rating) delete next[criterion]
+      else next[criterion] = rating
+      return next
+    })
   }, [])
 
   // Internal mobility: move a self-applied EXISTING employee into the new role (no offer/placement).
@@ -891,7 +956,21 @@ export default function InterviewsClient() {
     const interview = resultModalInterview
     setResultUpdating(true)
     try {
-      const updated = await updateMeeting(interview.id, { interviewResult: resultModalSelected })
+      const ratings = RUBRIC_CRITERIA.filter((c) => typeof resultModalRatings[c.id] === 'number').map((c) => ({
+        criterion: c.id,
+        rating: resultModalRatings[c.id] as number,
+      }))
+      const comment = resultModalComment.trim()
+      // Only send the scorecard when there is something to store, or something stored to clear —
+      // otherwise every plain result flip would restamp scoredBy/scoredAt on an empty scorecard.
+      const hadScorecard =
+        Boolean(interview.interviewScorecard?.ratings?.length) ||
+        Boolean(interview.interviewScorecard?.comment)
+      const payload: UpdateMeetingPayload = { interviewResult: resultModalSelected }
+      if (ratings.length || comment || hadScorecard) {
+        payload.interviewScorecard = { ratings, comment }
+      }
+      const updated = await updateMeeting(interview.id, payload)
       await refreshMeetingsList()
       closeResultModal()
       if (resultModalSelected === 'selected' && updated.moveToPreboardingError) {
@@ -939,7 +1018,7 @@ export default function InterviewsClient() {
     } finally {
       setResultUpdating(false)
     }
-  }, [resultModalInterview, resultModalSelected, refreshMeetingsList, closeResultModal, confirm, doInternalTransfer])
+  }, [resultModalInterview, resultModalSelected, resultModalRatings, resultModalComment, refreshMeetingsList, closeResultModal, confirm, doInternalTransfer])
 
   const handleCancelMeeting = useCallback(async (row: InterviewTableRow) => {
     if (!row.id) return
@@ -1580,7 +1659,7 @@ export default function InterviewsClient() {
           const config = statusConfig[raw] || { label: interview.status || 'Scheduled', className: 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/30' }
           return (
             <div className="flex justify-center items-center min-w-0 max-w-full px-0.5">
-              <span className={`inline-flex items-center justify-center border px-2 py-0.5 rounded-md text-xs font-medium max-w-full truncate ${config.className}`}>
+              <span className={`${INTERVIEW_BADGE_BASE_CLASS} text-xs max-w-full truncate ${config.className}`}>
                 {config.label}
               </span>
             </div>
@@ -1592,23 +1671,16 @@ export default function InterviewsClient() {
         accessor: 'interviewResult',
         Cell: ({ row }: any) => {
           const interview = row.original
-          const resultColors: Record<string, string> = {
-            pending: 'bg-gray/10 text-gray border-gray/30',
-            selected: 'bg-success/10 text-success border-success/30',
-            rejected: 'bg-danger/10 text-danger border-danger/30',
+          const resultConfig: Record<string, { label: string; className: string }> = {
+            pending: { label: 'Pending', className: 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/30' },
+            selected: { label: 'Selected', className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' },
+            rejected: { label: 'Rejected', className: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30' },
           }
-          const label =
-            interview.interviewResult === 'selected'
-              ? 'Selected'
-              : interview.interviewResult === 'rejected'
-                ? 'Rejected'
-                : 'Pending'
+          const config = resultConfig[interview.interviewResult] || resultConfig.pending
           return (
             <div className="flex justify-center items-center min-w-0 max-w-full px-0.5">
-              <span
-                className={`badge inline-flex items-center justify-center ${resultColors[interview.interviewResult] || resultColors.pending} border px-2 py-0.5 rounded-md text-xs font-medium max-w-full truncate`}
-              >
-                {label}
+              <span className={`${INTERVIEW_BADGE_BASE_CLASS} text-xs max-w-full truncate ${config.className}`}>
+                {config.label}
               </span>
             </div>
           )
@@ -2351,17 +2423,12 @@ export default function InterviewsClient() {
                     rescheduled: { label: 'Rescheduled', className: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30' },
                   }
                   const status = statusConfig[statusRaw] || { label: interview.status || 'Scheduled', className: 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/30' }
-                  const resultColors: Record<string, string> = {
-                    pending: 'bg-gray/10 text-gray border-gray/30',
-                    selected: 'bg-success/10 text-success border-success/30',
-                    rejected: 'bg-danger/10 text-danger border-danger/30',
+                  const resultConfig: Record<string, { label: string; className: string }> = {
+                    pending: { label: 'Pending', className: 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/30' },
+                    selected: { label: 'Selected', className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' },
+                    rejected: { label: 'Rejected', className: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30' },
                   }
-                  const resultLabel =
-                    interview.interviewResult === 'selected'
-                      ? 'Selected'
-                      : interview.interviewResult === 'rejected'
-                        ? 'Rejected'
-                        : 'Pending'
+                  const result = resultConfig[interview.interviewResult] || resultConfig.pending
                   const candidateInitials = (interview.candidate?.name || '?').trim().split(/\s+/).map((x: string) => x[0]).join('').toUpperCase().slice(0, 2) || '?'
                   return (
                     <div
@@ -2413,11 +2480,11 @@ export default function InterviewsClient() {
                         <span className="font-medium">Agent:</span> {interview.recruiter?.name ?? '—'}
                       </div>
                       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                        <span className={`inline-flex items-center border px-2 py-0.5 rounded-md text-[0.65rem] font-medium ${status.className}`}>
+                        <span className={`${INTERVIEW_BADGE_BASE_CLASS} text-[0.65rem] ${status.className}`}>
                           {status.label}
                         </span>
-                        <span className={`badge ${resultColors[interview.interviewResult] || resultColors.pending} border px-2 py-0.5 rounded-md text-[0.65rem] font-medium`}>
-                          {resultLabel}
+                        <span className={`${INTERVIEW_BADGE_BASE_CLASS} text-[0.65rem] ${result.className}`}>
+                          {result.label}
                         </span>
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -2636,7 +2703,7 @@ export default function InterviewsClient() {
         aria-labelledby="interview-result-modal-label"
         aria-hidden="true"
       >
-        <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out transition-all sm:max-w-md">
+        <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out transition-all sm:max-w-lg">
           <div className="ti-modal-content border border-defaultborder dark:border-defaultborder/10 rounded-xl shadow-xl overflow-hidden">
             <div className="ti-modal-header bg-gray-50 dark:bg-black/20 border-b border-defaultborder dark:border-defaultborder/10 px-6 py-4">
               <h3 id="interview-result-modal-label" className="ti-modal-title text-lg font-semibold text-defaulttextcolor dark:text-white flex items-center gap-2">
@@ -2653,7 +2720,7 @@ export default function InterviewsClient() {
                 <i className="ri-close-line text-xl"></i>
               </button>
             </div>
-            <div className="ti-modal-body px-6 py-5">
+            <div className="ti-modal-body px-6 py-5 max-h-[70vh] overflow-y-auto">
               {resultModalInterview && (
                 <>
                   <div className="mb-4">
@@ -2691,6 +2758,93 @@ export default function InterviewsClient() {
                         </label>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Rubric scores (PRD 5.4). Informational only — they never change the result above. */}
+                  <div className="mt-6 pt-5 border-t border-defaultborder dark:border-defaultborder/10">
+                    <div className="flex items-end justify-between gap-3 mb-3">
+                      <div>
+                        <p className="form-label block text-sm font-medium text-defaulttextcolor dark:text-white mb-0.5">
+                          Scorecard
+                        </p>
+                        <p className="text-xs text-defaulttextcolor/60 dark:text-white/60">
+                          Rate 1&ndash;5. Click a rating again to clear it. Optional.
+                        </p>
+                      </div>
+                      {(() => {
+                        const avg = rubricAverage(resultModalRatings)
+                        const scored = Object.keys(resultModalRatings).length
+                        if (avg === null) return null
+                        return (
+                          <div className="text-end flex-shrink-0">
+                            <p className="text-lg font-semibold leading-none text-primary">
+                              {avg.toFixed(1)}
+                              <span className="text-xs font-normal text-defaulttextcolor/60 dark:text-white/60"> / 5</span>
+                            </p>
+                            <p className="text-[0.65rem] text-defaulttextcolor/60 dark:text-white/60 mt-1">
+                              {scored} of {RUBRIC_CRITERIA.length} scored
+                            </p>
+                          </div>
+                        )
+                      })()}
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      {RUBRIC_CRITERIA.map((criterion) => (
+                        <div
+                          key={criterion.id}
+                          className="flex items-center justify-between gap-3 py-1.5"
+                        >
+                          <span className="text-sm text-defaulttextcolor dark:text-white/90">{criterion.label}</span>
+                          <div className="flex items-center gap-1 flex-shrink-0" role="group" aria-label={criterion.label}>
+                            {RUBRIC_SCALE.map((value) => {
+                              const active = resultModalRatings[criterion.id] === value
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  aria-pressed={active}
+                                  aria-label={`${criterion.label}: ${value} of 5`}
+                                  onClick={() => setRubricRating(criterion.id, value)}
+                                  className={`w-8 h-8 rounded-md border text-xs font-medium transition-colors ${
+                                    active
+                                      ? 'border-primary bg-primary text-white'
+                                      : 'border-defaultborder dark:border-defaultborder/10 text-defaulttextcolor/70 dark:text-white/60 hover:bg-gray-50 dark:hover:bg-black/20'
+                                  }`}
+                                >
+                                  {value}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3">
+                      <label
+                        htmlFor="interview-scorecard-comment"
+                        className="form-label block text-sm font-medium text-defaulttextcolor dark:text-white mb-1.5"
+                      >
+                        Notes
+                      </label>
+                      <textarea
+                        id="interview-scorecard-comment"
+                        rows={3}
+                        maxLength={2000}
+                        value={resultModalComment}
+                        onChange={(e) => setResultModalComment(e.target.value)}
+                        placeholder="What stood out, concerns, follow-up questions..."
+                        className="form-control w-full !rounded-md text-sm"
+                      />
+                    </div>
+
+                    {scoredByLabel(resultModalInterview.interviewScorecard) && (
+                      <p className="mt-2 text-xs text-defaulttextcolor/60 dark:text-white/60">
+                        <i className="ri-user-star-line me-1 align-middle"></i>
+                        {scoredByLabel(resultModalInterview.interviewScorecard)}
+                      </p>
+                    )}
                   </div>
                 </>
               )}
