@@ -372,6 +372,28 @@ export async function trashThreads(
   return data;
 }
 
+/**
+ * Permanently delete conversations. Not recoverable.
+ *
+ * Both providers have supported this all along - Gmail via users.threads.delete
+ * (the connect flow already requests the full https://mail.google.com/ scope it
+ * needs) and Outlook via the Graph permanentDelete action. Nothing called it, so
+ * "delete" inside Trash re-ran trashThreads instead, which the provider treats
+ * as a no-op for an already-trashed conversation: the row vanished optimistically
+ * and came back on the next refresh.
+ */
+export async function deleteThreads(
+  accountId: string,
+  threadIds: string[],
+  provider: MailProvider = "gmail"
+): Promise<{ success: boolean; deleted?: number }> {
+  const { data } = await apiClient.post(`${mailBase(provider)}/threads/delete`, {
+    accountId,
+    threadIds,
+  });
+  return data;
+}
+
 export async function trashMessage(
   accountId: string,
   messageId: string,

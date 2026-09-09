@@ -31,6 +31,7 @@ import { parseQuickRecipients } from "./_utils/quickRecipients";
 import { buildPrintDocument } from "./_utils/printEmail";
 import { resolveBulkTargets } from "./_utils/bulkSelection";
 import { prepareMailBodyHtml } from "./_utils/mailHtmlBody";
+import { isPermanentDeleteFolderId } from "./_utils/deleteScope";
 import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
@@ -519,6 +520,8 @@ const Mailapp = () => {
     setNotice({ tone: "success", message });
   }, []);
 
+  const isPermanentDeleteFolder = isPermanentDeleteFolderId(selectedLabelId);
+
   const requestMailConfirm = useCallback((options: MailConfirmRequest): Promise<boolean> => {
     return new Promise((resolve) => {
       mailConfirmResolverRef.current = resolve;
@@ -532,6 +535,41 @@ const Mailapp = () => {
     setMailConfirm(null);
     resolve?.(confirmed);
   }, []);
+  const confirmTrash = useCallback(
+    async (count: number, scope: "selected" | "visible") => {
+      const noun = count === 1 ? "conversation" : "conversations";
+      const recover = count === 1 ? "it" : "them";
+      const where =
+        scope === "selected" ? `${count} selected ${noun}` : `all ${count} ${noun} loaded in this view`;
+
+      // Inside Trash and Spam there is nowhere further to move to, so the action
+      // is a permanent delete and has to say so. It used to offer "Move to trash"
+      // for conversations that were already in trash.
+      if (isPermanentDeleteFolder) {
+        return requestMailConfirm({
+          title: "Delete forever?",
+          message: `This permanently deletes ${where}. This cannot be undone and ${
+            count === 1 ? "it" : "they"
+          } cannot be recovered.`,
+          confirmLabel: "Delete forever",
+          destructive: true,
+        });
+      }
+
+      const message =
+        scope === "selected"
+          ? `${count} selected ${noun} will be moved to trash. You can recover ${recover} from Trash.`
+          : `All ${count} ${noun} loaded in this view will be moved to trash. You can recover ${recover} from Trash.`;
+      return requestMailConfirm({
+        title: "Move to trash?",
+        message,
+        confirmLabel: "Move to trash",
+        destructive: true,
+      });
+    },
+    [requestMailConfirm, isPermanentDeleteFolder]
+  );
+
 
   // OAuth failures on return only rendered on the connect stage; with mailboxes
   // already linked the main shell hid them entirely.
@@ -1946,8 +1984,14 @@ const Mailapp = () => {
   const handleTrash = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
     const wasUnread = threads.find((t) => t.id === selectedThreadId)?.isUnread ?? false;
+    if (!(await confirmTrash(1, "selected"))) return;
     try {
-      await emailApi.trashThreads(selectedAccountId, [selectedThreadId], mailProvider);
+      // In Trash or Spam this is the permanent delete; anywhere else it is a move.
+      if (isPermanentDeleteFolder) {
+        await emailApi.deleteThreads(selectedAccountId, [selectedThreadId], mailProvider);
+      } else {
+        await emailApi.trashThreads(selectedAccountId, [selectedThreadId], mailProvider);
+      }
       setThreads((prev) => prev.filter((t) => t.id !== selectedThreadId));
       setSelectedThreadId(null);
       setThreadMessages([]);
@@ -1959,9 +2003,17 @@ const Mailapp = () => {
       restoreMobileListLayout();
       if (wasUnread) bumpNavUnreadCounts(-1, ["INBOX"]);
       void refreshMailboxLabels();
-    } catch (err) {
-      console.error("[Email] Trash failed:", err);
-      showError("Could not move this conversation to trash. Nothing was deleted.");
+      showSuccess(
+        isPermanentDeleteFolder
+          ? "Conversation permanently deleted."
+          : "Moved to trash. Recover it from the Trash folder."
+      );
+    } catch {
+      showError(
+        isPermanentDeleteFolder
+          ? "Could not delete this conversation. Nothing was removed."
+          : "Could not move this conversation to trash. Nothing was deleted."
+      );
     }
   }, [
     selectedAccountId,
@@ -1970,8 +2022,11 @@ const Mailapp = () => {
     restoreMobileListLayout,
     mailProvider,
     showError,
+    showSuccess,
     bumpNavUnreadCounts,
     refreshMailboxLabels,
+    isPermanentDeleteFolder,
+    confirmTrash,
   ]);
 
   const handleToggleStar = useCallback(
@@ -2237,24 +2292,6 @@ const Mailapp = () => {
     setMailMenuPosition(null);
   }, []);
 
-  const confirmTrash = useCallback(
-    async (count: number, scope: "selected" | "visible") => {
-      const noun = count === 1 ? "conversation" : "conversations";
-      const recover = count === 1 ? "it" : "them";
-      const message =
-        scope === "selected"
-          ? `${count} selected ${noun} will be moved to trash. You can recover ${recover} from Trash.`
-          : `All ${count} ${noun} loaded in this view will be moved to trash. You can recover ${recover} from Trash.`;
-      return requestMailConfirm({
-        title: "Move to trash?",
-        message,
-        confirmLabel: "Move to trash",
-        destructive: true,
-      });
-    },
-    [requestMailConfirm]
-  );
-
   const confirmSpam = useCallback(
     async (count: number, scope: "selected" | "visible") => {
       const noun = count === 1 ? "conversation" : "conversations";
@@ -2306,7 +2343,14 @@ const Mailapp = () => {
       const target = new Set(ids);
       const unreadTrashed = threads.filter((t) => target.has(t.id) && t.isUnread).length;
       try {
-        await emailApi.trashThreads(selectedAccountId, ids, mailProvider);
+        // Already in the bin or in spam? Then this is the permanent delete, not
+        // another move - moving re-trashed an already-trashed conversation, which
+        // the provider accepts and ignores, so the row came back on refresh.
+        if (isPermanentDeleteFolder) {
+          await emailApi.deleteThreads(selectedAccountId, ids, mailProvider);
+        } else {
+          await emailApi.trashThreads(selectedAccountId, ids, mailProvider);
+        }
         setThreads((prev) => prev.filter((t) => !target.has(t.id)));
         if (selectedThreadId && target.has(selectedThreadId)) {
           setSelectedThreadId(null);
@@ -2315,9 +2359,17 @@ const Mailapp = () => {
         setSelectedThreadIds(new Set());
         if (unreadTrashed > 0) bumpNavUnreadCounts(-unreadTrashed, ["INBOX"]);
         void refreshMailboxLabels();
-        showSuccess(`Moved ${ids.length} to trash. Recover them from the Trash folder.`);
+        showSuccess(
+          isPermanentDeleteFolder
+            ? `Permanently deleted ${ids.length}.`
+            : `Moved ${ids.length} to trash. Recover them from the Trash folder.`
+        );
       } catch {
-        showError("Could not move those conversations to trash. Nothing was deleted.");
+        showError(
+          isPermanentDeleteFolder
+            ? "Could not delete those conversations. Nothing was removed."
+            : "Could not move those conversations to trash. Nothing was deleted."
+        );
       }
     },
     [
@@ -2329,6 +2381,7 @@ const Mailapp = () => {
       showSuccess,
       bumpNavUnreadCounts,
       refreshMailboxLabels,
+      isPermanentDeleteFolder,
     ]
   );
 
@@ -3685,8 +3738,12 @@ const Mailapp = () => {
                           type="button"
                           onClick={handleTrash}
                           className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Delete"
-                          aria-label="Move thread to trash"
+                          title={isPermanentDeleteFolder ? "Delete forever" : "Move to trash"}
+                          aria-label={
+                            isPermanentDeleteFolder
+                              ? "Delete this conversation forever"
+                              : "Move this conversation to trash"
+                          }
                         >
                           <i className="ri-delete-bin-line" aria-hidden></i>
                         </button>
