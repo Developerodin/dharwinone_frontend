@@ -3268,28 +3268,35 @@ const Mailapp = () => {
                   <span className={mailStyles.threadListSelectionCount}>
                     {liveSelectedCount} selected
                   </span>
-                  <button
-                    type="button"
-                    className="ti-btn ti-btn-sm ti-btn-danger !mb-0"
-                    onClick={() => void handleDeleteSelected()}
-                  >
-                    <i className="ri-delete-bin-line me-1 align-middle" aria-hidden />
-                    Delete selected
-                  </button>
-                  <button
-                    type="button"
-                    className="ti-btn ti-btn-sm ti-btn-light !mb-0"
-                    onClick={() => void handleMarkAllRead()}
-                  >
-                    Mark read
-                  </button>
-                  <button
-                    type="button"
-                    className={`ti-btn ti-btn-sm ti-btn-light !mb-0 ${mailStyles.threadListSelectionClear}`}
-                    onClick={handleClearSelection}
-                  >
-                    Clear
-                  </button>
+                  <div className={mailStyles.threadListSelectionActions}>
+                    <button
+                      type="button"
+                      className={`${mailStyles.selectionActionBtn} ${mailStyles.selectionActionBtnDanger}`}
+                      onClick={() => void handleDeleteSelected()}
+                      aria-label={`Delete ${liveSelectedCount} selected conversations`}
+                    >
+                      <i className="ri-delete-bin-line" aria-hidden />
+                      <span className={mailStyles.selectionActionBtnLabel}>Delete selected</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`${mailStyles.selectionActionBtn} ${mailStyles.selectionActionBtnNeutral}`}
+                      onClick={() => void handleMarkAllRead()}
+                      aria-label={`Mark ${liveSelectedCount} conversations as read`}
+                    >
+                      <i className="ri-mail-open-line" aria-hidden />
+                      <span className={mailStyles.selectionActionBtnLabel}>Mark read</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`${mailStyles.selectionActionBtn} ${mailStyles.selectionActionBtnNeutral}`}
+                      onClick={handleClearSelection}
+                      aria-label="Clear selection"
+                    >
+                      <i className="ri-close-circle-line" aria-hidden />
+                      <span className={mailStyles.selectionActionBtnLabel}>Clear</span>
+                    </button>
+                  </div>
                 </div>
               )}
               <div className="px-4 pb-3 pt-1">
