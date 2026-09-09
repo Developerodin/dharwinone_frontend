@@ -549,12 +549,12 @@ const Mailapp = () => {
   );
 
   const backToThreadList = useCallback(() => {
-    setSelectedThreadId(null);
-    setThreadMessages([]);
     const params = new URLSearchParams(searchParams.toString());
     params.delete("thread");
     const q = params.toString();
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    setSelectedThreadId(null);
+    setThreadMessages([]);
     restoreMobileListLayout();
   }, [router, pathname, searchParams, restoreMobileListLayout]);
 
@@ -1119,16 +1119,24 @@ const Mailapp = () => {
   );
 
   useEffect(() => {
+    if (!selectedAccountId) return;
     const tid = searchParams.get("thread");
-    if (!tid || !selectedAccountId) return;
-    if (selectedThreadId === tid) return;
+    if (!tid) {
+      setSelectedThreadId((current) => (current === null ? current : null));
+      restoreMobileListLayout();
+      return;
+    }
     // Open it whether or not it is in the loaded page. The link used to resolve
     // only against threads already fetched, so a shared link to anything beyond
     // the first 20 rows silently did nothing. The detail fetch works from the id
     // alone, and the reading-pane header falls back to the fetched messages.
-    setSelectedThreadId(tid);
+    //
+    // Do not depend on selectedThreadId here: backToThreadList clears selection
+    // before router.replace updates searchParams, which used to re-run this effect
+    // with a stale ?thread= and immediately reopen the pane (two-click back).
+    setSelectedThreadId((current) => (current === tid ? current : tid));
     Medium();
-  }, [searchParams, selectedThreadId, selectedAccountId, Medium]);
+  }, [searchParams, selectedAccountId, Medium, restoreMobileListLayout]);
 
   const lastMessageInThread = threadMessages.length > 0 ? threadMessages[threadMessages.length - 1] : null;
 
@@ -3185,8 +3193,17 @@ const Mailapp = () => {
               ) : (
                 <>
                   <div
-                    className={`mail-info-header relative z-20 flex flex-wrap gap-2 items-center !p-5 border-b border-stone-200/80 dark:border-white/10 ${mailStyles.readingHeader} ${mailStyles.readingPaneHeader}`}
+                    className={`mail-info-header relative z-20 flex flex-wrap gap-2 items-center !p-5 !pe-14 border-b border-stone-200/80 dark:border-white/10 ${mailStyles.readingHeader} ${mailStyles.readingPaneHeader}`}
                   >
+                    <button
+                      type="button"
+                      onClick={backToThreadList}
+                      className={`ti-btn ti-btn-icon ti-btn-light ${mailStyles.readingPaneClose}`}
+                      title="Back to mail list"
+                      aria-label="Close message"
+                    >
+                      <i className="ri-close-line" aria-hidden />
+                    </button>
                     <div className="me-2">
                       <span className="avatar avatar-md online avatar-rounded flex items-center justify-center !bg-amber-100 !text-amber-900 dark:!bg-amber-900/40 dark:!text-amber-200 ring-2 ring-amber-200/50 dark:ring-amber-700/40">
                         {headerFrom?.[0]?.toUpperCase() || "?"}
@@ -3212,18 +3229,6 @@ const Mailapp = () => {
                       role="toolbar"
                       aria-label="Mail actions"
                     >
-                      <div className={mailStyles.mailToolbarGroup}>
-                        <button
-                          type="button"
-                          onClick={backToThreadList}
-                          className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Back to list"
-                          aria-label="Back to inbox list"
-                        >
-                          <i className="ri-arrow-left-line" aria-hidden></i>
-                        </button>
-                      </div>
-                      <span className={mailStyles.toolbarDivider} aria-hidden />
                       <div className={mailStyles.mailToolbarGroup}>
                         <button
                           type="button"

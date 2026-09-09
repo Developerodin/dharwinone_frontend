@@ -577,6 +577,18 @@
   flex-shrink: 0;
 }
 
+.readingPaneClose {
+  position: absolute;
+  top: 0.75rem;
+  inset-inline-end: 0.75rem;
+  z-index: 30;
+}
+
+.readingPaneClose:focus-visible {
+  outline: 2px solid var(--mail-accent);
+  outline-offset: 2px;
+}
+
 .readingHeader {
   background: linear-gradient(180deg, var(--mail-paper-elevated) 0%, var(--mail-paper) 100%);
   border-bottom: 1px solid rgba(28, 25, 23, 0.06);
