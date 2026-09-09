@@ -31,7 +31,7 @@ import { parseQuickRecipients } from "./_utils/quickRecipients";
 import { buildPrintDocument } from "./_utils/printEmail";
 import { resolveBulkTargets } from "./_utils/bulkSelection";
 import { htmlHasRemoteImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody";
-import { isPermanentDeleteFolderId } from "./_utils/deleteScope";
+import { isPermanentDeleteFolderId, isSpamFolderId } from "./_utils/deleteScope";
 import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
@@ -521,6 +521,7 @@ const Mailapp = () => {
   }, []);
 
   const isPermanentDeleteFolder = isPermanentDeleteFolderId(selectedLabelId);
+  const isSpamFolder = isSpamFolderId(selectedLabelId);
 
   /**
    * Which conversation the reader has agreed to load remote media for.
@@ -2417,61 +2418,83 @@ const Mailapp = () => {
     await trashThreadIds(ids);
   }, [visibleThreadIds, selectedAccountId, confirmTrash, closeMailMenu, trashThreadIds]);
 
+  /**
+   * Move conversations into, or back out of, the junk folder.
+   *
+   * Inside Spam the direction reverses. Reporting already-junk mail as junk is
+   * accepted and ignored by both providers, so the row was removed
+   * optimistically, "Moved to spam" was reported, and the conversation came back
+   * on the next load - the same defect the Trash delete had. In Spam the action
+   * is now "Not spam", which is what the reader actually needs there and what
+   * every mail client offers.
+   *
+   * Both directions ride the existing batch-modify endpoint: Gmail treats
+   * remove SPAM + add INBOX as its canonical "not spam", and the Outlook
+   * provider moves to the inbox on an INBOX add that carries no SPAM.
+   */
+  const applySpamChange = useCallback(
+    async (ids: string[]) => {
+      if (!selectedAccountId || ids.length === 0) return;
+      const target = new Set(ids);
+      const unSpam = isSpamFolder;
+      try {
+        await emailApi.batchModifyThreads(
+          {
+            accountId: selectedAccountId,
+            threadIds: ids,
+            addLabelIds: unSpam ? ["INBOX"] : ["SPAM"],
+            removeLabelIds: unSpam ? ["SPAM"] : ["INBOX"],
+          },
+          mailProvider
+        );
+        setThreads((prev) => prev.filter((t) => !target.has(t.id)));
+        if (selectedThreadId && target.has(selectedThreadId)) {
+          setSelectedThreadId(null);
+          setThreadMessages([]);
+        }
+        setSelectedThreadIds(new Set());
+        void refreshMailboxLabels();
+        showSuccess(
+          unSpam
+            ? `Moved ${ids.length} back to the inbox.`
+            : `Moved ${ids.length} to spam.`
+        );
+      } catch {
+        showError(
+          unSpam
+            ? "Could not move those conversations out of spam. Nothing was changed."
+            : "Could not move those conversations to spam. Nothing was changed."
+        );
+      }
+    },
+    [
+      selectedAccountId,
+      selectedThreadId,
+      mailProvider,
+      isSpamFolder,
+      refreshMailboxLabels,
+      showError,
+      showSuccess,
+    ]
+  );
+
   const handleMoveSelectedToSpam = useCallback(async () => {
     if (bulkTargets.scope !== "selected" || bulkTargets.ids.length === 0) return;
     const ids = bulkTargets.ids;
-    if (!selectedAccountId) return;
-    if (!(await confirmSpam(ids.length, "selected"))) return;
+    // Restoring mail from junk is recoverable and expected, so it does not need
+    // the "are you sure" that reporting as junk does.
+    if (!isSpamFolder && !(await confirmSpam(ids.length, "selected"))) return;
     closeMailMenu();
-    const target = new Set(ids);
-    try {
-      await emailApi.batchModifyThreads(
-        { accountId: selectedAccountId, threadIds: ids, addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] },
-        mailProvider
-      );
-      setThreads((prev) => prev.filter((t) => !target.has(t.id)));
-      if (selectedThreadId && target.has(selectedThreadId)) {
-        setSelectedThreadId(null);
-        setThreadMessages([]);
-      }
-      setSelectedThreadIds(new Set());
-      showSuccess(`Moved ${ids.length} to spam.`);
-    } catch {
-      showError("Could not move those conversations to spam. Nothing was changed.");
-    }
-  }, [bulkTargets, selectedAccountId, selectedThreadId, mailProvider, confirmSpam, closeMailMenu, showError, showSuccess]);
+    await applySpamChange(ids);
+  }, [bulkTargets, isSpamFolder, confirmSpam, closeMailMenu, applySpamChange]);
 
   const handleMoveAllLoadedToSpam = useCallback(async () => {
     const ids = visibleThreadIds;
-    if (!selectedAccountId || ids.length === 0) return;
-    if (!(await confirmSpam(ids.length, "visible"))) return;
+    if (ids.length === 0) return;
+    if (!isSpamFolder && !(await confirmSpam(ids.length, "visible"))) return;
     closeMailMenu();
-    const target = new Set(ids);
-    try {
-      await emailApi.batchModifyThreads(
-        { accountId: selectedAccountId, threadIds: ids, addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] },
-        mailProvider
-      );
-      setThreads((prev) => prev.filter((t) => !target.has(t.id)));
-      if (selectedThreadId && target.has(selectedThreadId)) {
-        setSelectedThreadId(null);
-        setThreadMessages([]);
-      }
-      setSelectedThreadIds(new Set());
-      showSuccess(`Moved ${ids.length} to spam.`);
-    } catch {
-      showError("Could not move those conversations to spam. Nothing was changed.");
-    }
-  }, [
-    visibleThreadIds,
-    selectedAccountId,
-    selectedThreadId,
-    mailProvider,
-    confirmSpam,
-    closeMailMenu,
-    showError,
-    showSuccess,
-  ]);
+    await applySpamChange(ids);
+  }, [visibleThreadIds, isSpamFolder, confirmSpam, closeMailMenu, applySpamChange]);
 
   const handleMailMenuRecent = useCallback(() => {
     setShowMailMenu(false);
@@ -3255,25 +3278,35 @@ const Mailapp = () => {
                                 <button
                                   type="button"
                                   onClick={() => void handleMoveSelectedToSpam()}
-                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                  className={`ti-dropdown-item !py-2 !px-4 w-full text-left ${
+                                    isSpamFolder ? "" : "!text-danger"
+                                  }`}
                                 >
-                                  Report {liveSelectedCount} selected as spam
+                                  {isSpamFolder
+                                    ? `Not spam (${liveSelectedCount} selected)`
+                                    : `Report ${liveSelectedCount} selected as spam`}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => void handleMoveAllLoadedToSpam()}
-                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                  className={`ti-dropdown-item !py-2 !px-4 w-full text-left ${
+                                    isSpamFolder ? "" : "!text-danger"
+                                  }`}
                                 >
-                                  Report all {threads.length} loaded as spam
+                                  {isSpamFolder
+                                    ? `Not spam (all ${threads.length} loaded)`
+                                    : `Report all ${threads.length} loaded as spam`}
                                 </button>
                               </>
                             ) : (
                               <button
                                 type="button"
                                 onClick={() => void handleMoveAllLoadedToSpam()}
-                                className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                className={`ti-dropdown-item !py-2 !px-4 w-full text-left ${
+                                  isSpamFolder ? "" : "!text-danger"
+                                }`}
                               >
-                                Report all as spam
+                                {isSpamFolder ? "Not spam (all loaded)" : "Report all as spam"}
                               </button>
                             )}
                           </li>

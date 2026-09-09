@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { isPermanentDeleteFolderId } from "./deleteScope";
+import { isPermanentDeleteFolderId, isSpamFolderId } from "./deleteScope";
+
+describe("isSpamFolderId", () => {
+  it("matches the junk folder on both providers", () => {
+    expect(isSpamFolderId("SPAM")).toBe(true); // Gmail
+    expect(isSpamFolderId("JUNK")).toBe(true); // Outlook
+  });
+
+  it("does not match anything else", () => {
+    for (const id of ["INBOX", "TRASH", "ALL", "SENT", "ARCHIVE", "Label_9", "Spam", ""]) {
+      expect(isSpamFolderId(id)).toBe(false);
+    }
+  });
+});
 
 describe("isPermanentDeleteFolderId", () => {
   it("deletes for good in the bin, for both providers", () => {
