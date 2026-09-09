@@ -34,6 +34,7 @@ import { htmlHasRemoteImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody"
 import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
+import MailConfirmDialog from "./MailConfirmDialog";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward";
 
@@ -46,6 +47,13 @@ type MailNotice = {
   tone: "error" | "success";
   message: string;
   action?: { label: string; onClick: () => void };
+};
+type MailConfirmRequest = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  destructive?: boolean;
 };
 type ComposeAttachment = {
   id: string;
@@ -376,6 +384,8 @@ const Mailapp = () => {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [notice, setNotice] = useState<MailNotice | null>(null);
+  const [mailConfirm, setMailConfirm] = useState<MailConfirmRequest | null>(null);
+  const mailConfirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
   /**
    * Set when the thread list could not be loaded. Without it a failed fetch and a
    * genuinely empty folder both rendered "Nothing here yet", so an outage or an
@@ -509,6 +519,20 @@ const Mailapp = () => {
   }, []);
   const showSuccess = useCallback((message: string) => {
     setNotice({ tone: "success", message });
+  }, []);
+
+  const requestMailConfirm = useCallback((options: MailConfirmRequest): Promise<boolean> => {
+    return new Promise((resolve) => {
+      mailConfirmResolverRef.current = resolve;
+      setMailConfirm(options);
+    });
+  }, []);
+
+  const settleMailConfirm = useCallback((confirmed: boolean) => {
+    const resolve = mailConfirmResolverRef.current;
+    mailConfirmResolverRef.current = null;
+    setMailConfirm(null);
+    resolve?.(confirmed);
   }, []);
 
   // OAuth failures on return only rendered on the connect stage; with mailboxes
@@ -1186,7 +1210,12 @@ const Mailapp = () => {
       if (
         !draftBelongsHere &&
         hasMeaningfulComposeBody(inlineReplyHtml) &&
-        !window.confirm("Discard the reply you started on the other thread?")
+        !(await requestMailConfirm({
+          title: "Discard reply?",
+          message: "Discard the reply you started on the other thread?",
+          confirmLabel: "Discard",
+          destructive: true,
+        }))
       ) {
         return;
       }
@@ -1231,6 +1260,7 @@ const Mailapp = () => {
       router,
       pathname,
       searchParams,
+      requestMailConfirm,
     ]
   );
 
@@ -1613,30 +1643,42 @@ const Mailapp = () => {
    * every base64-encoded attachment without a word, and a stray backdrop click
    * was enough to do it.
    */
-  const requestCloseCompose = useCallback(() => {
-    if (isComposeDirty() && !window.confirm("Discard this message? Your draft will be lost.")) {
+  const requestCloseCompose = useCallback(async () => {
+    if (
+      isComposeDirty() &&
+      !(await requestMailConfirm({
+        title: "Discard message?",
+        message: "Discard this message? Your draft will be lost.",
+        confirmLabel: "Discard",
+        destructive: true,
+      }))
+    ) {
       return;
     }
     closeCompose();
-  }, [isComposeDirty, closeCompose]);
+  }, [isComposeDirty, closeCompose, requestMailConfirm]);
 
-  // Escape closes the topmost surface: the quick-add sheet if it is up, otherwise
-  // the compose window (which asks first if there is anything to lose).
+  // Escape closes the topmost surface: confirm dialog, then quick-add, then
+  // compose (which asks first if there is anything to lose).
   useEffect(() => {
-    if (!showComposeModal && !showQuickAddModal) return;
+    if (!mailConfirm && !showComposeModal && !showQuickAddModal) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (mailConfirm) {
+        settleMailConfirm(false);
+        return;
+      }
       if (showQuickAddModal) {
         setShowQuickAddModal(false);
         setQuickAddEmail("");
         setQuickAddError(null);
         return;
       }
-      requestCloseCompose();
+      void requestCloseCompose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showComposeModal, showQuickAddModal, requestCloseCompose]);
+  }, [mailConfirm, showComposeModal, showQuickAddModal, requestCloseCompose, settleMailConfirm]);
 
   const handleAddAttachment = useCallback(() => {
     fileInputRef.current?.click();
@@ -1729,11 +1771,14 @@ const Mailapp = () => {
   }, [canManageEmail, composeAiContext, composeAiLength, composeAiPrompt, composeAiTone, composeSubject, composeTo]);
 
   const applyComposeDraft = useCallback(
-    (option: EmailDraftOption, mode: "replace" | "append" = "replace") => {
+    async (option: EmailDraftOption, mode: "replace" | "append" = "replace") => {
       if (mode === "replace" && hasMeaningfulComposeBody(composeHtml)) {
-        const shouldReplace = window.confirm(
-          "Replace the current draft body with this AI version? Your existing text will be removed, but your signature will stay."
-        );
+        const shouldReplace = await requestMailConfirm({
+          title: "Replace draft?",
+          message:
+            "Replace the current draft body with this AI version? Your existing text will be removed, but your signature will stay.",
+          confirmLabel: "Replace",
+        });
         if (!shouldReplace) return;
       }
       setComposeHtml((prev) =>
@@ -1746,7 +1791,7 @@ const Mailapp = () => {
       setComposeAiError(null);
       setShowComposeAiPanel(false);
     },
-    [composeAiSubject, composeHtml]
+    [composeAiSubject, composeHtml, requestMailConfirm]
   );
 
   const handleAddInlineReplyAttachment = useCallback(() => {
@@ -2198,23 +2243,40 @@ const Mailapp = () => {
     setMailMenuPosition(null);
   }, []);
 
-  const confirmTrash = useCallback((count: number, scope: "selected" | "visible") => {
-    const noun = count === 1 ? "conversation" : "conversations";
-    const what =
-      scope === "selected"
-        ? `Are you sure you want to delete ${count} selected ${noun}? They will be moved to trash.`
-        : `Are you sure you want to delete all ${count} ${noun} loaded in this view? They will be moved to trash.`;
-    return window.confirm(what);
-  }, []);
+  const confirmTrash = useCallback(
+    async (count: number, scope: "selected" | "visible") => {
+      const noun = count === 1 ? "conversation" : "conversations";
+      const recover = count === 1 ? "it" : "them";
+      const message =
+        scope === "selected"
+          ? `${count} selected ${noun} will be moved to trash. You can recover ${recover} from Trash.`
+          : `All ${count} ${noun} loaded in this view will be moved to trash. You can recover ${recover} from Trash.`;
+      return requestMailConfirm({
+        title: "Move to trash?",
+        message,
+        confirmLabel: "Move to trash",
+        destructive: true,
+      });
+    },
+    [requestMailConfirm]
+  );
 
-  const confirmSpam = useCallback((count: number, scope: "selected" | "visible") => {
-    const noun = count === 1 ? "conversation" : "conversations";
-    const what =
-      scope === "selected"
-        ? `Report ${count} selected ${noun} as spam and move them out of the inbox?`
-        : `Report all ${count} ${noun} loaded in this view as spam?`;
-    return window.confirm(what);
-  }, []);
+  const confirmSpam = useCallback(
+    async (count: number, scope: "selected" | "visible") => {
+      const noun = count === 1 ? "conversation" : "conversations";
+      const message =
+        scope === "selected"
+          ? `Report ${count} selected ${noun} as spam and move them out of the inbox?`
+          : `Report all ${count} ${noun} loaded in this view as spam?`;
+      return requestMailConfirm({
+        title: "Report as spam?",
+        message,
+        confirmLabel: "Report as spam",
+        destructive: true,
+      });
+    },
+    [requestMailConfirm]
+  );
 
   const handleMarkAllRead = useCallback(async () => {
     const ids = bulkTargets.ids;
@@ -2279,7 +2341,7 @@ const Mailapp = () => {
   const handleDeleteSelected = useCallback(async () => {
     if (bulkTargets.scope !== "selected" || bulkTargets.ids.length === 0) return;
     const ids = bulkTargets.ids;
-    if (!confirmTrash(ids.length, "selected")) return;
+    if (!(await confirmTrash(ids.length, "selected"))) return;
     closeMailMenu();
     await trashThreadIds(ids);
   }, [bulkTargets, confirmTrash, closeMailMenu, trashThreadIds]);
@@ -2287,7 +2349,7 @@ const Mailapp = () => {
   const handleDeleteAllLoaded = useCallback(async () => {
     const ids = visibleThreadIds;
     if (!selectedAccountId || ids.length === 0) return;
-    if (!confirmTrash(ids.length, "visible")) return;
+    if (!(await confirmTrash(ids.length, "visible"))) return;
     closeMailMenu();
     await trashThreadIds(ids);
   }, [visibleThreadIds, selectedAccountId, confirmTrash, closeMailMenu, trashThreadIds]);
@@ -2296,7 +2358,7 @@ const Mailapp = () => {
     if (bulkTargets.scope !== "selected" || bulkTargets.ids.length === 0) return;
     const ids = bulkTargets.ids;
     if (!selectedAccountId) return;
-    if (!confirmSpam(ids.length, "selected")) return;
+    if (!(await confirmSpam(ids.length, "selected"))) return;
     closeMailMenu();
     const target = new Set(ids);
     try {
@@ -2319,7 +2381,7 @@ const Mailapp = () => {
   const handleMoveAllLoadedToSpam = useCallback(async () => {
     const ids = visibleThreadIds;
     if (!selectedAccountId || ids.length === 0) return;
-    if (!confirmSpam(ids.length, "visible")) return;
+    if (!(await confirmSpam(ids.length, "visible"))) return;
     closeMailMenu();
     const target = new Set(ids);
     try {
@@ -4076,6 +4138,18 @@ const Mailapp = () => {
             </div>
             </div>
           </div>
+        )}
+
+        {mailConfirm && (
+          <MailConfirmDialog
+            title={mailConfirm.title}
+            message={mailConfirm.message}
+            confirmLabel={mailConfirm.confirmLabel}
+            cancelLabel={mailConfirm.cancelLabel}
+            destructive={mailConfirm.destructive}
+            onConfirm={() => settleMailConfirm(true)}
+            onCancel={() => settleMailConfirm(false)}
+          />
         )}
 
         {notice && (
