@@ -137,6 +137,46 @@ function getLabelIcon(labelId: string): string {
   return LABEL_ICONS[labelId] || "ri-price-tag-line";
 }
 
+/** Gmail folder-counts keys → normalized label ids used in the nav. */
+const GMAIL_FOLDER_COUNT_KEY_BY_LABEL: Record<string, string> = {
+  INBOX: "inbox",
+  SENT: "sent",
+  DRAFT: "draft",
+  SPAM: "spam",
+  TRASH: "trash",
+  IMPORTANT: "important",
+  STARRED: "starred",
+};
+
+function mergeGmailLabelCounts(
+  labels: EmailLabel[],
+  counts: emailApi.EmailFolderCounts
+): EmailLabel[] {
+  return labels.map((label) => {
+    const key = GMAIL_FOLDER_COUNT_KEY_BY_LABEL[label.id];
+    const bucket = key ? counts[key] : undefined;
+    if (!bucket) return label;
+    return { ...label, unread: bucket.unread, total: bucket.total };
+  });
+}
+
+function formatMailNavBadgeCount(count: number): string {
+  if (count > 999) return `${(count / 1000).toFixed(1)}k`;
+  return String(count);
+}
+
+function MailNavUnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0"
+      title="Unread conversations"
+    >
+      {formatMailNavBadgeCount(count)}
+    </span>
+  );
+}
+
 /** Human-readable dates in list + reading pane (avoids raw ISO like 2024-03-18T09:25:58Z). */
 function formatMailListDate(iso: string | null | undefined): string {
   if (!iso || !String(iso).trim()) return "";
@@ -321,6 +361,7 @@ const Mailapp = () => {
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [labels, setLabels] = useState<EmailLabel[]>([]);
+  const [gmailFolderCounts, setGmailFolderCounts] = useState<emailApi.EmailFolderCounts | null>(null);
   const [selectedLabelId, setSelectedLabelId] = useState<string>("ALL");
   const [threads, setThreads] = useState<EmailThreadListItem[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
@@ -772,6 +813,7 @@ const Mailapp = () => {
     const accountId = selectedAccountId;
     if (!accountId) {
       setLabels([]);
+      setGmailFolderCounts(null);
       return;
     }
     const id: string = accountId;
@@ -779,9 +821,26 @@ const Mailapp = () => {
     async function load() {
       try {
         const list = await emailApi.getLabels(id, mailProvider);
-        if (!cancelled) setLabels(list);
+        if (cancelled) return;
+        if (mailProvider === "gmail") {
+          try {
+            const counts = await emailApi.getFolderCounts(id, mailProvider);
+            if (cancelled) return;
+            setGmailFolderCounts(counts);
+            setLabels(mergeGmailLabelCounts(list, counts));
+          } catch {
+            setGmailFolderCounts(null);
+            setLabels(list);
+          }
+        } else {
+          setGmailFolderCounts(null);
+          setLabels(list);
+        }
       } catch {
-        if (!cancelled) setLabels([]);
+        if (!cancelled) {
+          setLabels([]);
+          setGmailFolderCounts(null);
+        }
       }
     }
     load();
@@ -793,6 +852,63 @@ const Mailapp = () => {
     // every sibling effect - reloading labels, resetting the thread list to page
     // one and refetching the open thread each time the user came back to the tab.
   }, [selectedAccountId, mailProvider]);
+
+  const refreshMailboxLabels = useCallback(async () => {
+    const accountId = selectedAccountId;
+    if (!accountId) {
+      setLabels([]);
+      setGmailFolderCounts(null);
+      return;
+    }
+    try {
+      const list = await emailApi.getLabels(accountId, mailProvider);
+      if (mailProvider === "gmail") {
+        try {
+          const counts = await emailApi.getFolderCounts(accountId, mailProvider);
+          setGmailFolderCounts(counts);
+          setLabels(mergeGmailLabelCounts(list, counts));
+        } catch {
+          setGmailFolderCounts(null);
+          setLabels(list);
+        }
+      } else {
+        setGmailFolderCounts(null);
+        setLabels(list);
+      }
+    } catch {
+      setLabels([]);
+      setGmailFolderCounts(null);
+    }
+  }, [selectedAccountId, mailProvider]);
+
+  const bumpNavUnreadCounts = useCallback(
+    (delta: number, labelIds: string[] = ["INBOX"]) => {
+      if (delta === 0) return;
+      setLabels((prev) =>
+        prev.map((l) =>
+          labelIds.includes(l.id) && typeof l.unread === "number"
+            ? { ...l, unread: Math.max(0, l.unread + delta) }
+            : l
+        )
+      );
+      if (mailProvider !== "gmail" || !gmailFolderCounts) return;
+      setGmailFolderCounts((prev) => {
+        if (!prev) return prev;
+        const next: emailApi.EmailFolderCounts = { ...prev };
+        for (const labelId of labelIds) {
+          const key = GMAIL_FOLDER_COUNT_KEY_BY_LABEL[labelId];
+          if (key && next[key]) {
+            next[key] = { ...next[key], unread: Math.max(0, next[key].unread + delta) };
+          }
+        }
+        if (labelIds.includes("INBOX") && next.all) {
+          next.all = { ...next.all, unread: Math.max(0, next.all.unread + delta) };
+        }
+        return next;
+      });
+    },
+    [mailProvider, gmailFolderCounts]
+  );
 
   // Outlook cannot use Gmail label ids as folder paths — reset when switching to Outlook
   useEffect(() => {
@@ -1769,6 +1885,7 @@ const Mailapp = () => {
     closeCompose();
     showSuccess("Message sent.");
     await refetchMessages();
+    void refreshMailboxLabels();
   }, [
     selectedAccountId,
     composeTo,
@@ -1781,6 +1898,7 @@ const Mailapp = () => {
     closeCompose,
     mailProvider,
     refetchMessages,
+    refreshMailboxLabels,
     showError,
     showSuccess,
     canManageEmail,
@@ -1788,6 +1906,7 @@ const Mailapp = () => {
 
   const handleTrash = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
+    const wasUnread = threads.find((t) => t.id === selectedThreadId)?.isUnread ?? false;
     try {
       await emailApi.trashThreads(selectedAccountId, [selectedThreadId], mailProvider);
       setThreads((prev) => prev.filter((t) => t.id !== selectedThreadId));
@@ -1799,11 +1918,22 @@ const Mailapp = () => {
         return next;
       });
       restoreMobileListLayout();
+      if (wasUnread) bumpNavUnreadCounts(-1, ["INBOX"]);
+      void refreshMailboxLabels();
     } catch (err) {
       console.error("[Email] Trash failed:", err);
       showError("Could not move this conversation to trash. Nothing was deleted.");
     }
-  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider, showError]);
+  }, [
+    selectedAccountId,
+    selectedThreadId,
+    threads,
+    restoreMobileListLayout,
+    mailProvider,
+    showError,
+    bumpNavUnreadCounts,
+    refreshMailboxLabels,
+  ]);
 
   const handleToggleStar = useCallback(
     async (thread: EmailThreadListItem, e?: React.MouseEvent) => {
@@ -1891,18 +2021,17 @@ const Mailapp = () => {
       : "https://mail.google.com/mail/#settings";
   }, [accounts, selectedAccountId, mailProvider]);
 
-  /**
-   * Whether the folder count badge means anything.
-   *
-   * It was showing three different things at once. Gmail returns an estimate of
-   * all matching conversations; Outlook's listThreads returns the number of
-   * conversations on the page just fetched, so the badge read "20" for a mailbox
-   * of any size; and the page decremented it whenever a conversation was marked
-   * read, as though it were an unread count, which neither provider sends. The
-   * read/unread arithmetic is gone, and the badge is only drawn where the number
-   * is a real total.
-   */
-  const showResultCount = mailProvider === "gmail" && resultSizeEstimate > 0;
+  const unreadForLabel = useCallback(
+    (labelId: string): number => labels.find((l) => l.id === labelId)?.unread ?? 0,
+    [labels]
+  );
+
+  const allMailsUnread = useMemo(() => {
+    if (mailProvider === "gmail") {
+      return gmailFolderCounts?.all?.unread ?? unreadForLabel("INBOX");
+    }
+    return labels.reduce((sum, l) => sum + (l.unread ?? 0), 0);
+  }, [mailProvider, gmailFolderCounts, labels, unreadForLabel]);
 
   const selectedThread = threads.find((t) => t.id === selectedThreadId);
 
@@ -1996,6 +2125,7 @@ const Mailapp = () => {
 
   const handleMarkRead = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
+    const wasUnread = selectedThread?.isUnread ?? false;
     try {
       await emailApi.batchModifyThreads(
         {
@@ -2011,11 +2141,11 @@ const Mailapp = () => {
           t.id === selectedThreadId ? { ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") } : t
         )
       );
-
+      if (wasUnread) bumpNavUnreadCounts(-1, ["INBOX"]);
     } catch {
       showError("Could not mark this conversation as read.");
     }
-  }, [selectedAccountId, selectedThreadId, mailProvider, showError]);
+  }, [selectedAccountId, selectedThreadId, selectedThread, mailProvider, showError, bumpNavUnreadCounts]);
 
   const handleMarkUnread = useCallback(
     async (thread: EmailThreadListItem, e?: React.MouseEvent) => {
@@ -2042,12 +2172,12 @@ const Mailapp = () => {
               : t
           )
         );
-
+        bumpNavUnreadCounts(1, ["INBOX"]);
       } catch {
         showError("Could not mark this conversation as unread.");
       }
     },
-    [selectedAccountId, mailProvider, showError]
+    [selectedAccountId, mailProvider, showError, bumpNavUnreadCounts]
   );
 
   const visibleThreadIds = useMemo(() => threads.map((t) => t.id), [threads]);
@@ -2063,29 +2193,35 @@ const Mailapp = () => {
   /** Ticks that still refer to a visible row, for the header checkbox and labels. */
   const liveSelectedCount = bulkTargets.scope === "selected" ? bulkTargets.ids.length : 0;
 
-  /**
-   * "Delete all 43 conversations" and "delete the 2 you ticked" are very
-   * different acts, and the menu used to word both as "Delete All". Say which one
-   * is about to happen, and how many, before doing it.
-   */
-  const confirmBulk = useCallback(
-    (verb: string) => {
-      const n = bulkTargets.ids.length;
-      const noun = n === 1 ? "conversation" : "conversations";
-      const what =
-        bulkTargets.scope === "selected"
-          ? `${verb} ${n} selected ${noun}?`
-          : `${verb} all ${n} ${noun} loaded in this view?`;
-      return window.confirm(what);
-    },
-    [bulkTargets]
-  );
+  const closeMailMenu = useCallback(() => {
+    setShowMailMenu(false);
+    setMailMenuPosition(null);
+  }, []);
+
+  const confirmTrash = useCallback((count: number, scope: "selected" | "visible") => {
+    const noun = count === 1 ? "conversation" : "conversations";
+    const what =
+      scope === "selected"
+        ? `Are you sure you want to delete ${count} selected ${noun}? They will be moved to trash.`
+        : `Are you sure you want to delete all ${count} ${noun} loaded in this view? They will be moved to trash.`;
+    return window.confirm(what);
+  }, []);
+
+  const confirmSpam = useCallback((count: number, scope: "selected" | "visible") => {
+    const noun = count === 1 ? "conversation" : "conversations";
+    const what =
+      scope === "selected"
+        ? `Report ${count} selected ${noun} as spam and move them out of the inbox?`
+        : `Report all ${count} ${noun} loaded in this view as spam?`;
+    return window.confirm(what);
+  }, []);
 
   const handleMarkAllRead = useCallback(async () => {
     const ids = bulkTargets.ids;
     if (!selectedAccountId || ids.length === 0) return;
     setShowMailMenu(false);
     const target = new Set(ids);
+    const unreadMarked = threads.filter((t) => target.has(t.id) && t.isUnread).length;
     try {
       await emailApi.batchModifyThreads(
         { accountId: selectedAccountId, threadIds: ids, addLabelIds: [], removeLabelIds: ["UNREAD"] },
@@ -2101,17 +2237,67 @@ const Mailapp = () => {
         )
       );
       setSelectedThreadIds(new Set());
-
+      if (unreadMarked > 0) bumpNavUnreadCounts(-unreadMarked, ["INBOX"]);
+      void refreshMailboxLabels();
     } catch {
       showError("Could not mark those conversations as read. Check your connection and try again.");
     }
-  }, [selectedAccountId, bulkTargets, mailProvider, showError]);
+  }, [selectedAccountId, bulkTargets, threads, mailProvider, showError, bumpNavUnreadCounts, refreshMailboxLabels]);
 
-  const handleMoveToSpam = useCallback(async () => {
+  const trashThreadIds = useCallback(
+    async (ids: string[]) => {
+      if (!selectedAccountId || ids.length === 0) return;
+      const target = new Set(ids);
+      const unreadTrashed = threads.filter((t) => target.has(t.id) && t.isUnread).length;
+      try {
+        await emailApi.trashThreads(selectedAccountId, ids, mailProvider);
+        setThreads((prev) => prev.filter((t) => !target.has(t.id)));
+        if (selectedThreadId && target.has(selectedThreadId)) {
+          setSelectedThreadId(null);
+          setThreadMessages([]);
+        }
+        setSelectedThreadIds(new Set());
+        if (unreadTrashed > 0) bumpNavUnreadCounts(-unreadTrashed, ["INBOX"]);
+        void refreshMailboxLabels();
+        showSuccess(`Moved ${ids.length} to trash. Recover them from the Trash folder.`);
+      } catch {
+        showError("Could not move those conversations to trash. Nothing was deleted.");
+      }
+    },
+    [
+      selectedAccountId,
+      threads,
+      selectedThreadId,
+      mailProvider,
+      showError,
+      showSuccess,
+      bumpNavUnreadCounts,
+      refreshMailboxLabels,
+    ]
+  );
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (bulkTargets.scope !== "selected" || bulkTargets.ids.length === 0) return;
     const ids = bulkTargets.ids;
+    if (!confirmTrash(ids.length, "selected")) return;
+    closeMailMenu();
+    await trashThreadIds(ids);
+  }, [bulkTargets, confirmTrash, closeMailMenu, trashThreadIds]);
+
+  const handleDeleteAllLoaded = useCallback(async () => {
+    const ids = visibleThreadIds;
     if (!selectedAccountId || ids.length === 0) return;
-    setShowMailMenu(false);
-    if (!confirmBulk("Report as spam and move")) return;
+    if (!confirmTrash(ids.length, "visible")) return;
+    closeMailMenu();
+    await trashThreadIds(ids);
+  }, [visibleThreadIds, selectedAccountId, confirmTrash, closeMailMenu, trashThreadIds]);
+
+  const handleMoveSelectedToSpam = useCallback(async () => {
+    if (bulkTargets.scope !== "selected" || bulkTargets.ids.length === 0) return;
+    const ids = bulkTargets.ids;
+    if (!selectedAccountId) return;
+    if (!confirmSpam(ids.length, "selected")) return;
+    closeMailMenu();
     const target = new Set(ids);
     try {
       await emailApi.batchModifyThreads(
@@ -2128,27 +2314,39 @@ const Mailapp = () => {
     } catch {
       showError("Could not move those conversations to spam. Nothing was changed.");
     }
-  }, [selectedAccountId, bulkTargets, selectedThreadId, mailProvider, confirmBulk, showError, showSuccess]);
+  }, [bulkTargets, selectedAccountId, selectedThreadId, mailProvider, confirmSpam, closeMailMenu, showError, showSuccess]);
 
-  const handleDeleteAll = useCallback(async () => {
-    const ids = bulkTargets.ids;
+  const handleMoveAllLoadedToSpam = useCallback(async () => {
+    const ids = visibleThreadIds;
     if (!selectedAccountId || ids.length === 0) return;
-    setShowMailMenu(false);
-    if (!confirmBulk("Move to trash")) return;
+    if (!confirmSpam(ids.length, "visible")) return;
+    closeMailMenu();
     const target = new Set(ids);
     try {
-      await emailApi.trashThreads(selectedAccountId, ids, mailProvider);
+      await emailApi.batchModifyThreads(
+        { accountId: selectedAccountId, threadIds: ids, addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] },
+        mailProvider
+      );
       setThreads((prev) => prev.filter((t) => !target.has(t.id)));
       if (selectedThreadId && target.has(selectedThreadId)) {
         setSelectedThreadId(null);
         setThreadMessages([]);
       }
       setSelectedThreadIds(new Set());
-      showSuccess(`Moved ${ids.length} to trash. Recover them from the Trash folder.`);
+      showSuccess(`Moved ${ids.length} to spam.`);
     } catch {
-      showError("Could not move those conversations to trash. Nothing was deleted.");
+      showError("Could not move those conversations to spam. Nothing was changed.");
     }
-  }, [selectedAccountId, bulkTargets, selectedThreadId, mailProvider, confirmBulk, showError, showSuccess]);
+  }, [
+    visibleThreadIds,
+    selectedAccountId,
+    selectedThreadId,
+    mailProvider,
+    confirmSpam,
+    closeMailMenu,
+    showError,
+    showSuccess,
+  ]);
 
   const handleMailMenuRecent = useCallback(() => {
     setShowMailMenu(false);
@@ -2178,6 +2376,10 @@ const Mailapp = () => {
       else next.delete(id);
       return next;
     });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedThreadIds(new Set());
   }, []);
 
   const handlePrint = useCallback(() => {
@@ -2603,14 +2805,7 @@ const Mailapp = () => {
                               <i className="ri-mail-line align-middle text-[.875rem] me-2"></i>
                               <span className="whitespace-nowrap">All Mails</span>
                             </div>
-                            {selectedLabelId === "ALL" && showResultCount && (
-                              <span
-                                className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0"
-                                title="Approximate number of conversations in this view"
-                              >
-                                {resultSizeEstimate > 999 ? `${(resultSizeEstimate / 1000).toFixed(1)}k` : resultSizeEstimate}
-                              </span>
-                            )}
+                            <MailNavUnreadBadge count={allMailsUnread} />
                           </div>
                           </button>
                         </li>
@@ -2628,14 +2823,7 @@ const Mailapp = () => {
                               <i className="ri-inbox-line align-middle text-[.875rem] me-2"></i>
                               <span className="whitespace-nowrap">Inbox</span>
                             </div>
-                            {selectedLabelId === "INBOX" && showResultCount && (
-                              <span
-                                className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0"
-                                title="Approximate number of conversations in this view"
-                              >
-                                {resultSizeEstimate > 999 ? `${(resultSizeEstimate / 1000).toFixed(1)}k` : resultSizeEstimate}
-                              </span>
-                            )}
+                            <MailNavUnreadBadge count={unreadForLabel("INBOX")} />
                           </div>
                           </button>
                         </li>
@@ -2650,14 +2838,17 @@ const Mailapp = () => {
                                 aria-current={selectedLabelId === label.id ? "true" : undefined}
                                 className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
                               >
-                                <div className="flex items-center">
-                                  <i
-                                    className={`${getLabelIcon(label.id)} align-middle text-[.875rem] me-2`}
-                                    aria-hidden
-                                  ></i>
-                                  <span className="flex-grow whitespace-nowrap">
-                                    {label.id === "CATEGORY_PERSONAL" ? "Archive" : label.id === "conversationhistory" ? "Conversation History" : label.name}
-                                  </span>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center min-w-0">
+                                    <i
+                                      className={`${getLabelIcon(label.id)} align-middle text-[.875rem] me-2`}
+                                      aria-hidden
+                                    ></i>
+                                    <span className="whitespace-nowrap">
+                                      {label.id === "CATEGORY_PERSONAL" ? "Archive" : label.id === "conversationhistory" ? "Conversation History" : label.name}
+                                    </span>
+                                  </div>
+                                  <MailNavUnreadBadge count={unreadForLabel(label.id)} />
                                 </div>
                               </button>
                             </li>
@@ -2803,12 +2994,15 @@ const Mailapp = () => {
                                   aria-current={selectedLabelId === label.id ? "true" : undefined}
                                   className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
                                 >
-                                  <div className="flex items-center">
-                                    <i
-                                      className="ri-price-tag-line align-middle text-[.875rem] me-2 text-secondary"
-                                      aria-hidden
-                                    ></i>
-                                    <span className="whitespace-nowrap">{label.name}</span>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center min-w-0">
+                                      <i
+                                        className="ri-price-tag-line align-middle text-[.875rem] me-2 text-secondary"
+                                        aria-hidden
+                                      ></i>
+                                      <span className="whitespace-nowrap">{label.name}</span>
+                                    </div>
+                                    <MailNavUnreadBadge count={unreadForLabel(label.id)} />
                                   </div>
                                 </button>
                               </li>

@@ -64,7 +64,20 @@ export interface EmailLabel {
   type?: string;
   messageListVisibility?: string;
   labelListVisibility?: string;
+  /** Unread conversation count from provider folder/label metadata. */
+  unread?: number;
+  /** Total conversations in folder (Outlook Graph; Gmail folder-counts). */
+  total?: number;
 }
+
+export interface EmailFolderCount {
+  unread: number;
+  total: number;
+  messagesUnread?: number;
+  messagesTotal?: number;
+}
+
+export type EmailFolderCounts = Record<string, EmailFolderCount>;
 
 export type EmailDraftTone = "professional" | "friendly" | "formal" | "persuasive" | "empathetic";
 export type EmailDraftLength = "short" | "medium" | "long";
@@ -375,6 +388,17 @@ export async function getLabels(
   provider: MailProvider = "gmail"
 ): Promise<EmailLabel[]> {
   const { data } = await apiClient.get(`${mailBase(provider)}/labels`, {
+    params: { accountId },
+  });
+  return data;
+}
+
+/** Authoritative per-folder unread/total counts (Gmail labels.get; Outlook mailFolders). */
+export async function getFolderCounts(
+  accountId: string,
+  provider: MailProvider = "gmail"
+): Promise<EmailFolderCounts> {
+  const { data } = await apiClient.get(`${mailBase(provider)}/folder-counts`, {
     params: { accountId },
   });
   return data;
