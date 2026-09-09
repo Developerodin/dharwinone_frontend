@@ -26,8 +26,9 @@ import { buildReplyAllRecipients } from "@/shared/lib/email-recipient-utils";
 import { hasEmailManageAccess, hasEmailReadAccess } from "@/shared/lib/permissions";
 import { buildMailQuery } from "@/shared/lib/mailQuery";
 import { escapeHtmlForTextNode, sanitizeRichHtml } from "@/shared/lib/sanitize-html";
-import { cleanHtmlForSend } from "./_utils/composeHtml";
+import { buildForwardQuote, buildReplyQuote, cleanHtmlForSend } from "./_utils/composeHtml";
 import { parseQuickRecipients } from "./_utils/quickRecipients";
+import { buildPrintDocument } from "./_utils/printEmail";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
 
@@ -971,7 +972,7 @@ const Mailapp = () => {
         }
       } else if (msg) {
         const subject = msg.subject || "(No subject)";
-        const quoteReply = `\n\n<div class="mail-quoted"><p>On ${msg.date || ""} ${msg.from} wrote:</p><blockquote>${msg.htmlBody || msg.textBody || ""}</blockquote></div>`;
+        const quoteReply = buildReplyQuote(msg);
         if (mode === "reply") {
           setComposeTo(msg.from ?? "");
           setComposeSubject(subject.startsWith("Re:") ? subject : `Re: ${subject}`);
@@ -987,8 +988,7 @@ const Mailapp = () => {
         } else {
           setComposeTo("");
           setComposeSubject(subject.startsWith("Fwd:") ? subject : `Fwd: ${subject}`);
-          const quoted = `\n\n<div class="mail-forwarded"><p>---------- Forwarded message ---------</p><p>From: ${msg.from}<br/>To: ${msg.to}${msg.cc ? `<br/>Cc: ${msg.cc}` : ""}<br/>Date: ${msg.date || ""}<br/>Subject: ${subject}</p><blockquote>${msg.htmlBody || msg.textBody || ""}</blockquote></div>`;
-          setComposeHtml(quoted);
+          setComposeHtml(buildForwardQuote(msg, subject));
           setComposeCc("");
         }
         setComposeBcc("");
@@ -1632,54 +1632,43 @@ const Mailapp = () => {
 
   const handlePrint = useCallback(() => {
     if (threadMessages.length === 0) return;
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      alert("Please allow popups to print the email.");
-      return;
-    }
-    const firstMsg = threadMessages[0];
-    const blocks = threadMessages.map(
-      (msg) => `
-      <div class="msg-block" style="margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:1px solid #eee;">
-        <div class="meta">
-          <p><strong>From:</strong> ${(msg.from || "").replace(/</g, "&lt;")}</p>
-          <p><strong>To:</strong> ${(msg.to || "").replace(/</g, "&lt;")}</p>
-          <p><strong>Date:</strong> ${(msg.date || "").replace(/</g, "&lt;")}</p>
-        </div>
-        <div class="body" style="margin-top:0.5rem;">${msg.htmlBody || (msg.textBody ? `<pre style="white-space:pre-wrap;font-family:inherit;">${msg.textBody}</pre>` : "<p>No content</p>")}</div>
-      </div>
-    `
-    );
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${(firstMsg.subject || "Email").replace(/</g, "&lt;")}</title>
-          <style>
-            body { font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #333; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-            .subject { font-size: 18px; font-weight: 600; margin-bottom: 1.5rem; }
-            .body img { max-width: 100%; }
-            @media print { body { margin: 0; padding: 1rem; } }
-          </style>
-        </head>
-        <body>
-          <div class="subject">${(firstMsg.subject || "(No subject)").replace(/</g, "&lt;")}</div>
-          ${blocks.join("")}
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.onload = () => {
-      printWindow.print();
-      printWindow.onafterprint = () => printWindow.close();
+    // Render into a sandboxed iframe rather than window.open(""), which hands back
+    // an about:blank window that inherits this app's origin - a crafted email could
+    // run script as the signed-in user there. Omitting allow-scripts means markup
+    // that ever slipped past the sanitizer still cannot execute; allow-modals is
+    // what permits print(), allow-same-origin is what lets us reach contentWindow.
+    // The iframe also removes the popup-blocker dead end, where printing was simply
+    // unavailable behind an alert().
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-same-origin allow-modals");
+    frame.setAttribute("aria-hidden", "true");
+    frame.setAttribute("title", "Print preview");
+    // Zero-sized and off-screen, but never display:none/visibility:hidden - those
+    // stop the frame from being painted, and an unpainted frame does not print.
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    frame.srcdoc = buildPrintDocument(threadMessages);
+
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      frame.remove();
     };
-    setTimeout(() => {
-      if (!printWindow.closed) {
-        printWindow.print();
-        printWindow.onafterprint = () => printWindow.close();
+
+    frame.onload = () => {
+      const win = frame.contentWindow;
+      if (!win) {
+        cleanup();
+        return;
       }
-    }, 250);
+      win.addEventListener("afterprint", cleanup, { once: true });
+      win.focus();
+      win.print();
+      // Not every browser fires afterprint (Safari historically does not), so
+      // reclaim the node on a long timer rather than leaking one frame per print.
+      window.setTimeout(cleanup, 60000);
+    };
+    document.body.appendChild(frame);
   }, [threadMessages]);
 
   const handleAddQuickRecipient = useCallback(() => {
