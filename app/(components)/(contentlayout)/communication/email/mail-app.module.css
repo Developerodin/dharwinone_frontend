@@ -651,6 +651,33 @@
   border-color: rgba(255, 255, 255, 0.08);
 }
 
+/* Compose / quick-add modals: global .form-label uses dark:text-defaulttextcolor/70
+   (white) while dark:bg-bodydark is not a Tailwind token, so the body stays white. */
+.composeModalBody {
+  background: var(--mail-paper-elevated);
+  color: var(--mail-ink);
+}
+
+.composeModalBody :global(.form-label) {
+  color: var(--mail-ink) !important;
+}
+
+.composeEditor {
+  background: var(--mail-paper-elevated);
+  border-color: rgba(28, 25, 23, 0.1);
+}
+
+:global(.dark) .composeEditor {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.composeEditor :global(.tiptap-toolbar),
+.composeEditor :global(.tiptap-content),
+.composeEditor :global(.ProseMirror) {
+  background: var(--mail-paper-elevated) !important;
+  color: var(--mail-ink);
+}
+
 .quickAddInput:focus {
   border-color: var(--mail-accent) !important;
   box-shadow: 0 0 0 3px var(--mail-accent-mist);

@@ -3894,7 +3894,7 @@ const Mailapp = () => {
                     <i className="ri-close-line text-lg"></i>
                   </button>
                 </div>
-                <div className="ti-modal-body !p-5 bg-white dark:bg-bodydark">
+                <div className={`ti-modal-body !p-5 ${mailStyles.composeModalBody}`}>
                   <label htmlFor="quick-add-email" className="form-label block mb-1">
                     Email address<sup className="text-danger">*</sup>
                   </label>
@@ -3983,7 +3983,7 @@ const Mailapp = () => {
                     <i className="ri-close-line text-lg"></i>
                   </button>
                 </div>
-                <div className="ti-modal-body flex-1 overflow-y-auto px-4 py-4 bg-white dark:bg-bodydark">
+                <div className={`ti-modal-body flex-1 overflow-y-auto px-4 py-4 ${mailStyles.composeModalBody}`}>
                   <div className="grid grid-cols-1 gap-4">
                     {isReplyMode ? (
                       /* The reply and reply-all endpoints accept only accountId, html
@@ -4078,7 +4078,7 @@ const Mailapp = () => {
                     </div>
                     <div>
                       <label className="form-label block mb-1">Message</label>
-                      <div className="mail-compose border dark:border-defaultborder/10 rounded-lg overflow-hidden bg-white dark:bg-bodydark shadow-sm [&_.tiptap-toolbar]:!bg-white [&_.tiptap-toolbar]:dark:!bg-bodydark [&_.tiptap-content]:!bg-white [&_.tiptap-content]:dark:!bg-bodydark [&_.ProseMirror]:!bg-white [&_.ProseMirror]:dark:!bg-bodydark">
+                      <div className={`mail-compose border dark:border-defaultborder/10 rounded-lg overflow-hidden shadow-sm ${mailStyles.composeEditor}`}>
                         <TiptapEditor
                           content={composeHtml}
                           placeholder="Compose your email..."
