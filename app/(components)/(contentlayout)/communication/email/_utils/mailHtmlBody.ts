@@ -16,9 +16,10 @@ export function blockRemoteImagesInHtml(html: string): string {
 
 export function prepareMailBodyHtml(
   rawHtml: string | null | undefined,
-  options: { loadRemoteImages: boolean }
+  options: { loadRemoteImages?: boolean } = {}
 ): string {
   if (!rawHtml?.trim()) return "";
   const sanitized = sanitizeRichHtml(rawHtml);
-  return options.loadRemoteImages ? sanitized : blockRemoteImagesInHtml(sanitized);
+  const loadRemoteImages = options.loadRemoteImages ?? true;
+  return loadRemoteImages ? sanitized : blockRemoteImagesInHtml(sanitized);
 }

@@ -30,7 +30,7 @@ import { buildForwardQuote, buildReplyQuote, cleanHtmlForSend } from "./_utils/c
 import { parseQuickRecipients } from "./_utils/quickRecipients";
 import { buildPrintDocument } from "./_utils/printEmail";
 import { resolveBulkTargets } from "./_utils/bulkSelection";
-import { htmlHasRemoteImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody";
+import { prepareMailBodyHtml } from "./_utils/mailHtmlBody";
 import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
@@ -396,8 +396,6 @@ const Mailapp = () => {
   const [providerWarning, setProviderWarning] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [oauthSuccess, setOauthSuccess] = useState(false);
-  /** Per-thread: remote images stay blocked until the user opts in. */
-  const [loadRemoteImages, setLoadRemoteImages] = useState(false);
   const [mailboxPolicy, setMailboxPolicy] = useState<EmailConnectionPolicy | null>(null);
   const [policyTick, setPolicyTick] = useState(0);
 
@@ -542,10 +540,6 @@ const Mailapp = () => {
     showError(oauthError);
     setOauthError(null);
   }, [oauthError, showMailEmptyStage, showError]);
-
-  useEffect(() => {
-    setLoadRemoteImages(false);
-  }, [selectedThreadId]);
 
   // Success is transient; an error stays until the user dismisses it or acts on
   // it, so a failed send is never scrolled past unnoticed.
@@ -3818,31 +3812,12 @@ const Mailapp = () => {
                               </div>
                             </div>
                           </div>
-                          {msg.htmlBody?.trim() &&
-                          !loadRemoteImages &&
-                          htmlHasRemoteImages(sanitizeRichHtml(msg.htmlBody)) ? (
-                            <div
-                              className={`mb-3 flex flex-wrap items-center justify-between gap-2 ${mailStyles.remoteImagesBanner}`}
-                              role="status"
-                            >
-                              <span className="text-[0.8125rem] text-stone-600 dark:text-stone-300">
-                                Remote images are hidden to protect your privacy.
-                              </span>
-                              <button
-                                type="button"
-                                className="ti-btn ti-btn-sm ti-btn-light !mb-0"
-                                onClick={() => setLoadRemoteImages(true)}
-                              >
-                                Show images
-                              </button>
-                            </div>
-                          ) : null}
                           <div
                             className={`main-mail-content prose max-w-none mail-html-body text-sm text-stone-800 ${mailStyles.mailHtmlCanvas}`}
                             dangerouslySetInnerHTML={{
                               __html:
                                 (msg.htmlBody && msg.htmlBody.trim()
-                                  ? prepareMailBodyHtml(msg.htmlBody, { loadRemoteImages })
+                                  ? prepareMailBodyHtml(msg.htmlBody)
                                   : null) ||
                                 (msg.textBody
                                   ? `<pre class="whitespace-pre-wrap">${escapeHtmlForTextNode(msg.textBody)}</pre>`

@@ -22,16 +22,16 @@ describe("htmlHasRemoteImages", () => {
 });
 
 describe("prepareMailBodyHtml", () => {
-  it("blocks remote images by default", () => {
+  it("loads remote images by default", () => {
+    const out = prepareMailBodyHtml('<img src="https://cdn.example/logo.png">');
+    expect(out).toContain("cdn.example");
+  });
+
+  it("blocks remote images when explicitly disabled", () => {
     const out = prepareMailBodyHtml('<p>x</p><img src="https://evil/x" onerror="alert(1)">', {
       loadRemoteImages: false,
     });
     expect(out).not.toContain("evil");
     expect(out).not.toContain("onerror");
-  });
-
-  it("allows images when explicitly enabled", () => {
-    const out = prepareMailBodyHtml('<img src="https://cdn.example/logo.png">', { loadRemoteImages: true });
-    expect(out).toContain("cdn.example");
   });
 });
