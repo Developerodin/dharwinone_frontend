@@ -3446,17 +3446,8 @@ const Mailapp = () => {
               ) : (
                 <>
                   <div
-                    className={`mail-info-header relative z-20 flex flex-wrap gap-2 items-center !p-5 !pe-14 border-b border-stone-200/80 dark:border-white/10 ${mailStyles.readingHeader} ${mailStyles.readingPaneHeader}`}
+                    className={`mail-info-header relative z-20 flex flex-wrap gap-2 items-center !p-5 border-b border-stone-200/80 dark:border-white/10 ${mailStyles.readingHeader} ${mailStyles.readingPaneHeader}`}
                   >
-                    <button
-                      type="button"
-                      onClick={backToThreadList}
-                      className={`ti-btn ti-btn-icon ti-btn-light ${mailStyles.readingPaneClose}`}
-                      title="Back to mail list"
-                      aria-label="Close message"
-                    >
-                      <i className="ri-close-line" aria-hidden />
-                    </button>
                     <div className="me-2">
                       <span className="avatar avatar-md online avatar-rounded flex items-center justify-center !bg-amber-100 !text-amber-900 dark:!bg-amber-900/40 dark:!text-amber-200 ring-2 ring-amber-200/50 dark:ring-amber-700/40">
                         {headerFrom?.[0]?.toUpperCase() || "?"}
@@ -3671,6 +3662,18 @@ const Mailapp = () => {
                           </div>
                         </>
                       ) : null}
+                      <span className={mailStyles.toolbarDivider} aria-hidden />
+                      <div className={mailStyles.mailToolbarGroup}>
+                        <button
+                          type="button"
+                          onClick={backToThreadList}
+                          className="ti-btn ti-btn-icon ti-btn-light"
+                          title="Back to mail list"
+                          aria-label="Close message"
+                        >
+                          <i className="ri-close-line" aria-hidden />
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div
