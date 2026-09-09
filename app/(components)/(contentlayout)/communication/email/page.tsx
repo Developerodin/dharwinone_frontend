@@ -299,6 +299,7 @@ const Mailapp = () => {
   const [searchInput, setSearchInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [notice, setNotice] = useState<MailNotice | null>(null);
@@ -320,9 +321,15 @@ const Mailapp = () => {
   const expectedWorkEmail = workLock
     ? String((mailboxPolicy as Extract<EmailConnectionPolicy, { hardLockActive: true }>).expectedEmail).toLowerCase().trim()
     : "";
-  const lockAllowedProviders: ("gmail" | "outlook")[] = workLock
-    ? (mailboxPolicy as Extract<EmailConnectionPolicy, { hardLockActive: true }>).allowedProviders
-    : [];
+  // Memoised because the [] literal was a fresh array on every render, which made
+  // the two connect handlers that depend on it new functions on every render too.
+  const lockAllowedProviders: ("gmail" | "outlook")[] = useMemo(
+    () =>
+      workLock
+        ? (mailboxPolicy as Extract<EmailConnectionPolicy, { hardLockActive: true }>).allowedProviders
+        : [],
+    [workLock, mailboxPolicy]
+  );
 
   const navMailboxAccounts = useMemo(() => {
     if (!workLock) return accounts;
@@ -366,6 +373,8 @@ const Mailapp = () => {
   const [composeSubject, setComposeSubject] = useState("");
   const [composeHtml, setComposeHtml] = useState("");
   const [inlineReplyHtml, setInlineReplyHtml] = useState("");
+  /** Which thread the reply draft belongs to, so navigating back to it keeps it. */
+  const inlineReplyThreadIdRef = useRef<string | null>(null);
   const [inlineReplyAttachments, setInlineReplyAttachments] = useState<
     { filename: string; content: string; mimeType: string }[]
   >([]);
@@ -460,6 +469,24 @@ const Mailapp = () => {
     }
   }, []);
 
+  /**
+   * Single entry point for choosing a folder.
+   *
+   * The four call sites had drifted: All Mails and Inbox cleared searchQuery but
+   * not searchInput, so the box still showed a term that was no longer applied,
+   * and the label rows cleared neither, so a search silently carried over into
+   * the folder you had just opened.
+   */
+  const selectFolder = useCallback(
+    (labelId: string) => {
+      setSelectedLabelId(labelId);
+      setSearchInput("");
+      setSearchQuery("");
+      Toggle2();
+    },
+    [Toggle2]
+  );
+
   const backToThreadList = useCallback(() => {
     setSelectedThreadId(null);
     setThreadMessages([]);
@@ -521,7 +548,21 @@ const Mailapp = () => {
       setOauthError(friendly[dec] ?? dec);
     }
     if (connected === "gmail" || connected === "outlook") setOauthSuccess(true);
-  }, [searchParams]);
+    // Strip the callback params once handled. They used to survive every later
+    // router.replace on this page, so the URL stayed advertising ?connected= or a
+    // raw ?error= code, and reloading re-ran the callback handling.
+    //
+    // Only after the account load has finished: that load reads ?connected= from
+    // window.location to pick out the mailbox just linked, so clearing it any
+    // earlier would leave the new mailbox unselected.
+    if (!loading && (connected || error)) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("connected");
+      params.delete("error");
+      const q = params.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    }
+  }, [searchParams, router, pathname, loading]);
 
   useEffect(() => {
     if (!canSeeEmailPolicy) return;
@@ -588,13 +629,24 @@ const Mailapp = () => {
           (new URLSearchParams(window.location.search).get("connected") === "gmail" ||
             new URLSearchParams(window.location.search).get("connected") === "outlook");
 
-        const [pol, list] = await Promise.all([
+        const [pol, accountsResult] = await Promise.all([
           canSeeEmailPolicy
             ? emailApi.getEmailConnectionPolicy().catch(() => ({ hardLockActive: false } as EmailConnectionPolicy))
             : Promise.resolve({ hardLockActive: false } as EmailConnectionPolicy),
           emailApi.getEmailAccounts(),
         ]);
         if (cancelled) return;
+        const list = accountsResult.accounts;
+        // A provider we could not reach is not the same as a provider with no
+        // accounts. Say so, otherwise a connected mailbox just disappears - and
+        // when it is the only one, the page offers to connect what is already
+        // connected.
+        if (accountsResult.unreachable.length > 0) {
+          const names = accountsResult.unreachable
+            .map((p) => (p === "outlook" ? "Outlook" : "Gmail"))
+            .join(" and ");
+          setListError(`We couldn't reach ${names} just now.`);
+        }
 
         setMailboxPolicy(pol);
         const polLock =
@@ -661,9 +713,7 @@ const Mailapp = () => {
     let cancelled = false;
     async function load() {
       try {
-        const p =
-          accounts.find((a) => a.id === id)?.provider === "outlook" ? "outlook" : "gmail";
-        const list = await emailApi.getLabels(id, p);
+        const list = await emailApi.getLabels(id, mailProvider);
         if (!cancelled) setLabels(list);
       } catch {
         if (!cancelled) setLabels([]);
@@ -673,13 +723,15 @@ const Mailapp = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedAccountId, accounts]);
+    // Depends on the selected account's provider, not on the accounts array: that
+    // array is rebuilt on every window focus, and depending on it re-ran this and
+    // every sibling effect - reloading labels, resetting the thread list to page
+    // one and refetching the open thread each time the user came back to the tab.
+  }, [selectedAccountId, mailProvider]);
 
   // Outlook cannot use Gmail label ids as folder paths — reset when switching to Outlook
   useEffect(() => {
-    if (!selectedAccountId || accounts.length === 0) return;
-    const acc = accounts.find((a) => a.id === selectedAccountId);
-    if (acc?.provider !== "outlook") return;
+    if (!selectedAccountId || mailProvider !== "outlook") return;
     setSelectedLabelId((prev) => {
       if (
         prev.startsWith("CATEGORY_") ||
@@ -690,7 +742,7 @@ const Mailapp = () => {
       }
       return prev;
     });
-  }, [selectedAccountId, accounts]);
+  }, [selectedAccountId, mailProvider]);
 
   useEffect(() => {
     const accountId = selectedAccountId;
@@ -707,8 +759,6 @@ const Mailapp = () => {
     setListError(null);
     async function load() {
       try {
-        const p =
-          accounts.find((a) => a.id === id)?.provider === "outlook" ? "outlook" : "gmail";
         const res = await emailApi.getThreads(
           {
             accountId: id,
@@ -716,7 +766,7 @@ const Mailapp = () => {
             pageSize: 20,
             q: searchQuery || undefined,
           },
-          p
+          mailProvider
         );
         if (!cancelled) {
           setThreads(res.threads);
@@ -737,11 +787,57 @@ const Mailapp = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedAccountId, selectedLabelId, searchQuery, accounts]);
+  }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
+
+  // Lets the retry action call the current loader without the callback depending
+  // on itself.
+  const loadMoreThreadsRef = useRef<(() => Promise<void>) | null>(null);
+
+  /**
+   * Close the open thread when the list it came from is replaced.
+   *
+   * Changing folder or search reset `threads` but left `selectedThreadId`, so
+   * `threads.find(...)` returned undefined and the reading pane rendered a blank
+   * sender, recipient and date over the previous thread's body, with ?thread=
+   * still in the URL. On a tablet the thread list stayed hidden too, leaving the
+   * user stranded on that header-less pane.
+   *
+   * The first run is skipped so a ?thread= deep link, which resolves once the
+   * list arrives, is not cleared out from under itself.
+   */
+  const listScopeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const scope = `${selectedAccountId ?? ""}|${selectedLabelId}|${searchQuery}`;
+    if (listScopeRef.current === null || listScopeRef.current === scope) {
+      listScopeRef.current = scope;
+      return;
+    }
+    listScopeRef.current = scope;
+    setSelectedThreadId(null);
+    setThreadMessages([]);
+    restoreMobileListLayout();
+    if (searchParams.get("thread")) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("thread");
+      const q = params.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    }
+  }, [
+    selectedAccountId,
+    selectedLabelId,
+    searchQuery,
+    restoreMobileListLayout,
+    router,
+    pathname,
+    searchParams,
+  ]);
 
   const loadMoreThreads = useCallback(async () => {
     if (!selectedAccountId || !nextPageToken) return;
-    setLoadingMessages(true);
+    // Its own flag: sharing loadingMessages swapped the whole list for skeletons
+    // on every "Load more", so the rows the user was reading vanished and the
+    // scroll position was lost before the next page was appended.
+    setLoadingMore(true);
     try {
       const res = await emailApi.getThreads(
         {
@@ -753,12 +849,26 @@ const Mailapp = () => {
         },
         mailProvider
       );
-      setThreads((prev) => [...prev, ...res.threads]);
+      setThreads((prev) => {
+        // Outlook groups a page of messages into conversations, so a conversation
+        // whose messages straddle a page boundary comes back on both pages. Left
+        // unchecked that produced duplicate React keys, and a star or read toggle
+        // updated both copies.
+        const seen = new Set(prev.map((t) => t.id));
+        return [...prev, ...res.threads.filter((t) => !seen.has(t.id))];
+      });
       setNextPageToken(res.nextPageToken);
+    } catch {
+      showError("Could not load more conversations.", {
+        label: "Try again",
+        onClick: () => void loadMoreThreadsRef.current?.(),
+      });
     } finally {
-      setLoadingMessages(false);
+      setLoadingMore(false);
     }
-  }, [selectedAccountId, selectedLabelId, searchQuery, nextPageToken, mailProvider]);
+  }, [selectedAccountId, selectedLabelId, searchQuery, nextPageToken, mailProvider, showError]);
+
+  loadMoreThreadsRef.current = loadMoreThreads;
 
   useEffect(() => {
     if (!selectedAccountId || !selectedThreadId) {
@@ -768,10 +878,8 @@ const Mailapp = () => {
     const tid = selectedThreadId;
     let cancelled = false;
     setLoadingDetail(true);
-    const p =
-      accounts.find((a) => a.id === selectedAccountId)?.provider === "outlook" ? "outlook" : "gmail";
     emailApi
-      .getThread(selectedAccountId, tid, p)
+      .getThread(selectedAccountId, tid, mailProvider)
       .then((data) => {
         if (!cancelled && selectedThreadId === tid) setThreadMessages(data.messages);
       })
@@ -784,7 +892,7 @@ const Mailapp = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedAccountId, selectedThreadId, accounts]);
+  }, [selectedAccountId, selectedThreadId, mailProvider]);
 
   const handleConnectGmail = useCallback(async () => {
     const bypassGmailCap =
@@ -866,17 +974,23 @@ const Mailapp = () => {
   const handleSelectThread = useCallback(
     async (thread: EmailThreadListItem) => {
       if (thread.id === selectedThreadId) return;
-      // Opening another thread wipes the reply composer. It used to do that
-      // silently, so a half-written reply vanished on a stray click.
+      // Returning to the thread the draft belongs to keeps it; only moving to a
+      // different one discards it, and then only after asking. This used to wipe
+      // the composer silently, so a half-written reply vanished on a stray click.
+      const draftBelongsHere = inlineReplyThreadIdRef.current === thread.id;
       if (
+        !draftBelongsHere &&
         hasMeaningfulComposeBody(inlineReplyHtml) &&
-        !window.confirm("Discard the reply you started on this thread?")
+        !window.confirm("Discard the reply you started on the other thread?")
       ) {
         return;
       }
       setSelectedThreadId(thread.id);
-      setInlineReplyHtml("");
-      setInlineReplyAttachments([]);
+      if (!draftBelongsHere) {
+        setInlineReplyHtml("");
+        setInlineReplyAttachments([]);
+        inlineReplyThreadIdRef.current = null;
+      }
       Medium();
       const params = new URLSearchParams(searchParams.toString());
       params.set("thread", thread.id);
@@ -920,12 +1034,15 @@ const Mailapp = () => {
 
   useEffect(() => {
     const tid = searchParams.get("thread");
-    if (!tid || threads.length === 0) return;
-    if (!threads.some((t) => t.id === tid)) return;
+    if (!tid || !selectedAccountId) return;
     if (selectedThreadId === tid) return;
+    // Open it whether or not it is in the loaded page. The link used to resolve
+    // only against threads already fetched, so a shared link to anything beyond
+    // the first 20 rows silently did nothing. The detail fetch works from the id
+    // alone, and the reading-pane header falls back to the fetched messages.
     setSelectedThreadId(tid);
     Medium();
-  }, [threads, searchParams, selectedThreadId, Medium]);
+  }, [searchParams, selectedThreadId, selectedAccountId, Medium]);
 
   const lastMessageInThread = threadMessages.length > 0 ? threadMessages[threadMessages.length - 1] : null;
 
@@ -1570,6 +1687,20 @@ const Mailapp = () => {
 
   const selectedThread = threads.find((t) => t.id === selectedThreadId);
 
+  /**
+   * What the reading-pane header shows.
+   *
+   * The list row is the best source when there is one, but there is not always a
+   * row: a shared ?thread= link can point at a thread beyond the loaded page.
+   * Falling back to the fetched messages stops the pane rendering a blank sender,
+   * recipient and date above a perfectly good conversation.
+   */
+  const headerFrom = selectedThread?.from ?? lastMessageInThread?.from ?? "";
+  const headerTo = selectedThread?.to ?? lastMessageInThread?.to ?? "";
+  const headerDate = selectedThread?.date ?? lastMessageInThread?.date ?? null;
+  const headerSubject = selectedThread?.subject ?? threadMessages[0]?.subject ?? "";
+  const headerMessageCount = selectedThread?.messageCount ?? threadMessages.length;
+
   const handleCreateLabel = useCallback(
     async (name: string) => {
       if (!selectedAccountId || !name?.trim()) return;
@@ -1934,6 +2065,10 @@ const Mailapp = () => {
       setThreadMessages([]);
       setSelectedThreadIds(new Set());
       setNextPageToken(null);
+      // A search typed against the previous mailbox otherwise stayed applied,
+      // and its operators may not even be valid for the new provider.
+      setSearchInput("");
+      setSearchQuery("");
       const params = new URLSearchParams(searchParams.toString());
       params.delete("thread");
       const q = params.toString();
@@ -2226,9 +2361,7 @@ const Mailapp = () => {
                         <li
                           className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === "ALL" ? mailStyles.navItemActive : ""}`}
                           onClick={() => {
-                            setSelectedLabelId("ALL");
-                            setSearchQuery("");
-                            Toggle2();
+                            selectFolder("ALL");
                           }}
                         >
                           <div className="flex items-center justify-between">
@@ -2246,9 +2379,7 @@ const Mailapp = () => {
                         <li
                           className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === "INBOX" ? mailStyles.navItemActive : ""}`}
                           onClick={() => {
-                            setSelectedLabelId("INBOX");
-                            setSearchQuery("");
-                            Toggle2();
+                            selectFolder("INBOX");
                           }}
                         >
                           <div className="flex items-center justify-between">
@@ -2268,8 +2399,7 @@ const Mailapp = () => {
                               key={label.id}
                               className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
                               onClick={() => {
-                                setSelectedLabelId(label.id);
-                                Toggle2();
+                                selectFolder(label.id);
                               }}
                             >
                               <div className="flex items-center">
@@ -2390,10 +2520,7 @@ const Mailapp = () => {
                               <li
                                 key={label.id}
                                 className={`cursor-pointer ${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
-                                onClick={() => {
-                                  setSelectedLabelId(label.id);
-                                  Toggle2();
-                                }}
+                                onClick={() => selectFolder(label.id)}
                               >
                                 <div className="flex items-center">
                                   <i className="ri-price-tag-line align-middle text-[.875rem] me-2 text-secondary"></i>
@@ -2694,10 +2821,10 @@ const Mailapp = () => {
                         <button
                           type="button"
                           onClick={loadMoreThreads}
-                          disabled={loadingMessages}
+                          disabled={loadingMore}
                           className="ti-btn ti-btn-sm ti-btn-light whitespace-nowrap shrink-0 min-w-[5.5rem]"
                         >
-                          {loadingMessages ? "Loading..." : "Load more"}
+                          {loadingMore ? "Loading..." : "Load more"}
                         </button>
                       </li>
                     )}
@@ -2735,22 +2862,22 @@ const Mailapp = () => {
                   >
                     <div className="me-2">
                       <span className="avatar avatar-md online avatar-rounded flex items-center justify-center !bg-amber-100 !text-amber-900 dark:!bg-amber-900/40 dark:!text-amber-200 ring-2 ring-amber-200/50 dark:ring-amber-700/40">
-                        {selectedThread?.from?.[0]?.toUpperCase() || "?"}
+                        {headerFrom?.[0]?.toUpperCase() || "?"}
                       </span>
                     </div>
                     <div className="flex-grow min-w-0">
                       <h6 className="mb-0 font-semibold text-[1.05rem] text-stone-900 dark:text-stone-100 truncate">
-                        {selectedThread?.from}
+                        {headerFrom}
                       </h6>
                       <span className="text-stone-500 dark:text-stone-400 text-[0.75rem] block truncate">
-                        {selectedThread?.to}
+                        {headerTo}
                       </span>
                     </div>
                     <span
                       className={`text-[0.75rem] text-stone-500 dark:text-stone-400 shrink-0 ${mailStyles.threadListDate}`}
                     >
-                      <time dateTime={selectedThread?.date || undefined}>
-                        {formatMailListDate(selectedThread?.date)}
+                      <time dateTime={headerDate || undefined}>
+                        {formatMailListDate(headerDate)}
                       </time>
                     </span>
                     <div
@@ -2965,11 +3092,11 @@ const Mailapp = () => {
                         <p
                           className={`${mailDisplay.className} ${mailStyles.subjectDisplay} font-semibold mb-0 flex-1 min-w-0`}
                         >
-                          {selectedThread?.subject || "(No subject)"}
+                          {headerSubject || "(No subject)"}
                         </p>
-                        {selectedThread && selectedThread.messageCount > 1 ? (
+                        {headerMessageCount > 1 ? (
                           <span className={mailStyles.threadCountBadge}>
-                            {selectedThread.messageCount} messages
+                            {headerMessageCount} messages
                           </span>
                         ) : null}
                       </div>
@@ -3083,7 +3210,10 @@ const Mailapp = () => {
                         <TiptapEditor
                           content={inlineReplyHtml}
                           placeholder="Type your reply..."
-                          onChange={setInlineReplyHtml}
+                          onChange={(html) => {
+                            inlineReplyThreadIdRef.current = selectedThreadId;
+                            setInlineReplyHtml(html);
+                          }}
                         />
                       </div>
                       {inlineReplyAttachments.length > 0 && (

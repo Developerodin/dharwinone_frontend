@@ -95,15 +95,30 @@ function mailBase(provider?: string): string {
   return provider === "outlook" ? OUTLOOK_BASE : EMAIL_BASE;
 }
 
-/** Gmail + Outlook accounts (merged). */
-export async function getEmailAccounts(): Promise<EmailAccount[]> {
+/**
+ * Gmail + Outlook accounts (merged).
+ *
+ * Reports which providers could not be reached rather than folding a failure
+ * into an empty list. A provider outage used to be indistinguishable from
+ * "no accounts of that type": the mailbox simply vanished from the nav, and if
+ * it was the only one, the page offered to connect a mailbox that was already
+ * connected. Note a user with no Outlook account gets 200 with [], not a
+ * rejection, so an entry here is a genuine failure.
+ */
+export async function getEmailAccounts(): Promise<{
+  accounts: EmailAccount[];
+  unreachable: MailProvider[];
+}> {
   const [gmailRes, outlookRes] = await Promise.allSettled([
     apiClient.get<EmailAccount[]>(`${EMAIL_BASE}/accounts`),
     apiClient.get<EmailAccount[]>(`${OUTLOOK_BASE}/accounts`),
   ]);
   const gmail = gmailRes.status === "fulfilled" ? gmailRes.value.data : [];
   const outlook = outlookRes.status === "fulfilled" ? outlookRes.value.data : [];
-  return [...(gmail || []), ...(outlook || [])];
+  const unreachable: MailProvider[] = [];
+  if (gmailRes.status === "rejected") unreachable.push("gmail");
+  if (outlookRes.status === "rejected") unreachable.push("outlook");
+  return { accounts: [...(gmail || []), ...(outlook || [])], unreachable };
 }
 
 /** Company-assigned mailbox policy for Communication → Email (requires emails.read or emails.manage). */
