@@ -180,6 +180,32 @@
   background: rgb(68 64 60 / 0.65);
 }
 
+/* Third-party HTML emails hardcode light-mode inline colors (#000, #212121).
+   In dark app theme, render the body on a fixed light "paper" canvas (Gmail pattern). */
+:global(.dark) .mailHtmlCanvas {
+  background: #faf8f5;
+  color: #1c1917;
+  color-scheme: light;
+  border-radius: calc(var(--mail-radius-sm) + 2px);
+  border: 1px solid rgba(28, 25, 23, 0.1);
+  padding: 1rem 1.125rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+:global(.dark) .mailHtmlCanvas :global(img[data-remote-image="blocked"]) {
+  background: rgb(231 229 228 / 0.65);
+}
+
+.mailRoot :global(.dark) .mailHtmlCanvas :global(.mail-quoted) {
+  border-top-color: rgba(120, 113, 108, 0.12);
+}
+
+.mailRoot :global(.dark) .mailHtmlCanvas :global(.mail-quoted blockquote),
+.mailRoot :global(.dark) .mailHtmlCanvas :global(blockquote) {
+  border-left-color: rgba(194, 65, 12, 0.45);
+  background: rgba(120, 113, 108, 0.05);
+}
+
 .composeError {
   margin-top: 0.7rem;
   margin-bottom: 0;

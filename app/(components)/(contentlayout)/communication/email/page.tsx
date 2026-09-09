@@ -3766,7 +3766,7 @@ const Mailapp = () => {
                             </div>
                           ) : null}
                           <div
-                            className="main-mail-content prose dark:prose-invert max-w-none mail-html-body text-sm text-stone-800 dark:text-stone-100"
+                            className={`main-mail-content prose max-w-none mail-html-body text-sm text-stone-800 ${mailStyles.mailHtmlCanvas}`}
                             dangerouslySetInnerHTML={{
                               __html:
                                 (msg.htmlBody && msg.htmlBody.trim()
