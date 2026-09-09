@@ -341,6 +341,9 @@ const Mailapp = () => {
    * expired mailbox looked exactly like an empty inbox.
    */
   const [listError, setListError] = useState<string | null>(null);
+  /** Provider outage during account load — kept separate from folder listError. */
+  const [providerWarning, setProviderWarning] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [oauthSuccess, setOauthSuccess] = useState(false);
   /** Per-thread: remote images stay blocked until the user opts in. */
   const [loadRemoteImages, setLoadRemoteImages] = useState(false);
@@ -429,6 +432,8 @@ const Mailapp = () => {
   /** Reply and reply-all derive their recipients server-side; only these two modes. */
   const isReplyMode = composeMode === "reply" || composeMode === "replyAll";
   const composeMessageRef = useRef<EmailMessage | null>(null);
+  /** Bumped whenever compose opens or closes so in-flight forward attachment loads cannot land on a new draft. */
+  const forwardAttachGenerationRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inlineReplyFileInputRef = useRef<HTMLInputElement>(null);
   const [showMailMenu, setShowMailMenu] = useState(false);
@@ -701,7 +706,11 @@ const Mailapp = () => {
           const names = accountsResult.unreachable
             .map((p) => (p === "outlook" ? "Outlook" : "Gmail"))
             .join(" and ");
-          setListError(`We couldn't reach ${names} just now.`);
+          setProviderWarning(
+            `We couldn't reach ${names} just now. Connected mailboxes may be missing until the provider responds again.`
+          );
+        } else {
+          setProviderWarning(null);
         }
 
         setMailboxPolicy(pol);
@@ -926,6 +935,23 @@ const Mailapp = () => {
 
   loadMoreThreadsRef.current = loadMoreThreads;
 
+  const retryLoadThreadDetail = useCallback(() => {
+    if (!selectedAccountId || !selectedThreadId) return;
+    setDetailError(null);
+    setLoadingDetail(true);
+    emailApi
+      .getThread(selectedAccountId, selectedThreadId, mailProvider)
+      .then((data) => {
+        setThreadMessages(data.messages);
+        setDetailError(null);
+      })
+      .catch(() => {
+        setThreadMessages([]);
+        setDetailError("We couldn't load this conversation.");
+      })
+      .finally(() => setLoadingDetail(false));
+  }, [selectedAccountId, selectedThreadId, mailProvider]);
+
   useEffect(() => {
     if (!selectedAccountId || !selectedThreadId) {
       setThreadMessages([]);
@@ -934,13 +960,20 @@ const Mailapp = () => {
     const tid = selectedThreadId;
     let cancelled = false;
     setLoadingDetail(true);
+    setDetailError(null);
     emailApi
       .getThread(selectedAccountId, tid, mailProvider)
       .then((data) => {
-        if (!cancelled && selectedThreadId === tid) setThreadMessages(data.messages);
+        if (!cancelled && selectedThreadId === tid) {
+          setThreadMessages(data.messages);
+          setDetailError(null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setThreadMessages([]);
+        if (!cancelled) {
+          setThreadMessages([]);
+          setDetailError("We couldn't load this conversation.");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingDetail(false);
@@ -1233,7 +1266,7 @@ const Mailapp = () => {
   }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
 
   const attachOriginalAttachments = useCallback(
-    async (msg: EmailMessage) => {
+    async (msg: EmailMessage, generation: number) => {
       const source = (msg.attachments || []).filter((a) => a.attachmentId);
       if (!selectedAccountId || source.length === 0) return;
       setAttachmentsBusy(true);
@@ -1241,6 +1274,10 @@ const Mailapp = () => {
       const failed: string[] = [];
       let budget = composeAttachmentLimitBytes;
       for (const att of source) {
+        if (generation !== forwardAttachGenerationRef.current) {
+          setAttachmentsBusy(false);
+          return;
+        }
         if (att.size > budget) {
           failed.push(`${att.filename} (too large to include)`);
           continue;
@@ -1264,7 +1301,13 @@ const Mailapp = () => {
           failed.push(att.filename);
         }
       }
-      // Only add to the compose still on screen; the user may have closed it.
+      const stillForwardForThisMessage =
+        generation === forwardAttachGenerationRef.current &&
+        composeMessageRef.current?.id === msg.id;
+      if (!stillForwardForThisMessage) {
+        setAttachmentsBusy(false);
+        return;
+      }
       setComposeAttachments((prev) => {
         const have = new Set(prev.map((a) => a.id));
         return [...prev, ...loaded.filter((a) => !have.has(a.id))];
@@ -1285,6 +1328,7 @@ const Mailapp = () => {
         showError("You do not have permission to send email.");
         return;
       }
+      forwardAttachGenerationRef.current += 1;
       composeMessageRef.current = msg ?? null;
       setComposeMode(mode);
       setShowComposeTemplatesMenu(false);
@@ -1370,7 +1414,7 @@ const Mailapp = () => {
       if (mode === "forward") {
         // Fire and forget: the modal is already open and shows a busy state on the
         // attach control while the original's files are pulled in.
-        void attachOriginalAttachments(msg);
+        void attachOriginalAttachments(msg, forwardAttachGenerationRef.current);
       }
     },
     [
@@ -1424,6 +1468,7 @@ const Mailapp = () => {
   }, [composeHtml, composeSubject, composeTo, composeCc, composeBcc, composeAttachments]);
 
   const closeCompose = useCallback(() => {
+    forwardAttachGenerationRef.current += 1;
     setShowComposeModal(false);
     composeMessageRef.current = null;
     setShowComposeAiPanel(false);
@@ -2425,7 +2470,19 @@ const Mailapp = () => {
             </div>
           </div>
         ) : (
-          <div className={`main-mail-container !p-2 gap-x-2 flex min-h-0 ${mailStyles.shell} ${mailStyles.fadeIn}`}>
+          <div className={`main-mail-container !p-2 gap-y-2 flex flex-col min-h-0 ${mailStyles.shell} ${mailStyles.fadeIn}`}>
+            {providerWarning ? (
+              <div
+                className="w-full shrink-0 rounded-lg border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-[0.8125rem] text-amber-950 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-100"
+                role="alert"
+              >
+                <div className="flex items-start gap-2">
+                  <i className="ri-cloud-off-line mt-0.5 shrink-0" aria-hidden />
+                  <p className="mb-0">{providerWarning}</p>
+                </div>
+              </div>
+            ) : null}
+            <div className="flex gap-x-2 min-h-0 flex-1 min-w-0">
             <div
               // !flex, not !block: the SCSS lays this column out with flex, and
               // display:block !important silently disabled that.
@@ -3109,6 +3166,22 @@ const Mailapp = () => {
                   <div className={`w-48 h-3 ${mailStyles.skeleton}`} />
                   <div className={`w-full max-w-md h-32 ${mailStyles.skeleton}`} />
                 </div>
+              ) : detailError ? (
+                <div className="flex flex-col items-center justify-center py-24 px-6 text-center" role="alert">
+                  <i className="ri-wifi-off-line text-3xl mb-3 text-danger/60" aria-hidden />
+                  <p className="text-stone-700 dark:text-stone-200 mb-1">{detailError}</p>
+                  <p className="text-stone-500 dark:text-stone-400 text-[0.75rem] mb-4 max-w-sm">
+                    This is a loading problem, not an empty thread.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={retryLoadThreadDetail}
+                    className="ti-btn ti-btn-sm ti-btn-light !mb-0"
+                  >
+                    <i className="ri-refresh-line me-1 align-middle" aria-hidden />
+                    Try again
+                  </button>
+                </div>
               ) : (
                 <>
                   <div
@@ -3739,6 +3812,7 @@ const Mailapp = () => {
                   </div>
                 ))}
               </div>
+            </div>
             </div>
           </div>
         )}
