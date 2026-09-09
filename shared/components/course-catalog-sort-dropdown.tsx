@@ -34,7 +34,7 @@ export default function CourseCatalogSortDropdown({
   onSortChange,
 }: CourseCatalogSortDropdownProps) {
   return (
-    <div className="relative shrink-0 z-[102] overflow-visible">
+    <div className={`relative shrink-0 overflow-visible${open ? " z-20" : ""}`}>
       <button
         type="button"
         aria-haspopup="listbox"

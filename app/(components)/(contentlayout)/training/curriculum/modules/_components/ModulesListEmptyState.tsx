@@ -60,7 +60,7 @@ export function ModulesListEmptyState({
       {copy.showCreate ? (
         <Link
           href="/training/curriculum/modules/create"
-          className="ti-btn ti-btn-sm ti-btn-primary-full !mb-0 mt-3"
+          className="ti-btn ti-btn-primary-full !mb-0 !w-auto !h-9 !px-3 mt-3 inline-flex items-center"
         >
           Create module
         </Link>

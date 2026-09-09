@@ -251,7 +251,7 @@ export default function ModuleRowActions({
         ref={buttonRef}
         type="button"
         id={`dropdown-menu-${moduleId}`}
-        className="ti-btn ti-btn-sm ti-btn-light !mb-0 !px-1.5 !py-1 min-h-8 min-w-8"
+        className="ti-btn ti-btn-sm ti-btn-light !mb-0 !px-0 !py-0 !w-8 !h-8 inline-flex items-center justify-center"
         aria-expanded={open}
         aria-haspopup="menu"
         aria-controls={open ? menuId : undefined}

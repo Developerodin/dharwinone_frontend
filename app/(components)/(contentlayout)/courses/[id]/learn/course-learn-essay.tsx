@@ -217,11 +217,11 @@ export function EssayRenderer({
           </div>
         )}
         {essayResults && (
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button type="button" className="ti-btn ti-btn-outline-primary min-h-11" onClick={() => setShowResponses((v) => !v)}>
               {showResponses ? "Hide responses" : "View your responses"}
             </button>
-            <button type="button" className={LEARN_RECT_PRIMARY} onClick={handleRetake}>Retake Q&A</button>
+            <button type="button" className="ti-btn ti-btn-primary min-h-11" onClick={handleRetake}>Retake Q&A</button>
           </div>
         )}
         {essayResults && showResponses && (

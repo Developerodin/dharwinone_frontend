@@ -191,13 +191,13 @@ function ModuleDraftActions({
     <div className="mt-3 flex items-center gap-1.5">
       <Link
         href={`/training/curriculum/modules/edit?id=${moduleId}`}
-        className="ti-btn ti-btn-sm ti-btn-light !mb-0 flex-1 justify-center !px-2.5 min-h-9"
+        className="ti-btn ti-btn-light !mb-0 !w-auto !h-9 flex-1 justify-center !px-2.5 whitespace-nowrap inline-flex items-center"
       >
         Edit
       </Link>
       <button
         type="button"
-        className="ti-btn ti-btn-sm ti-btn-primary-full !mb-0 flex-1 justify-center !px-2.5 min-h-9"
+        className="ti-btn ti-btn-primary-full !mb-0 !w-auto !h-9 flex-1 justify-center !px-2.5 whitespace-nowrap inline-flex items-center"
         disabled={statusBusy}
         onClick={onPublish}
       >
