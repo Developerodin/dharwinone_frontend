@@ -168,7 +168,7 @@
   border-color: rgb(180 83 9 / 0.35);
 }
 
-:global(.mail-html-body) img[data-remote-image="blocked"] {
+.mailRoot :global(.mail-html-body) img[data-remote-image="blocked"] {
   display: inline-block;
   min-width: 3rem;
   min-height: 2rem;
@@ -176,7 +176,7 @@
   border-radius: 0.25rem;
 }
 
-:global(.dark .mail-html-body) img[data-remote-image="blocked"] {
+.mailRoot :global(.dark .mail-html-body) img[data-remote-image="blocked"] {
   background: rgb(68 64 60 / 0.65);
 }
 
