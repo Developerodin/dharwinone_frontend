@@ -26,6 +26,8 @@ import { buildReplyAllRecipients } from "@/shared/lib/email-recipient-utils";
 import { hasEmailManageAccess, hasEmailReadAccess } from "@/shared/lib/permissions";
 import { buildMailQuery } from "@/shared/lib/mailQuery";
 import { escapeHtmlForTextNode, sanitizeRichHtml } from "@/shared/lib/sanitize-html";
+import { cleanHtmlForSend } from "./_utils/composeHtml";
+import { parseQuickRecipients } from "./_utils/quickRecipients";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
 
@@ -135,25 +137,6 @@ function formatMailListDate(iso: string | null | undefined): string {
     day: "numeric",
     ...(sameYear ? {} : { year: "numeric" }),
   });
-}
-
-/** Clean Tiptap HTML before send: unescape entities, remove empty paragraphs, trim. */
-function cleanHtmlForSend(html: string): string {
-  if (!html?.trim()) return "<p></p>";
-  let cleaned = html;
-  // Unescape HTML entities so we send raw HTML, not &lt;p&gt;text&lt;/p&gt;
-  cleaned = cleaned
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&");
-  cleaned = cleaned
-    .replace(/<p>\s*<br\s*\/?>\s*<\/p>/gi, "")
-    .replace(/<p>\s*<\/p>/g, "")
-    .replace(/\s*$/, "")
-    .trim();
-  return cleaned || "<p></p>";
 }
 
 function emailToDisplayName(email: string): string {
@@ -400,9 +383,9 @@ const Mailapp = () => {
   const [quickRecipients, setQuickRecipients] = useState<{ email: string }[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const stored = localStorage.getItem("email-quick-recipients");
-      return stored ? JSON.parse(stored) : [];
+      return parseQuickRecipients(localStorage.getItem("email-quick-recipients"));
     } catch {
+      // localStorage itself can throw (private mode, blocked site data).
       return [];
     }
   });
@@ -962,7 +945,6 @@ const Mailapp = () => {
 
   const openCompose = useCallback(
     (mode: ComposeMode, msg?: EmailMessage) => {
-      console.log("[Email] openCompose:", { mode, msgId: msg?.id });
       composeMessageRef.current = msg ?? null;
       setComposeMode(mode);
       setShowComposeTemplatesMenu(false);
