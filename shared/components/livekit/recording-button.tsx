@@ -3,21 +3,87 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRoomContext } from "@livekit/components-react";
-import * as livekitApi from "@/shared/lib/api/livekit";
+import {
+  fetchRecordingStatus,
+  recordingApiError,
+  startRoomRecording,
+  stopRoomRecording,
+} from "./recording-api";
 import {
   reconcileRecordingState,
   IDLE_RECORDING_STATE,
+  START_GRACE_MS,
   type RecordingUiState,
 } from "./recording-state";
+import { isRecordingActive } from "./recording-status";
 
 interface RecordingButtonProps {
   roomName: string;
   hostEmail?: string;
   controlBar?: boolean;
+  requireStartConfirm?: boolean;
   onRecordingStarted?: () => void;
+  onRecordingStopped?: () => void;
 }
 
-export function RecordingButton({ roomName, hostEmail, controlBar = false, onRecordingStarted }: RecordingButtonProps) {
+export type RecordingNoticeKind = "started" | "stopped";
+
+/** Shared Obsidian-style toast for recording start/stop notices. */
+export function RecordingNoticeToast({
+  kind,
+  visible,
+}: {
+  kind: RecordingNoticeKind;
+  visible: boolean;
+}) {
+  if (!visible) return null;
+
+  const isStarted = kind === "started";
+  const message = isStarted
+    ? "Recording in progress"
+    : "Recording saved — processing, available in Recordings shortly";
+
+  return (
+    <div
+      className="fixed top-4 left-1/2 -translate-x-1/2 z-[2000] flex items-center gap-2 px-4 py-2.5 rounded-full"
+      style={{
+        background: "rgba(11,13,14,0.82)",
+        backdropFilter: "blur(20px) saturate(140%)",
+        WebkitBackdropFilter: "blur(20px) saturate(140%)",
+        border: "1px solid rgba(255,82,82,0.35)",
+        boxShadow: "0 12px 32px -8px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,82,82,0.15)",
+        color: "#fff",
+        fontFamily: "var(--obs-font-mono, ui-monospace, monospace)",
+        fontSize: "11px",
+        letterSpacing: "0.14em",
+        textTransform: "uppercase",
+        maxWidth: "min(420px, calc(100vw - 2rem))",
+      }}
+      role="status"
+      aria-live="polite"
+    >
+      <span
+        className="inline-block w-2 h-2 rounded-full"
+        style={{
+          background: isStarted ? "#ff5252" : "#34d399",
+          boxShadow: isStarted ? "0 0 10px #ff5252" : "0 0 10px #34d399",
+          animation: isStarted ? "obsPulse 1.4s ease-in-out infinite" : undefined,
+          flexShrink: 0,
+        }}
+      />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+export function RecordingButton({
+  roomName,
+  hostEmail,
+  controlBar = false,
+  requireStartConfirm = false,
+  onRecordingStarted,
+  onRecordingStopped,
+}: RecordingButtonProps) {
   useRoomContext();
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,32 +92,32 @@ export function RecordingButton({ roomName, hostEmail, controlBar = false, onRec
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
-  // Source of truth for the poll reducer. The 5s interval closure can't see the
-  // latest React state, so it reads/writes this ref; applyState mirrors it to state.
+  const [showStartConfirm, setShowStartConfirm] = useState(false);
+  const [backendConfirmed, setBackendConfirmed] = useState(false);
+  const [liveAnnouncement, setLiveAnnouncement] = useState("");
   const stateRef = useRef<RecordingUiState>(IDLE_RECORDING_STATE);
 
-  const applyState = (next: RecordingUiState) => {
+  const applyState = (next: RecordingUiState, fromBackend = false) => {
     stateRef.current = next;
     setIsRecording(next.isRecording);
     setEgressId(next.egressId);
     setRecordingStartTime(next.startTime);
+    if (fromBackend && next.isRecording) {
+      setBackendConfirmed(true);
+    }
+    if (!next.isRecording) {
+      setBackendConfirmed(false);
+    }
   };
 
-  const getStatus = () =>
-    hostEmail
-      ? livekitApi.getRecordingStatusPublic(roomName)
-      : livekitApi.getRecordingStatus(roomName);
+  const getStatus = () => fetchRecordingStatus(roomName, Boolean(hostEmail));
 
   useEffect(() => {
     const checkStatus = async () => {
       try {
         const data = await getStatus();
-        applyState(reconcileRecordingState(stateRef.current, data, Date.now()));
+        applyState(reconcileRecordingState(stateRef.current, data, Date.now()), isRecordingActive(data));
       } catch (err) {
-        // Non-critical 5s poll: a transient blip (backend reload, momentary network
-        // drop) must not reset state or fire a console.error that pops the Next dev
-        // error overlay. Keep the last known state and retry next tick. Genuine
-        // recording failures surface via the start/stop handlers' visible error UI.
         console.debug("Recording status poll skipped (transient):", err);
       }
     };
@@ -77,6 +143,12 @@ export function RecordingButton({ roomName, hostEmail, controlBar = false, onRec
     return () => clearInterval(interval);
   }, [isRecording, recordingStartTime]);
 
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 5000);
+    return () => clearTimeout(t);
+  }, [error]);
+
   const formatDuration = (totalSeconds: number) => {
     const sec = Number.isFinite(totalSeconds) ? Math.max(0, Math.floor(totalSeconds)) : 0;
     const m = Math.floor(sec / 60);
@@ -84,18 +156,26 @@ export function RecordingButton({ roomName, hostEmail, controlBar = false, onRec
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
+  const withinStartGrace =
+    isRecording &&
+    recordingStartTime != null &&
+    Date.now() - recordingStartTime < START_GRACE_MS;
+  const isStarting = isLoading || (withinStartGrace && !backendConfirmed);
+
   const handleStartRecording = async () => {
+    setShowStartConfirm(false);
     setIsLoading(true);
     setError(null);
+    setLiveAnnouncement("Starting recording");
     try {
-      const data = hostEmail
-        ? await livekitApi.startRecordingPublic(roomName, hostEmail)
-        : await livekitApi.startRecording(roomName);
+      const data = await startRoomRecording(roomName, hostEmail);
       applyState({ isRecording: true, egressId: data.egressId, startTime: Date.now(), missCount: 0 });
+      setLiveAnnouncement("Recording started");
       onRecordingStarted?.();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(e?.response?.data?.message || e?.message || "Failed to start recording");
+      const msg = recordingApiError(err, "Failed to start recording");
+      setError(msg);
+      setLiveAnnouncement(msg);
     } finally {
       setIsLoading(false);
     }
@@ -103,22 +183,23 @@ export function RecordingButton({ roomName, hostEmail, controlBar = false, onRec
 
   const handleStopRecording = async () => {
     if (!egressId) {
-      setError("No active recording found");
+      const msg = "No active recording found";
+      setError(msg);
+      setLiveAnnouncement(msg);
       return;
     }
     setShowStopConfirm(false);
     setIsLoading(true);
     setError(null);
     try {
-      if (hostEmail) {
-        await livekitApi.stopRecordingPublic(egressId, roomName, hostEmail);
-      } else {
-        await livekitApi.stopRecording(egressId, roomName);
-      }
+      await stopRoomRecording(egressId, roomName, hostEmail);
       applyState(IDLE_RECORDING_STATE);
+      setLiveAnnouncement("Recording stopped");
+      onRecordingStopped?.();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } }; message?: string };
-      setError(e?.response?.data?.message || e?.message || "Failed to stop recording");
+      const msg = recordingApiError(err, "Failed to stop recording");
+      setError(msg);
+      setLiveAnnouncement(msg);
     } finally {
       setIsLoading(false);
     }
@@ -127,41 +208,135 @@ export function RecordingButton({ roomName, hostEmail, controlBar = false, onRec
   const handleToggleRecording = () => {
     if (isRecording) {
       setShowStopConfirm(true);
+    } else if (requireStartConfirm) {
+      setShowStartConfirm(true);
     } else {
-      handleStartRecording();
+      void handleStartRecording();
     }
   };
 
-  const recordIcon = (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="8" />
+  const recordIdleIcon = (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden
+      style={{ flexShrink: 0 }}
+    >
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
     </svg>
   );
 
-  const buttonContent = (
+  const recordActiveDot = (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-block",
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        backgroundColor: controlBar ? "#f87171" : "#fff",
+        flexShrink: 0,
+        animation: "pulse 2s infinite",
+      }}
+    />
+  );
+
+  const buttonContent = isStarting ? (
+    <span className="lk-recording-action-label">Starting…</span>
+  ) : isRecording ? (
     <>
-      {isRecording ? (
+      {recordActiveDot}
+      {controlBar ? (
         <>
-          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", backgroundColor: controlBar ? "#f87171" : "#fff", flexShrink: 0, animation: "pulse 2s infinite" }} />
-          {controlBar && (
-            <span className="lk-recording-timer-label" style={{ fontSize: "0.75rem", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>
-              REC {formatDuration(elapsedSeconds)}
-            </span>
-          )}
-          {!controlBar && <span>Stop Recording</span>}
+          <span
+            className="lk-recording-timer-label"
+            style={{ fontSize: "0.75rem", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}
+          >
+            REC {formatDuration(elapsedSeconds)}
+          </span>
+          <span
+            className="lk-recording-timer-compact"
+            style={{ fontSize: "0.75rem", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}
+          >
+            ● {formatDuration(elapsedSeconds)}
+          </span>
         </>
       ) : (
-        <>
-          {recordIcon}
-          {!controlBar && <span>Record</span>}
-        </>
+        <span>Stop Recording</span>
       )}
     </>
+  ) : (
+    <>
+      {recordIdleIcon}
+      <span className="lk-recording-action-label">Record</span>
+    </>
+  );
+
+  const errorToast =
+    error &&
+    createPortal(
+      <div
+        role="alert"
+        aria-live="assertive"
+        style={{
+          position: "fixed",
+          top: "4.5rem",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 2500,
+          maxWidth: "min(420px, calc(100vw - 2rem))",
+          padding: "0.75rem 1rem",
+          background: "rgba(127,29,29,0.95)",
+          border: "1px solid rgba(248,113,113,0.4)",
+          borderRadius: "12px",
+          color: "#fecaca",
+          fontSize: "0.8125rem",
+          fontWeight: 500,
+          boxShadow: "0 12px 32px -8px rgba(0,0,0,0.6)",
+        }}
+      >
+        {error}
+      </div>,
+      document.body
+    );
+
+  const toggleLabel = isRecording ? "Stop Recording" : "Start Recording";
+
+  const confirmDialogs = (
+    <>
+      <RecordingConfirmDialog
+        variant="start"
+        open={showStartConfirm}
+        loading={isLoading}
+        onCancel={() => setShowStartConfirm(false)}
+        onConfirm={() => void handleStartRecording()}
+      />
+      <RecordingConfirmDialog
+        variant="stop"
+        open={showStopConfirm}
+        loading={isLoading}
+        onCancel={() => setShowStopConfirm(false)}
+        onConfirm={() => void handleStopRecording()}
+      />
+    </>
+  );
+
+  const liveRegion = (
+    <span className="sr-only" aria-live="polite" aria-atomic="true">
+      {liveAnnouncement}
+    </span>
   );
 
   if (controlBar) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+        {liveRegion}
         <button
           type="button"
           onClick={handleToggleRecording}
@@ -182,45 +357,34 @@ export function RecordingButton({ roomName, hostEmail, controlBar = false, onRec
             fontSize: "inherit",
             lineHeight: "inherit",
           }}
-          title={isRecording ? "Stop Recording" : "Start Recording"}
-          aria-label={isRecording ? "Stop Recording" : "Start Recording"}
+          title={toggleLabel}
+          aria-label={toggleLabel}
+          aria-pressed={isRecording}
         >
           {buttonContent}
         </button>
-        {error && (
-          <span style={{ color: "#f87171", fontSize: "0.75rem", maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={error}>
-            {error}
-          </span>
-        )}
-        <StopRecordingDialog
-          open={showStopConfirm}
-          loading={isLoading}
-          onCancel={() => setShowStopConfirm(false)}
-          onConfirm={handleStopRecording}
-        />
+        {errorToast}
+        {confirmDialogs}
       </div>
     );
   }
 
   return (
     <div className="recording-control">
+      {liveRegion}
       <button
         type="button"
         onClick={handleToggleRecording}
         disabled={isLoading}
         className={`ti-btn inline-flex items-center gap-2 ${isRecording ? "ti-btn-danger" : "ti-btn-primary"} ${isLoading ? "opacity-60" : ""}`}
-        title={isRecording ? "Stop Recording" : "Start Recording"}
+        title={toggleLabel}
+        aria-pressed={isRecording}
       >
         {buttonContent}
       </button>
-      <StopRecordingDialog
-        open={showStopConfirm}
-        loading={isLoading}
-        onCancel={() => setShowStopConfirm(false)}
-        onConfirm={handleStopRecording}
-      />
+      {confirmDialogs}
       {error && (
-        <div className="mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-300 text-xs">
+        <div className="mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg text-red-300 text-xs" role="alert">
           {error}
         </div>
       )}
@@ -228,28 +392,40 @@ export function RecordingButton({ roomName, hostEmail, controlBar = false, onRec
   );
 }
 
-/**
- * Stop-recording confirmation. Portaled to document.body so it escapes
- * the control-bar's `backdrop-filter` containing block (which would otherwise
- * anchor `position: fixed` to the bar instead of the viewport, parking the
- * dialog at the bottom of the screen).
- */
-function StopRecordingDialog({
+function RecordingConfirmDialog({
+  variant,
   open,
   loading,
   onCancel,
   onConfirm,
 }: {
+  variant: "start" | "stop";
   open: boolean;
   loading: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   if (!open || typeof document === "undefined") return null;
+
+  const isStart = variant === "start";
+  const title = isStart ? "Begin recording?" : "Stop the recording?";
+  const body = isStart
+    ? "Notify all participants and begin recording?"
+    : "The file will be saved and added to the recordings list. You can start a new recording at any time.";
+  let confirmLabel: string;
+  if (loading) {
+    confirmLabel = isStart ? "Starting…" : "Stopping…";
+  } else {
+    confirmLabel = isStart ? "Start recording" : "Stop recording";
+  }
+  const cancelLabel = isStart ? "Not now" : "Keep recording";
+  const badge = isStart ? "RECORDING" : "RECORDING ACTIVE";
+
   return createPortal(
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby={`recording-confirm-title-${variant}`}
       style={{
         position: "fixed",
         inset: 0,
@@ -306,9 +482,10 @@ function StopRecordingDialog({
               animation: "obsPulse 1.4s ease-in-out infinite",
             }}
           />
-          RECORDING ACTIVE
+          {badge}
         </div>
         <h3
+          id={`recording-confirm-title-${variant}`}
           style={{
             fontFamily: "var(--obs-font-display, 'Fraunces', serif)",
             fontSize: "1.6rem",
@@ -318,11 +495,9 @@ function StopRecordingDialog({
             lineHeight: 1.1,
           }}
         >
-          Stop the recording?
+          {title}
         </h3>
-        <p style={{ fontSize: "13px", color: "#a8acb1", lineHeight: 1.55, margin: "0 0 1.5rem" }}>
-          The file will be saved and added to the recordings list. You can start a new recording at any time.
-        </p>
+        <p style={{ fontSize: "13px", color: "#a8acb1", lineHeight: 1.55, margin: "0 0 1.5rem" }}>{body}</p>
         <div style={{ display: "flex", gap: "0.6rem", justifyContent: "flex-end" }}>
           <button
             type="button"
@@ -340,7 +515,7 @@ function StopRecordingDialog({
               letterSpacing: "-0.005em",
             }}
           >
-            Keep recording
+            {cancelLabel}
           </button>
           <button
             type="button"
@@ -363,12 +538,15 @@ function StopRecordingDialog({
               opacity: loading ? 0.6 : 1,
             }}
           >
-            {loading ? "Stopping…" : "Stop recording"}
+            {confirmLabel}
           </button>
         </div>
       </div>
       <style>{`
         @keyframes obsFade { from { opacity: 0; } to { opacity: 1; } }
+        @media (prefers-reduced-motion: reduce) {
+          [style*="obsPulse"] { animation: none !important; }
+        }
       `}</style>
     </div>,
     document.body

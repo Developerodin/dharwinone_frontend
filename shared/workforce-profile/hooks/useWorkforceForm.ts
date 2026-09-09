@@ -186,6 +186,7 @@ export function useWorkforceForm(
       submitAttempted,
 
       validationOverlay,
+      dismissValidationOverlay: dismiss,
       submit,
       goNext,
     }),
@@ -210,6 +211,7 @@ export function useWorkforceForm(
       validation.issuesBySection,
       submitAttempted,
       validationOverlay,
+      dismiss,
       submit,
       goNext,
     ],

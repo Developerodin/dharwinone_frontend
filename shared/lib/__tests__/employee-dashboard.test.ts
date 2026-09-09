@@ -177,6 +177,17 @@ describe("monthStripDays", () => {
   it("returns an empty array for no records", () => {
     expect(monthStripDays([], NOW)).toEqual([]);
   });
+  it("aggregates multiple records on the same day into one bar", () => {
+    const recs = [
+      { date: "2026-08-18", duration: 120, status: "Present" },
+      { date: "2026-08-18", duration: 60, status: "Present" },
+      { date: "2026-08-03", duration: 180, status: "Present" },
+    ] as unknown as AttendanceRecord[];
+    const out = monthStripDays(recs, NOW);
+    expect(out.map((d) => d.date)).toEqual(["2026-08-03", "2026-08-18"]);
+    expect(out[1].hours).toBe(3);
+    expect(out[1].kind).toBe("today");
+  });
 });
 
 describe("meetings", () => {

@@ -121,6 +121,33 @@
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
+}
+
+.versionPicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(280px, 42vw);
+}
+
+.versionPickerLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.versionPicker .select {
+  min-width: 0;
+  max-width: 220px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #334155;
 }
 
 .btn {
@@ -428,6 +455,24 @@
   border-color: rgba(245, 158, 11, 0.32);
   background: rgba(245, 158, 11, 0.14);
   color: #b45309;
+}
+
+.freelancePayGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.freelancePayOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
 }
 
 .input,
@@ -1373,6 +1418,16 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
+  }
+
+  .topbarActions .versionPicker {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+
+  .topbarActions .versionPicker .select {
+    max-width: none;
+    flex: 1;
   }
 
   .topbarActions .btn {

@@ -1,17 +1,18 @@
 "use client"
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import Select, { Props as SelectProps } from 'react-select';
 import { Selectoption4 } from '@/shared/data/pages/candidates/skillsdata';
 import { createCandidate, updateCandidate, updateMyCandidate, uploadDocuments, importCandidatesFromExcel } from "@/shared/lib/api/candidates";
 import { listDepartments, type Department } from "@/shared/lib/api/departments";
 import { resolveDownloadUrlForBrowser } from "@/shared/lib/api/client";
 import { resolveEmployeeJobTitle } from "@/shared/lib/employee-job-title";
+import { EMPLOYMENT_TYPE_OPTIONS } from "@/shared/schemas/employeeFilter.generated";
 import { getPhoneCountry, getPhoneValidationError, parseStoredPhone } from "@/shared/lib/phoneCountries";
 import { PhoneCountrySelect } from "@/shared/components/PhoneCountrySelect";
 import Swal from "sweetalert2";
 import { useRouter } from "next/navigation";
 import { ROUTES } from "@/shared/lib/constants";
-import { useEffect } from "react";
 import { useAuth } from "@/shared/contexts/auth-context";
 import { hasPermission } from "@/shared/lib/permissions";
 import { isCandidatePersona } from "@/shared/lib/persona";
@@ -27,6 +28,28 @@ import {
   validateSocialLinkRows,
 } from "@/shared/lib/socialLinks";
 import { ProfilePhotoUploader } from "@/shared/workforce-profile";
+import { YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
+import { formatYmdLocal } from "@/shared/lib/leave-date-range";
+
+const PASSWORD_MIN_LENGTH = 8;
+
+const REMOVE_ROW_BTN_CLASS =
+  "absolute top-2 right-2 flex h-11 w-11 items-center justify-center border rounded-full text-red-500 hover:text-white hover:bg-red-600";
+const ADD_ROW_BTN_CLASS =
+  "ti-btn bg-primary text-white !py-2 !px-4 !text-[0.875rem] min-h-[44px] min-w-[44px] inline-flex items-center justify-center";
+
+function FieldError({ message, className = "text-red-500 text-sm mt-1" }: { message?: string; className?: string }) {
+  if (!message) return null;
+  return <div className={className} role="alert">{message}</div>;
+}
+
+function resolveInitialDepartmentId(data: {
+  departmentId?: unknown;
+  department?: { id?: string; _id?: string };
+}): string {
+  const raw = data.departmentId ?? data.department?.id ?? data.department?._id ?? "";
+  return String(raw || "");
+}
 
 function normalizeExcelHeader(h: string) {
   return (h || "").toString().trim().toLowerCase().replace(/\s+/g, "");
@@ -157,27 +180,68 @@ const Wizard = ({
   step: currentIndex,
   onChange,
   onSubmit,
+  onBeforeStepChange,
   children,
   showSaveOnEveryStep = false,
   submitLabel = "Submit",
   submitting = false,
+  stepValidationErrors = {} as { [key: number]: string[] },
+  validationSummaryRef,
+  cancelHref,
 }: any) => {
   const steps = React.Children.toArray(children) as React.ReactElement[];
   const prevStep = currentIndex !== 0 && (steps[currentIndex - 1] as any).props;
-  const nextStep = currentIndex !== steps.length - 1 && (steps[currentIndex + 1] as any).props;
+  const stepTabId = (index: number) => `employee-wizard-tab-${index}`;
+  const stepPanelId = (index: number) => `employee-wizard-panel-${index}`;
 
-  // Free navigation: no per-step validation gating. Validation runs only at submit.
-  const handleNext = () => onChange(currentIndex + 1);
-  const handleStepClick = (targetStep: number) => onChange(targetStep);
+  const flattenedStepErrors = Object.entries(stepValidationErrors).flatMap(([stepIdx, errs]) =>
+    (errs as string[]).map((msg) => ({ step: Number(stepIdx), msg }))
+  );
+
+  const handleNext = () => {
+    const next = currentIndex + 1;
+    if (onBeforeStepChange && !onBeforeStepChange(currentIndex, next)) return;
+    onChange(next);
+  };
+
+  const handleStepClick = (targetStep: number) => {
+    if (targetStep === currentIndex) return;
+    if (targetStep > currentIndex && onBeforeStepChange && !onBeforeStepChange(currentIndex, targetStep)) {
+      return;
+    }
+    onChange(targetStep);
+  };
 
   return (
     <div>
-      <nav className="btn-group steps basicsteps">
+      {flattenedStepErrors.length > 0 ? (
+        <div
+          ref={validationSummaryRef}
+          className="mx-3 mt-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-3"
+          role="alert"
+          aria-live="polite"
+          tabIndex={-1}
+        >
+          <p className="font-semibold text-danger mb-2">Please fix the following:</p>
+          <ul className="list-disc ps-5 text-sm text-danger space-y-1">
+            {flattenedStepErrors.map(({ step, msg }, i) => (
+              <li key={`${step}-${i}`}>{msg}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <nav className="btn-group steps basicsteps" role="tablist" aria-label="Employee form steps">
         {steps.map((step: any, index: number) => {
           const isActive = index === currentIndex;
           return (
             <Button
               key={index}
+              role="tab"
+              id={stepTabId(index)}
+              aria-selected={isActive}
+              aria-current={isActive ? "step" : undefined}
+              aria-controls={stepPanelId(index)}
               onClick={() => handleStepClick(index)}
               className={getClsNavBtn(isActive, false)}
             >
@@ -187,19 +251,30 @@ const Wizard = ({
         })}
       </nav>
 
-      {steps[currentIndex]}
+      <div
+        role="tabpanel"
+        id={stepPanelId(currentIndex)}
+        aria-labelledby={stepTabId(currentIndex)}
+      >
+        {steps[currentIndex]}
+      </div>
 
       <div className="p-3 flex items-center justify-between gap-3 border-t border-dashed border-defaultborder dark:border-defaultborder/10">
-        <div className="flex">
+        <div className="flex gap-2">
           {prevStep ? (
             <Button onClick={() => onChange(currentIndex - 1)}>
               Back
             </Button>
           ) : null}
+          {cancelHref ? (
+            <Link href={cancelHref} className="ti-btn ti-btn-secondary inline-flex items-center">
+              Cancel
+            </Link>
+          ) : null}
         </div>
 
         <div className="flex ml-auto gap-2">
-          {showSaveOnEveryStep ? (
+          {showSaveOnEveryStep || currentIndex === steps.length - 1 ? (
             <button
               type="button"
               onClick={onSubmit}
@@ -209,20 +284,7 @@ const Wizard = ({
               {submitting ? "Saving..." : submitLabel}
             </button>
           ) : null}
-          {!showSaveOnEveryStep && currentIndex === steps.length - 1 ? (
-            <button
-              type="button"
-              onClick={onSubmit}
-              disabled={submitting}
-              className="ti-btn bg-green-600 text-white !py-2 !px-4 !rounded-md disabled:opacity-50"
-            >
-              {submitting ? "Saving..." : submitLabel}
-            </button>
-          ) : !showSaveOnEveryStep ? (
-            <Button onClick={handleNext}>
-              Next
-            </Button>
-          ) : currentIndex !== steps.length - 1 ? (
+          {currentIndex !== steps.length - 1 ? (
             <Button onClick={handleNext}>
               Next
             </Button>
@@ -528,14 +590,14 @@ export const EmployeeForm = ({
   }, [initialData, router, auth.permissionsLoaded, auth.user, canManageEmployees]);
 
   useEffect(() => {
-    if (!canManageEmployees || !initialData) return;
+    if (!canManageEmployees) return;
     listDepartments()
       .then((rows) => setDepartments(rows.filter((d) => d.isActive !== false)))
       .catch(() => setDepartments([]));
-  }, [canManageEmployees, initialData]);
+  }, [canManageEmployees]);
 
   const [formData, setFormData] = useState({ 
-    fullName: "", email: "", phoneNumber: "", countryCode: "IN", shortBio: "", sevisId: "", ead: "", degree: "", designation: "", compensationType: "", supervisorName: "", supervisorContact: "", supervisorCountryCode: "IN", visaType: "", customVisaType: "", salaryRange: "", streetAddress: "", streetAddress2: "", city: "", state: "", zipCode: "", country: "", password: "",
+    fullName: "", email: "", phoneNumber: "", countryCode: "IN", shortBio: "", sevisId: "", ead: "", degree: "", designation: "", compensationType: "", employmentType: "", supervisorName: "", supervisorContact: "", supervisorCountryCode: "IN", visaType: "", customVisaType: "", salaryRange: "", streetAddress: "", streetAddress2: "", city: "", state: "", zipCode: "", country: "", password: "",
     companyAssignedEmail: "",
     companyEmailProvider: "" as "" | "gmail" | "outlook" | "unknown",
     departmentId: "",
@@ -701,6 +763,9 @@ export const EmployeeForm = ({
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const validationSummaryRef = useRef<HTMLDivElement>(null);
+  const employeesReturnUrl = employeesListReturnUrl?.trim() || "/ats/employees";
 
   // ------------------------------- Excel Import State -------------------------------
   const [excelImportMode, setExcelImportMode] = useState(!!initialExcelMode);
@@ -728,6 +793,40 @@ export const EmployeeForm = ({
   // ------------------------------- Validation State -------------------------------
   const [fieldErrors, setFieldErrors] = useState<{[key: string]: string}>({});
   const [stepValidationErrors, setStepValidationErrors] = useState<{[key: number]: string[]}>({});
+
+  const STEP_FIELD_ERROR_KEYS: Record<number, string[]> = {
+    0: [
+      "fullName",
+      "email",
+      "companyAssignedEmail",
+      "phoneNumber",
+      "visaType",
+      "customVisaType",
+      "streetAddress",
+      "city",
+      "state",
+      "zipCode",
+      "country",
+      "salaryRange",
+      "socialLinks",
+      "supervisorContact",
+      "password",
+    ],
+    1: ["education", "skills"],
+    2: ["experience"],
+    3: ["documents"],
+    4: ["salarySlips"],
+  };
+
+  useEffect(() => {
+    const hasErrors = Object.values(stepValidationErrors).some((errs) => errs.length > 0);
+    if (!hasErrors) return;
+    const frame = requestAnimationFrame(() => {
+      validationSummaryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      validationSummaryRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [stepValidationErrors]);
 
   // ------------------------------- Validation Functions -------------------------------
   const validateEmail = (email: string): boolean => {
@@ -775,6 +874,52 @@ export const EmployeeForm = ({
     }
     return years;
   };
+
+  const handleBeforeStepChange = (fromStep: number, toStep: number): boolean => {
+    if (toStep <= fromStep) return true;
+    for (let i = fromStep; i < toStep; i++) {
+      if (!validateStep(i)) {
+        setStep(i);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const confirmRemoveExistingItem = async (label: string, itemType: string) => {
+    const result = await Swal.fire({
+      icon: "warning",
+      title: `Remove ${itemType}?`,
+      text: `Remove "${label}" from this employee profile? This takes effect when you save.`,
+      showCancelButton: true,
+      confirmButtonText: "Remove",
+      cancelButtonText: "Cancel",
+    });
+    return result.isConfirmed;
+  };
+
+  const removeExistingAt = async <T,>(
+    items: T[],
+    index: number,
+    itemType: string,
+    getLabel: (item: T | undefined) => string,
+    setter: (next: T[]) => void
+  ) => {
+    if (!(await confirmRemoveExistingItem(getLabel(items[index]), itemType))) return;
+    setter(items.filter((_, i) => i !== index));
+  };
+
+  const handleRemoveExistingDoc = (index: number) =>
+    removeExistingAt(existingDocs, index, "document", (doc) => doc?.label || "this document", setExistingDocs);
+
+  const handleRemoveExistingSalarySlip = (index: number) =>
+    removeExistingAt(
+      existingSalarySlips,
+      index,
+      "salary slip",
+      (slip) => (slip ? `${slip.month} ${slip.year}` : "this salary slip"),
+      setExistingSalarySlips
+    );
 
   const validateStep = (stepIndex: number): boolean => {
     const errors: string[] = [];
@@ -873,6 +1018,12 @@ export const EmployeeForm = ({
         if (!initialData && !validateRequired(formData.password)) {
           errors.push('Password is required');
           newFieldErrors['password'] = 'Password is required';
+        } else if (!initialData && formData.password.length < PASSWORD_MIN_LENGTH) {
+          errors.push(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
+          newFieldErrors['password'] = `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`;
+        } else if (!initialData && (!/[A-Za-z]/.test(formData.password) || !/\d/.test(formData.password))) {
+          errors.push('Password must include at least one letter and one number.');
+          newFieldErrors['password'] = 'Password must include at least one letter and one number.';
         }
         break;
         
@@ -882,8 +1033,8 @@ export const EmployeeForm = ({
           validateRequired(edu.degree) && validateRequired(edu.institute) && validateRequired(edu.location) && validateRequired(edu.startYear) && validateRequired(edu.endYear)
         );
         if (validEducations.length === 0) {
-          errors.push('education required');
-          newFieldErrors['education'] = 'education required';
+          errors.push('At least one education entry is required.');
+          newFieldErrors['education'] = 'At least one education entry is required.';
         }
         // Validate year ranges for all educations
         const invalidYearRanges = educations.filter(edu => 
@@ -895,8 +1046,8 @@ export const EmployeeForm = ({
         }
         const validSkills = skills.filter(skill => validateRequired(skill.name));
         if (validSkills.length === 0) {
-          errors.push('skill is required');
-          newFieldErrors['skills'] = 'skill is required';
+          errors.push('At least one skill is required.');
+          newFieldErrors['skills'] = 'At least one skill is required.';
         }
         break;
         
@@ -907,8 +1058,8 @@ export const EmployeeForm = ({
           (exp.currentlyWorking || validateRequired(exp.endDate))
         );
         if (validExperiences.length === 0) {
-          errors.push('work experience required');
-          newFieldErrors['experience'] = 'work experience required';
+          errors.push('At least one work experience entry is required.');
+          newFieldErrors['experience'] = 'At least one work experience entry is required.';
         }
         // Validate date ranges for all experiences
         const invalidDateRanges = experiences.filter(exp => 
@@ -947,8 +1098,17 @@ export const EmployeeForm = ({
         break;
     }
     
-    setStepValidationErrors(prev => ({ ...prev, [stepIndex]: errors }));
-    setFieldErrors(prev => ({ ...prev, ...newFieldErrors }));
+    setStepValidationErrors((prev) => ({ ...prev, [stepIndex]: errors }));
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      for (const key of STEP_FIELD_ERROR_KEYS[stepIndex] ?? []) {
+        delete next[key];
+      }
+      if (errors.length > 0) {
+        Object.assign(next, newFieldErrors);
+      }
+      return next;
+    });
     return errors.length === 0;
   };
 
@@ -1535,24 +1695,17 @@ export const EmployeeForm = ({
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.match(/\.(xlsx|xls)$/i)) {
+    if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
       await Swal.fire({
         icon: 'error',
         title: 'Invalid File Type',
-        text: 'Please upload an Excel file (.xlsx, .xls).',
+        text: 'Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.',
         confirmButtonText: 'OK'
       });
       return;
     }
 
     setExcelFile(file);
-    
-    await Swal.fire({
-      icon: 'success',
-      title: 'File Selected',
-      text: `File "${file.name}" is ready for import. Click "Import Excel Data" to proceed.`,
-      confirmButtonText: 'OK'
-    });
   };
 
   const handleExcelImport = async () => {
@@ -1616,7 +1769,7 @@ export const EmployeeForm = ({
       const errorMessage = error.response?.data?.message 
         || error.response?.data?.error
         || error.message 
-        || 'Failed to import candidates from Excel.';
+        || 'Failed to import employees from Excel.';
       
       const errorDetails = error.response?.data?.failed 
         ? `<br><br>Errors:<br>${error.response.data.failed.slice(0, 5).map((f: any) => `Row ${f.row}: ${f.error}`).join('<br>')}`
@@ -1673,6 +1826,7 @@ export const EmployeeForm = ({
         degree: initialData.degree || "",
         designation: resolveEmployeeJobTitle(initialData) || initialData.designation || "",
         compensationType: initialData.compensationType || "",
+        employmentType: initialData.employmentType || "",
         supervisorName: initialData.supervisorName || "",
         supervisorContact: parsedSupervisor.digits,
         supervisorCountryCode: parsedSupervisor.countryCode || "IN",
@@ -1693,8 +1847,9 @@ export const EmployeeForm = ({
             | "gmail"
             | "outlook"
             | "unknown") || "",
+        departmentId: resolveInitialDepartmentId(initialData),
       });
-      
+
       // Set profile picture preview if exists
       if (initialData.profilePicture) {
         // Handle both old format (string URL) and new format (object with url property)
@@ -1705,6 +1860,7 @@ export const EmployeeForm = ({
         setProfilePictureRemoved(false); // Reset removed flag when loading existing data
       }
       if (Array.isArray(initialData.qualifications) && initialData.qualifications.length) {
+        setEducationOpen(true);
         setEducations(initialData.qualifications.map((q: any) => ({
           degree: q.degree || "",
           institute: q.institute || "",
@@ -1715,6 +1871,7 @@ export const EmployeeForm = ({
         })));
       }
       if (Array.isArray(initialData.experiences) && initialData.experiences.length) {
+        setExperienceOpen(true);
         setExperiences(initialData.experiences.map((x: any) => ({
           company: x.company || "",
           role: x.role || "",
@@ -1754,6 +1911,7 @@ export const EmployeeForm = ({
         setSalarySlips([]);
       }
       if (Array.isArray(initialData.skills) && initialData.skills.length) {
+        setSkillsOpen(true);
         setSkills(initialData.skills.map((s: any) => ({
           id: Date.now() + Math.random(),
           name: s.name || "",
@@ -1796,12 +1954,6 @@ export const EmployeeForm = ({
       const message = "Please fix the highlighted errors before saving.";
       setError(message);
       setLoading(false);
-      await Swal.fire({
-        icon: "error",
-        title: "Could not save",
-        text: message,
-        confirmButtonText: "OK",
-      });
       return;
     }
     
@@ -1848,7 +2000,6 @@ export const EmployeeForm = ({
         
         try {
           const uploadResponse = await uploadDocuments(files, labels);
-          console.log('Documents upload response:', uploadResponse);
           
           // Handle the API response format: {success, message, data: [{key, url, originalName, size, mimeType}]}
           if (uploadResponse.success && uploadResponse.data && Array.isArray(uploadResponse.data)) {
@@ -1901,7 +2052,6 @@ export const EmployeeForm = ({
         
         try {
           const uploadResponse = await uploadDocuments(files, labels);
-          console.log('Salary slips upload response:', uploadResponse);
           
           // Handle the API response format: {success, message, data: [{key, url, originalName, size, mimeType}]}
           if (uploadResponse.success && uploadResponse.data && Array.isArray(uploadResponse.data)) {
@@ -1933,11 +2083,9 @@ export const EmployeeForm = ({
       
       // Handle profile picture upload if provided
       let profilePictureData = null;
-      console.log('Profile picture state:', profilePicture);
       if (profilePicture) {
         try {
           const uploadResult = await uploadDocuments([profilePicture], ['profile-picture']);
-          console.log('Profile picture upload result:', uploadResult);
           if (uploadResult && uploadResult.success && uploadResult.data && uploadResult.data.length > 0) {
             const uploadedFile = uploadResult.data[0];
             profilePictureData = {
@@ -1947,7 +2095,6 @@ export const EmployeeForm = ({
               size: uploadedFile.size,
               mimeType: uploadedFile.mimeType
             };
-            console.log('Profile picture data:', profilePictureData);
           }
         } catch (uploadError) {
           console.error('Profile picture upload failed:', uploadError);
@@ -1994,7 +2141,11 @@ export const EmployeeForm = ({
         ead: formData.ead,
         degree: formData.degree,
         designation: formData.designation?.trim() || undefined,
-        ...(canManageEmployees && isEdit && formData.departmentId
+        // Sent only when set. Unlike compensationType this needs no override flag: there is no
+        // provenance field to corrupt, so restating the current value on a whole-body PATCH is
+        // harmless.
+        ...(formData.employmentType ? { employmentType: formData.employmentType } : {}),
+        ...(canManageEmployees && formData.departmentId
           ? { departmentId: formData.departmentId }
           : {}),
         ...((!(isEdit && initialData?.compensationLocked) || isCompensationAdmin) &&
@@ -2044,22 +2195,14 @@ export const EmployeeForm = ({
         experiences: (relaxPersonalInfoValidation
           ? experiences.filter((exp) => exp.company?.trim() || exp.role?.trim())
           : experiences
-        ).map((exp) => {
-          console.log('Backend Submission - Sending dates to backend:', {
-            company: exp.company,
-            startDate: (exp as any).startDate,
-            endDate: (exp as any).endDate
-          });
-          
-          return {
+        ).map((exp) => ({
             company: exp.company,
             role: exp.role,
             startDate: (exp as any).startDate || undefined,
             endDate: (exp as any).endDate || undefined,
             description: exp.description,
             currentlyWorking: (exp as any).currentlyWorking || false,
-          };
-        }),
+          })),
         skills: skills.filter(skill => skill.name.trim() !== "").map((skill) => {
           const cat = (skill.category ?? "").trim();
           return {
@@ -2085,8 +2228,6 @@ export const EmployeeForm = ({
           companyEmailProvider: ce ? formData.companyEmailProvider || undefined : "",
         });
       }
-
-      console.log('Final payload profilePicture:', payload.profilePicture);
 
       let res: any;
       
@@ -2121,9 +2262,7 @@ export const EmployeeForm = ({
       }
 
       // Redirect after successful operation - candidate persona goes to their profile.
-      const employeesReturn =
-        employeesListReturnUrl?.trim() || "/ats/employees";
-      router.push(isCandidate && !canManageEmployees ? ROUTES.candidateProfile : employeesReturn);
+      router.push(isCandidate && !canManageEmployees ? ROUTES.candidateProfile : employeesReturnUrl);
     } catch (err: any) {
       setError(initialData ? "Failed to update employee" : "Failed to add employee");
       await Swal.fire({
@@ -2198,7 +2337,7 @@ export const EmployeeForm = ({
               onChange={handleExcelFileUpload}
               className="form-control w-full !rounded-md"
             />
-            <small className="text-gray-500 text-xs mt-1">Supported formats: .csv (fully supported), .xlsx/.xls (requires xlsx library)</small>
+            <small className="text-gray-500 text-xs mt-1">Supported formats: .csv, .xlsx, .xls</small>
           </div>
 
           {excelFile && (
@@ -2219,7 +2358,7 @@ export const EmployeeForm = ({
                   {excelFile.name} ({(excelFile.size / 1024).toFixed(2)} KB) is ready for import.
                 </p>
                 <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
-                  Click "Import Excel Data" below to process and import all candidates from this file.
+                  Click "Import Excel Data" below to process and import all employees from this file.
                 </p>
               </div>
             </div>
@@ -2271,6 +2410,15 @@ export const EmployeeForm = ({
 
   return (
     <div>
+      {error ? (
+        <div
+          role="alert"
+          className="mx-3 mt-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-3 text-danger text-sm"
+        >
+          {error}
+        </div>
+      ) : null}
+
       {/* Mode Selection - Only show for new candidates, not when editing */}
       {!initialData && (
         <div className="p-6 border-b border-defaultborder dark:border-defaultborder/10">
@@ -2296,14 +2444,18 @@ export const EmployeeForm = ({
       <Wizard
         step={step}
         onChange={setStep}
+        onBeforeStepChange={handleBeforeStepChange}
         onSubmit={handleSubmit}
         showSaveOnEveryStep={relaxPersonalInfoValidation && Boolean(initialData)}
         submitLabel="Save changes"
         submitting={loading}
+        stepValidationErrors={stepValidationErrors}
+        validationSummaryRef={validationSummaryRef}
+        cancelHref={employeesReturnUrl}
       >
       <Step title={<><i className="ri-user-3-line basicstep-icon"></i> Personal Info</>}>
-        <div className="p-6 w-full">
-          <p className="mb-1 font-semibold text-[#8c9097] dark:text-white/50 opacity-50 text-[1.25rem]">01</p>
+        <div className="p-4 sm:p-5 w-full">
+          <p className="mb-1 font-semibold wizard-step-number text-[1.25rem]">01</p>
           <div className="grid grid-cols-12 gap-6 w-full">
             {/* Profile Picture Upload */}
             <div className="xl:col-span-12 col-span-12 mb-4">
@@ -2329,6 +2481,7 @@ export const EmployeeForm = ({
                 <label htmlFor="fullName" className="form-label">Full Name <span className="text-red-500">*</span></label>
                 <input
                   type="text"
+                  id="fullName"
                   name="fullName"
                   value={formData.fullName}
                   onChange={handleFormChange}
@@ -2336,14 +2489,13 @@ export const EmployeeForm = ({
                   placeholder="Full Name"
                   // required
                 />
-                {fieldErrors['fullName'] && (
-                  <div className="text-red-500 text-sm mt-1">{fieldErrors['fullName']}</div>
-                )}
+                <FieldError message={fieldErrors['fullName']} />
             </div>
             <div className="xl:col-span-6 col-span-12">
                 <label htmlFor="email" className="form-label">Email <span className="text-red-500">*</span></label>
                 <input
                   type="email"
+                  id="email"
                   name="email"
                   value={formData.email}
                   onChange={handleFormChange}
@@ -2351,9 +2503,7 @@ export const EmployeeForm = ({
                   placeholder="xyz@example.com"
                   // required
                 />
-                {fieldErrors['email'] && (
-                  <div className="text-red-500 text-sm mt-1">{fieldErrors['email']}</div>
-                )}
+                <FieldError message={fieldErrors['email']} />
             </div>
             {userRole !== "user" && (
               <>
@@ -2379,7 +2529,7 @@ export const EmployeeForm = ({
                   )}
                 </div>
                 <div className="xl:col-span-6 col-span-12">
-                  <label htmlFor="companyEmailProvider" className="form-label">
+                  <label htmlFor="companyEmailProvider" className="form-label block">
                     Mailbox provider
                   </label>
                   <select
@@ -2397,10 +2547,13 @@ export const EmployeeForm = ({
                 </div>
               </>
             )}
-            <div className="xl:col-span-6 col-span-12">
-                <label htmlFor="phone" className="form-label">Phone Number <span className="text-red-500">*</span></label>
-                <div className="flex gap-2">
+            <div className="xl:col-span-6 col-span-12" role="group" aria-labelledby="phone-number-label">
+                <label id="phone-number-label" htmlFor="phoneNumber" className="form-label block">
+                  Phone Number <span className="text-red-500">*</span>
+                </label>
+                <div className="flex gap-2 items-center">
                   <PhoneCountrySelect
+                    id="countryCode"
                     name="countryCode"
                     value={formData.countryCode}
                     onChange={(code) => handleFormChange({ target: { name: "countryCode", value: code } } as React.ChangeEvent<HTMLSelectElement>)}
@@ -2410,16 +2563,14 @@ export const EmployeeForm = ({
                     name="phoneNumber"
                     value={formData.phoneNumber}
                     onChange={handleFormChange}
-                    className={`form-control flex-1 !rounded-md ${fieldErrors['phoneNumber'] ? '!border-red-500' : ''}`}
-                    id="phone"
+                    className={`form-control flex-1 min-w-0 !rounded-md ${fieldErrors['phoneNumber'] ? '!border-red-500' : ''}`}
+                    id="phoneNumber"
                     placeholder={getPhoneCountry(formData.countryCode).placeholder}
                     maxLength={getPhoneCountry(formData.countryCode).maxLength}
                     inputMode="numeric"
                   />
                 </div>
-                {fieldErrors['phoneNumber'] && (
-                  <div className="text-red-500 text-sm mt-1">{fieldErrors['phoneNumber']}</div>
-                )}
+                <FieldError message={fieldErrors['phoneNumber']} />
             </div>
             <div className="xl:col-span-6 col-span-12">
                 <label htmlFor="sevisId" className="form-label">SEVIS ID</label>
@@ -2449,7 +2600,7 @@ export const EmployeeForm = ({
                   )}
                 </div>
                 <small className="text-gray-500 text-xs mt-1 block">
-                  Assignment is managed from the candidates list (managers).
+                  Assignment is managed from the employees list (managers).
                 </small>
               </div>
             )}
@@ -2466,7 +2617,7 @@ export const EmployeeForm = ({
                 />
             </div>
             <div className="xl:col-span-6 col-span-12">
-                <label htmlFor="compensationType" className="form-label">Compensation</label>
+                <label htmlFor="compensationType" className="form-label block">Compensation</label>
                 <select
                   name="compensationType"
                   id="compensationType"
@@ -2477,7 +2628,7 @@ export const EmployeeForm = ({
                 >
                   <option value="">Select…</option>
                   <option value="paid">Paid</option>
-                  <option value="unpaid">Unpaid Internship / Trainee</option>
+                  <option value="unpaid">Unpaid</option>
                 </select>
                 {initialData?.compensationLocked ? (
                   isCompensationAdmin ? (
@@ -2496,13 +2647,58 @@ export const EmployeeForm = ({
                 )}
             </div>
             <div className="xl:col-span-6 col-span-12">
+                <label htmlFor="employmentType" className="form-label block">Employment Type</label>
+                <select
+                  name="employmentType"
+                  id="employmentType"
+                  value={formData.employmentType}
+                  onChange={handleFormChange}
+                  className="form-control w-full !rounded-md"
+                >
+                  <option value="">Select…</option>
+                  {EMPLOYMENT_TYPE_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {value === "Internship" ? "Training / Unpaid Internship" : value}
+                    </option>
+                  ))}
+                </select>
+                <small className="text-gray-500 text-xs mt-1 block">
+                  Usually set from the accepted offer; saving that offer letter overwrites this.
+                </small>
+            </div>
+            {canManageEmployees && (
+              <div className="xl:col-span-6 col-span-12">
+                <label htmlFor="departmentId" className="form-label block">Department</label>
+                <select
+                  name="departmentId"
+                  id="departmentId"
+                  value={formData.departmentId}
+                  onChange={handleFormChange}
+                  className="form-control w-full !rounded-md"
+                >
+                  <option value="">Select department (optional)</option>
+                  {departments.map((dept) => {
+                    const deptId = String(dept.id ?? "");
+                    return (
+                      <option key={deptId} value={deptId}>
+                        {dept.name}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+            <div className="xl:col-span-12 col-span-12">
                 <label htmlFor="supervisorName" className="form-label">Supervisor Name</label>
                 <input type="text" name="supervisorName" value={formData.supervisorName} onChange={handleFormChange} className="form-control w-full !rounded-md" id="supervisorName" placeholder="supervisor name" />
             </div>
-            <div className="xl:col-span-6 col-span-12">
-                <label htmlFor="supervisorContact" className="form-label">Supervisor Phone No.</label>
-                <div className="flex gap-2">
+            <div className="xl:col-span-6 col-span-12 min-w-0" role="group" aria-labelledby="supervisor-phone-label">
+                <label id="supervisor-phone-label" htmlFor="supervisorContact" className="form-label block">
+                  Supervisor Phone No.
+                </label>
+                <div className="flex gap-2 items-center">
                   <PhoneCountrySelect
+                    id="supervisorCountryCode"
                     name="supervisorCountryCode"
                     value={formData.supervisorCountryCode || formData.countryCode}
                     onChange={(code) => handleFormChange({ target: { name: "supervisorCountryCode", value: code } } as React.ChangeEvent<HTMLSelectElement>)}
@@ -2519,12 +2715,10 @@ export const EmployeeForm = ({
                     inputMode="numeric"
                   />
                 </div>
-                {fieldErrors['supervisorContact'] && (
-                  <div className="text-red-500 text-sm mt-1">{fieldErrors['supervisorContact']}</div>
-                )}
+                <FieldError message={fieldErrors['supervisorContact']} />
             </div>
-            <div className="xl:col-span-6 col-span-12">
-                <label htmlFor="visaType" className="form-label">
+            <div className="xl:col-span-6 col-span-12 min-w-0">
+                <label htmlFor="visaType" className="form-label block">
                   Visa Type {!relaxPersonalInfoValidation ? <span className="text-red-500">*</span> : null}
                 </label>
                 <select
@@ -2578,7 +2772,7 @@ export const EmployeeForm = ({
             )}
 
             <div className="xl:col-span-6 col-span-12">
-                <label htmlFor="salaryRange" className="form-label">
+                <label htmlFor="salaryRange" className="form-label block">
                   Salary Range {!relaxPersonalInfoValidation ? <span className="text-red-500">*</span> : null}
                 </label>
                 <select
@@ -2705,7 +2899,7 @@ export const EmployeeForm = ({
                 </div>
 
                 <div className="xl:col-span-6 col-span-12">
-                    <label htmlFor="country" className="form-label">
+                    <label htmlFor="country" className="form-label block">
                       Country {!relaxPersonalInfoValidation ? <span className="text-red-500">*</span> : null}
                     </label>
                     <select
@@ -2737,8 +2931,8 @@ export const EmployeeForm = ({
             </div>
 
             <div className="xl:col-span-12 col-span-12">
-                <label htmlFor="bio" className="form-label">Short Bio </label>
-                <textarea name="shortBio" value={formData.shortBio} onChange={handleFormChange} className="form-control w-full !rounded-md" rows={3}></textarea>
+                <label htmlFor="shortBio" className="form-label">Short Bio </label>
+                <textarea id="shortBio" name="shortBio" value={formData.shortBio} onChange={handleFormChange} className="form-control w-full !rounded-md" rows={3}></textarea>
             </div>
 
             {/* Social Links Section */}
@@ -2750,13 +2944,13 @@ export const EmployeeForm = ({
                 <button
                   type="button"
                   onClick={handleAddSocialLink}
-                  className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+                  className={ADD_ROW_BTN_CLASS}
                 >
                   + Add Social Link
                 </button>
               </div>
               {fieldErrors['socialLinks'] && (
-                <div className="text-red-500 text-sm mb-3">
+                <div className="text-red-500 text-sm mb-3" role="alert">
                   {fieldErrors['socialLinks']}
                 </div>
               )}
@@ -2766,13 +2960,14 @@ export const EmployeeForm = ({
                   <button
                     type="button"
                     onClick={() => handleRemoveSocialLink(index)}
-                    className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+                    className={REMOVE_ROW_BTN_CLASS}
+                    aria-label={`Remove social link ${index + 1}`}
                   >
                     ✕
                   </button>
 
                   <div className="xl:col-span-6 col-span-12">
-                    <label className="form-label">
+                    <label className="form-label block">
                       Platform {!relaxPersonalInfoValidation ? <span className="text-red-500">*</span> : null}
                     </label>
                     <select
@@ -2818,18 +3013,32 @@ export const EmployeeForm = ({
             {!initialData && (
               <div className="xl:col-span-6 col-span-12">
                 <label htmlFor="password" className="form-label">Password <span className="text-red-500">*</span></label>
-                <input
-                  type="password"
-                  name="password"
-                  value={formData.password}
-                  onChange={handleFormChange}
-                  className={`form-control w-full !rounded-md ${fieldErrors['password'] ? 'border-red-500' : ''}`}
-                  placeholder="Enter password"
-                  required
-                />
-                {fieldErrors['password'] && (
-                  <div className="text-red-500 text-sm mt-1">{fieldErrors['password']}</div>
-                )}
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    id="password"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleFormChange}
+                    className={`form-control w-full !rounded-md pe-10 ${fieldErrors['password'] ? 'border-red-500' : ''}`}
+                    placeholder="Enter password"
+                    autoComplete="new-password"
+                    minLength={PASSWORD_MIN_LENGTH}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 end-0 flex items-center px-3 text-gray-500 hover:text-gray-700"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    <i className={showPassword ? "ri-eye-off-line" : "ri-eye-line"} aria-hidden="true" />
+                  </button>
+                </div>
+                <small className="text-gray-500 text-xs mt-1 block">
+                  Minimum {PASSWORD_MIN_LENGTH} characters, with at least one letter and one number.
+                </small>
+                <FieldError message={fieldErrors['password']} />
               </div>
             )}
           </div>
@@ -2838,13 +3047,15 @@ export const EmployeeForm = ({
 
       <Step title={<><i className="ri-book-line basicstep-icon"></i> Qualification</>}>
         <div className="p-4">
-          <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">02</p>
+          <p className="mb-1 font-semibold wizard-step-number text-[1.25rem]">02</p>
           <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
             <button
               type="button"
+              id="education-toggle"
               onClick={() => setEducationOpen((v) => !v)}
               className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0"
               aria-expanded={educationOpen}
+              aria-controls="education-section"
             >
               <i
                 className={`ri-arrow-right-s-line text-xl leading-none text-[#8c9097] transition-transform duration-150 ${
@@ -2860,18 +3071,23 @@ export const EmployeeForm = ({
                 handleAddEducation();
                 setEducationOpen(true);
               }}
-              className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+              className={ADD_ROW_BTN_CLASS}
             >
               + Add Education
             </button>
           </div>
-          {fieldErrors['education'] && (
-            <div className="text-red-500 text-sm mb-3">{fieldErrors['education']}</div>
-          )}
+          <FieldError message={fieldErrors['education']} className="text-red-500 text-sm mb-3" />
 
-          {educationOpen && educations.map((edu, index) => (
+          {educationOpen && (
+            <div id="education-section">
+          {educations.map((edu, index) => (
             <div key={index} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3">
-              <button type="button" onClick={() => { setEducations(educations.filter((_, i) => i !== index)) }} className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600">
+              <button
+                type="button"
+                onClick={() => { setEducations(educations.filter((_, i) => i !== index)) }}
+                className={REMOVE_ROW_BTN_CLASS}
+                aria-label={`Remove education entry ${index + 1}`}
+              >
                 ✕
               </button>
               <div className="xl:col-span-6 col-span-12">
@@ -2910,7 +3126,7 @@ export const EmployeeForm = ({
               <div className="xl:col-span-6 col-span-12">
                 <div className="grid grid-cols-12 gap-2">
                   <div className="col-span-6">
-                    <label className="form-label">Start Year <span className="text-red-500">*</span></label>
+                    <label className="form-label block">Start Year <span className="text-red-500">*</span></label>
                     <select
                       className={`form-control w-full !rounded-md ${fieldErrors['education'] ? 'border-red-500' : ''}`}
                       value={(edu as any).startYear}
@@ -2923,7 +3139,7 @@ export const EmployeeForm = ({
                     </select>
                   </div>
                   <div className="col-span-6">
-                    <label className="form-label">End Year <span className="text-red-500">*</span></label>
+                    <label className="form-label block">End Year <span className="text-red-500">*</span></label>
                     <select
                       className={`form-control w-full !rounded-md ${fieldErrors['education'] ? 'border-red-500' : ''}`}
                       value={(edu as any).endYear}
@@ -2955,13 +3171,17 @@ export const EmployeeForm = ({
               </div>
             </div>
           ))}
+            </div>
+          )}
           <div className="xl:col-span-12 col-span-12">
             <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
               <button
                 type="button"
+                id="skills-toggle"
                 onClick={() => setSkillsOpen((v) => !v)}
                 className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0"
                 aria-expanded={skillsOpen}
+                aria-controls="skills-section"
               >
                 <i
                   className={`ri-arrow-right-s-line text-xl leading-none text-[#8c9097] transition-transform duration-150 ${
@@ -2977,21 +3197,22 @@ export const EmployeeForm = ({
                   handleAddSkill();
                   setSkillsOpen(true);
                 }}
-                className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+                className={ADD_ROW_BTN_CLASS}
               >
                 + Add Skill
               </button>
             </div>
-            {fieldErrors['skills'] && (
-              <div className="text-red-500 text-sm mb-3">{fieldErrors['skills']}</div>
-            )}
+          <FieldError message={fieldErrors['skills']} className="text-red-500 text-sm mb-3" />
 
-            {skillsOpen && skills.map((skill, index) => (
+            {skillsOpen && (
+              <div id="skills-section">
+            {skills.map((skill, index) => (
               <div key={skill.id} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3">
                 <button
                   type="button"
                   onClick={() => setSkills(skills.filter((_, i) => i !== index))}
-                  className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+                  className={REMOVE_ROW_BTN_CLASS}
+                  aria-label={`Remove skill ${index + 1}`}
                 >
                   ✕
                 </button>
@@ -3009,7 +3230,7 @@ export const EmployeeForm = ({
                 </div>
 
                 <div className="xl:col-span-4 col-span-12">
-                  <label className="form-label">Skill Level</label>
+                  <label className="form-label block">Skill Level</label>
                   <select
                     className="form-control w-full !rounded-md"
                     value={skill.level}
@@ -3034,19 +3255,23 @@ export const EmployeeForm = ({
                 </div>
               </div>
             ))}
+              </div>
+            )}
           </div>
         </div>
       </Step>
 
       <Step title={<><i className="ri-bank-card-line basicstep-icon"></i> Work Experience</>}>
         <div className="p-4">
-          <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">03</p>
+          <p className="mb-1 font-semibold wizard-step-number text-[1.25rem]">03</p>
           <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
             <button
               type="button"
+              id="experience-toggle"
               onClick={() => setExperienceOpen((v) => !v)}
               className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0"
               aria-expanded={experienceOpen}
+              aria-controls="experience-section"
             >
               <i
                 className={`ri-arrow-right-s-line text-xl leading-none text-[#8c9097] transition-transform duration-150 ${
@@ -3062,19 +3287,20 @@ export const EmployeeForm = ({
                 handleAddExperience();
                 setExperienceOpen(true);
               }}
-              className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+              className={ADD_ROW_BTN_CLASS}
             >
               + Add Experience
             </button>
           </div>
-          {fieldErrors['experience'] && (
-            <div className="text-red-500 text-sm mb-3">{fieldErrors['experience']}</div>
-          )}
-          {experienceOpen && experiences.map((exp, index) => (
+          <FieldError message={fieldErrors['experience']} className="text-red-500 text-sm mb-3" />
+          <div id="experience-section" hidden={!experienceOpen}>
+          {experiences.map((exp, index) => (
             <div key={index} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setExperiences(experiences.filter((_, i) => i !== index))}
-                className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+                className={REMOVE_ROW_BTN_CLASS}
+                aria-label={`Remove work experience ${index + 1}`}
               >
                 ✕
               </button>
@@ -3103,26 +3329,31 @@ export const EmployeeForm = ({
                 />
               </div>
               <div className="xl:col-span-6 col-span-12">
-                <label className="form-label">Start Date <span className="text-red-500">*</span></label>
-                <input
-                  type="date"
-                  className={`form-control w-full !rounded-md ${fieldErrors['experience'] ? 'border-red-500' : ''}`}
-                  placeholder="Start Date"
-                  value={(exp as any).startDate}
-                  onChange={(e) => handleExpChange(index, "startDate", e.target.value)}
-                  // required
+                <YmdFilterDateInput
+                  label="Start Date *"
+                  inputId={`employee-exp-start-${index}`}
+                  portalId={`employee-exp-start-datepicker-${index}`}
+                  popperClassName="!z-[10050]"
+                  value={(exp as any).startDate ?? ""}
+                  maxDate={(exp as any).endDate || undefined}
+                  labelClassName="form-label"
+                  inputClassName={`form-control w-full !rounded-md ${fieldErrors['experience'] ? 'border-red-500' : ''}`}
+                  onCommit={(ymd) => handleExpChange(index, "startDate", ymd)}
                 />
               </div>
               <div className="xl:col-span-6 col-span-12">
-                <label className="form-label">End Date {!exp.currentlyWorking && <span className="text-red-500">*</span>}</label>
-                <input
-                  type="date"
-                  className={`form-control w-full !rounded-md ${fieldErrors['experience'] ? 'border-red-500' : ''}`}
-                  placeholder="End Date"
-                  value={(exp as any).endDate}
-                  onChange={(e) => handleExpChange(index, "endDate", e.target.value)}
-                  disabled={exp.currentlyWorking}
-                  // required={!exp.currentlyWorking}
+                <YmdFilterDateInput
+                  label={`End Date${(exp as any).currentlyWorking ? "" : " *"}`}
+                  inputId={`employee-exp-end-${index}`}
+                  portalId={`employee-exp-end-datepicker-${index}`}
+                  popperClassName="!z-[10050]"
+                  value={(exp as any).endDate ?? ""}
+                  minDate={(exp as any).startDate || undefined}
+                  maxDate={formatYmdLocal(new Date())}
+                  disabled={(exp as any).currentlyWorking}
+                  labelClassName="form-label"
+                  inputClassName={`form-control w-full !rounded-md ${fieldErrors['experience'] ? 'border-red-500' : ''}`}
+                  onCommit={(ymd) => handleExpChange(index, "endDate", ymd)}
                 />
               </div>
               <div className="xl:col-span-12 col-span-12">
@@ -3157,7 +3388,7 @@ export const EmployeeForm = ({
               <div className="xl:col-span-12 col-span-12">
                 <label className="form-label">Responsibilities / Description</label>
                 <textarea
-                  className="form-control w-full !rounded-md"
+                  className="form-control w-full !rounded-md min-h-[6.5rem] resize-y"
                   rows={3}
                   placeholder="Responsibilities / Description"
                   value={exp.description}
@@ -3166,25 +3397,24 @@ export const EmployeeForm = ({
               </div>
             </div>
           ))}
+          </div>
         </div>
       </Step>
 
       <Step title={<><i className="ri-checkbox-circle-line basicstep-icon"></i> Document Uploads</>}>
         <div className="p-4">
-          <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">04</p>
+          <p className="mb-1 font-semibold wizard-step-number text-[1.25rem]">04</p>
           <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
             <div>Documents (Optional) :</div>
             <button
               type="button"
               onClick={() => setDocumentsList([...documentsList, { id: Date.now(), name: "", customName: "", file: null }])}
-              className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+              className={ADD_ROW_BTN_CLASS}
             >
               + Add Document
             </button>
           </div>
-          {fieldErrors['documents'] && (
-            <div className="text-red-500 text-sm mb-3">{fieldErrors['documents']}</div>
-          )}
+          <FieldError message={fieldErrors['documents']} className="text-red-500 text-sm mb-3" />
 
           {/* Existing Documents */}
           {existingDocs.length > 0 && (
@@ -3194,6 +3424,7 @@ export const EmployeeForm = ({
                 onClick={() => setExistingDocsOpen((v) => !v)}
                 className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0 mb-3"
                 aria-expanded={existingDocsOpen}
+                aria-controls="existing-docs-section"
               >
                 <i
                   className={`ri-arrow-right-s-line text-lg leading-none text-[#8c9097] transition-transform duration-150 ${
@@ -3203,12 +3434,15 @@ export const EmployeeForm = ({
                 />
                 <h6 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Existing Documents</h6>
               </button>
-              {existingDocsOpen && existingDocs.map((doc, index) => (
+              {existingDocsOpen && (
+                <div id="existing-docs-section">
+              {existingDocs.map((doc, index) => (
                 <div key={index} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3 bg-gray-50 dark:bg-gray-800">
                   <button
                     type="button"
-                    onClick={() => setExistingDocs(existingDocs.filter((_, i) => i !== index))}
-                    className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+                    onClick={() => void handleRemoveExistingDoc(index)}
+                    className={REMOVE_ROW_BTN_CLASS}
+                    aria-label={`Remove existing document ${doc.label || index + 1}`}
                   >
                     ✕
                   </button>
@@ -3258,6 +3492,8 @@ export const EmployeeForm = ({
                   </div>
                 </div>
               ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -3270,13 +3506,14 @@ export const EmployeeForm = ({
                   <button
                     type="button"
                     onClick={() => setDocumentsList(documentsList.filter(d => d.id !== doc.id))}
-                    className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+                    className={REMOVE_ROW_BTN_CLASS}
+                    aria-label={`Remove new document ${index + 1}`}
                   >
                     ✕
                   </button>
 
               <div className="xl:col-span-4 col-span-12 flex flex-col">
-                <label className="form-label">Document Type <span className="text-red-500">*</span></label>
+                <label className="form-label block">Document Type <span className="text-red-500">*</span></label>
                 <select
                   className={`form-control w-full !rounded-md h-11 ${fieldErrors['documents'] ? 'border-red-500' : ''}`}
                   value={doc.name}
@@ -3373,22 +3610,20 @@ export const EmployeeForm = ({
 
       <Step title={<><i className="ri-money-dollar-box-line basicstep-icon"></i> Salary Slips</>}>
         <div className="p-4">
-          <p className="mb-1 font-semibold text-[#8c9097] opacity-50 text-[1.25rem]">05</p>
+          <p className="mb-1 font-semibold wizard-step-number text-[1.25rem]">05</p>
           <div className="text-[0.9375rem] font-semibold sm:flex block items-center justify-between mb-4">
             <div>Salary Slips (Optional) :</div>
             <button
               type="button"
               onClick={handleAddSalarySlip}
-              className="ti-btn bg-primary text-white !py-1 !px-2 !text-[0.75rem]"
+              className={ADD_ROW_BTN_CLASS}
             >
               + Add Salary Slip
             </button>
           </div>
-        {fieldErrors['salarySlips'] && (
-          <div className="text-red-500 text-sm mb-3">{fieldErrors['salarySlips']}</div>
-        )}
+          <FieldError message={fieldErrors['salarySlips']} className="text-red-500 text-sm mb-3" />
         {validateSalarySlipDuplicates(salarySlips).length > 0 && (
-          <div className="text-red-500 text-sm mb-3">
+          <div className="text-red-500 text-sm mb-3" role="alert">
             Duplicate month/year combinations found. Each month and year combination must be unique.
           </div>
         )}
@@ -3401,6 +3636,7 @@ export const EmployeeForm = ({
               onClick={() => setExistingSalarySlipsOpen((v) => !v)}
               className="inline-flex items-center gap-1 border-0 bg-transparent cursor-pointer text-inherit p-0 mb-3"
               aria-expanded={existingSalarySlipsOpen}
+              aria-controls="existing-salary-slips-section"
             >
               <i
                 className={`ri-arrow-right-s-line text-lg leading-none text-[#8c9097] transition-transform duration-150 ${
@@ -3410,12 +3646,15 @@ export const EmployeeForm = ({
               />
               <h6 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Existing Salary Slips</h6>
             </button>
-            {existingSalarySlipsOpen && existingSalarySlips.map((slip, index) => (
+            {existingSalarySlipsOpen && (
+              <div id="existing-salary-slips-section">
+            {existingSalarySlips.map((slip, index) => (
               <div key={index} className="relative grid grid-cols-12 gap-4 border rounded-sm p-3 mb-3 bg-gray-50 dark:bg-gray-800">
                 <button
                   type="button"
-                  onClick={() => setExistingSalarySlips(existingSalarySlips.filter((_, i) => i !== index))}
-                  className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+                  onClick={() => void handleRemoveExistingSalarySlip(index)}
+                  className={REMOVE_ROW_BTN_CLASS}
+                  aria-label={`Remove salary slip ${slip.month} ${slip.year}`}
                 >
                   ✕
                 </button>
@@ -3454,6 +3693,8 @@ export const EmployeeForm = ({
                 </div>
               </div>
             ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -3468,13 +3709,14 @@ export const EmployeeForm = ({
             <button
               type="button"
               onClick={() => setSalarySlips(salarySlips.filter(s => s.id !== slip.id))}
-              className="absolute top-2 right-2 border rounded-full px-1 text-red-500 hover:text-white hover:bg-red-600"
+              className={REMOVE_ROW_BTN_CLASS}
+              aria-label={`Remove salary slip entry ${index + 1}`}
             >
               ✕
             </button>
 
             <div className="xl:col-span-2 col-span-6">
-              <label className="form-label">Month <span className="text-red-500">*</span></label>
+              <label className="form-label block">Month <span className="text-red-500">*</span></label>
               <select
                 className={`form-control w-full !rounded-md ${fieldErrors['salarySlips'] || isDuplicate ? 'border-red-500' : ''}`}
                 value={slip.month}
@@ -3498,7 +3740,7 @@ export const EmployeeForm = ({
             </div>
 
             <div className="xl:col-span-2 col-span-6">
-              <label className="form-label">Year <span className="text-red-500">*</span></label>
+              <label className="form-label block">Year <span className="text-red-500">*</span></label>
               <select
                 className={`form-control w-full !rounded-md ${fieldErrors['salarySlips'] || isDuplicate ? 'border-red-500' : ''}`}
                 value={slip.year}

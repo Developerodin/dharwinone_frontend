@@ -28,6 +28,9 @@ import MeetingReadOnlyView from "@/shared/components/meeting/MeetingReadOnlyView
 import { useConfirm } from "@/shared/components/ui/useConfirm"
 import { useRecurringScopeDialog } from "@/shared/components/meeting/RecurringScopeDialog"
 import { getMeetingActionVisibility } from "@/shared/lib/permissions"
+import { canJoinMeeting } from "@/shared/lib/dashboard/employeeDashboard"
+
+const JOIN_CLOSED_TOOLTIP = "Opens 10 minutes before the meeting starts"
 
 interface InternalMeetingRow {
   id: string
@@ -35,6 +38,7 @@ interface InternalMeetingRow {
   date: string
   dateKey: string
   time: string
+  scheduledAt: string
   type: string
   durationMinutes: number
   participantsSummary: string
@@ -76,6 +80,14 @@ function participantsSummary(m: InternalMeeting): string {
 function isCompletedStatus(status?: string): boolean {
   const raw = (status || "").toLowerCase()
   return raw === "ended" || raw === "completed"
+}
+
+function isVideoMeetingType(type?: string): boolean {
+  return (type || "").toLowerCase().includes("video")
+}
+
+function isScheduledMeetingStatus(status?: string): boolean {
+  return (status || "").toLowerCase() === "scheduled"
 }
 
 function computeActualDurationMinutes(m: InternalMeeting): number | null {
@@ -135,6 +147,7 @@ function meetingToRow(m: InternalMeeting, index: number): InternalMeetingRow {
     // is still what the edit form reads/writes wall-clock in.
     dateKey: wallClockDateKey(m.scheduledAt),
     time: formatMeetingTime(m.scheduledAt),
+    scheduledAt: m.scheduledAt,
     type: m.meetingType || "Video",
     durationMinutes: Number.isFinite(Number(m.durationMinutes)) ? Math.max(1, Number(m.durationMinutes)) : 60,
     participantsSummary: participantsSummary(m),
@@ -303,17 +316,25 @@ export default function InternalMeetingsClient() {
     }
   }, [fetchMeetings, fetchWeekMeetings, viewMode])
 
-  const copyMeetingLink = useCallback(
-    async (row: InternalMeetingRow) => {
+  const getMeetingJoinUrl = useCallback(
+    (row: InternalMeetingRow): string => {
       const baseUrl =
         row.publicMeetingUrl ||
         (typeof window !== "undefined"
           ? `${window.location.origin}/join/room?room=${encodeURIComponent(row.meetingId)}`
           : "")
-      if (!baseUrl) return
+      if (!baseUrl) return ""
       const joinName = (authUser?.name?.trim() || authUser?.email?.split("@")[0] || "").trim()
       const joinEmail = authUser?.email?.trim() || ""
-      const url = appendJoinIdentityToUrl(baseUrl, joinName, joinEmail)
+      return appendJoinIdentityToUrl(baseUrl, joinName, joinEmail)
+    },
+    [authUser]
+  )
+
+  const copyMeetingLink = useCallback(
+    async (row: InternalMeetingRow) => {
+      const url = getMeetingJoinUrl(row)
+      if (!url) return
       try {
         await navigator.clipboard.writeText(url)
         setCopiedLinkId(row.id)
@@ -323,7 +344,16 @@ export default function InternalMeetingsClient() {
         setTimeout(() => setCopiedLinkId(null), 2000)
       }
     },
-    [authUser]
+    [getMeetingJoinUrl]
+  )
+
+  const joinMeeting = useCallback(
+    (row: InternalMeetingRow) => {
+      const url = getMeetingJoinUrl(row)
+      if (!url) return
+      window.open(url, "_blank", "noopener,noreferrer")
+    },
+    [getMeetingJoinUrl]
   )
 
   const refreshPrelineDom = useCallback(() => {
@@ -827,12 +857,35 @@ export default function InternalMeetingsClient() {
         Header: "Actions",
         accessor: "id",
         disableSortBy: true,
-        Cell: ({ row }: any) => (
-          <div className="flex items-center gap-2">
+        Cell: ({ row }: any) => {
+          const meetingRow = row.original as InternalMeetingRow
+          const showJoin =
+            canView &&
+            isVideoMeetingType(meetingRow.type) &&
+            isScheduledMeetingStatus(meetingRow.status) &&
+            Boolean(meetingRow.meetingId || meetingRow.publicMeetingUrl)
+          const joinable = showJoin && canJoinMeeting(meetingRow.scheduledAt, meetingRow.durationMinutes)
+
+          return (
+          <div className="flex flex-nowrap items-center gap-1.5">
+            {showJoin && (
+              <button
+                type="button"
+                className={`ti-btn ti-btn-icon ti-btn-sm shrink-0 ${
+                  joinable ? "ti-btn-success" : "ti-btn-light !cursor-not-allowed opacity-50"
+                }`}
+                title={joinable ? `Join ${meetingRow.title}` : JOIN_CLOSED_TOOLTIP}
+                aria-label={joinable ? `Join ${meetingRow.title}` : JOIN_CLOSED_TOOLTIP}
+                disabled={!joinable}
+                onClick={() => joinable && joinMeeting(meetingRow)}
+              >
+                <i className="ri-video-add-line" aria-hidden="true" />
+              </button>
+            )}
             {canViewRecordings && (
               <button
                 type="button"
-                className="ti-btn ti-btn-icon ti-btn-sm ti-btn-success"
+                className="ti-btn ti-btn-icon ti-btn-sm shrink-0 ti-btn-success"
                 title="Recordings"
                 onClick={() => {
                   setRecordingsModalMeetingId(row.original.id)
@@ -845,7 +898,7 @@ export default function InternalMeetingsClient() {
             {canCopyLink && row.original.status?.toLowerCase() !== "cancelled" && (
               <button
                 type="button"
-                className="ti-btn ti-btn-icon ti-btn-sm ti-btn-light"
+                className="ti-btn ti-btn-icon ti-btn-sm shrink-0 ti-btn-light"
                 title="Copy link"
                 onClick={() => copyMeetingLink(row.original)}
               >
@@ -856,7 +909,7 @@ export default function InternalMeetingsClient() {
             {canView && (
               <button
                 type="button"
-                className={`ti-btn ti-btn-icon ti-btn-sm ${canEdit ? "ti-btn-info" : "ti-btn-light"}`}
+                className={`ti-btn ti-btn-icon ti-btn-sm shrink-0 ${canEdit ? "ti-btn-info" : "ti-btn-light"}`}
                 title={canEdit ? (row.original.seriesId ? "Edit this occurrence" : "Edit meeting") : "View details"}
                 onClick={() => openEditModal(row.original.id, "single")}
               >
@@ -866,7 +919,7 @@ export default function InternalMeetingsClient() {
             {canEdit && row.original.seriesId && row.original.status?.toLowerCase() !== "cancelled" ? (
               <button
                 type="button"
-                className="ti-btn ti-btn-icon ti-btn-sm ti-btn-primary"
+                className="ti-btn ti-btn-icon ti-btn-sm shrink-0 ti-btn-primary"
                 title="Edit entire series"
                 onClick={() => openEditModal(row.original.id, "series")}
               >
@@ -876,7 +929,7 @@ export default function InternalMeetingsClient() {
             {canDelete && row.original.status?.toLowerCase() !== "cancelled" && (
               <button
                 type="button"
-                className="ti-btn ti-btn-icon ti-btn-sm ti-btn-danger"
+                className="ti-btn ti-btn-icon ti-btn-sm shrink-0 ti-btn-danger"
                 title={row.original.seriesId ? "Cancel occurrence or series…" : "Cancel meeting"}
                 onClick={() => handleCancelMeeting(row.original)}
               >
@@ -886,7 +939,7 @@ export default function InternalMeetingsClient() {
             {canDelete && row.original.seriesId ? (
               <button
                 type="button"
-                className="ti-btn ti-btn-icon ti-btn-sm ti-btn-danger"
+                className="ti-btn ti-btn-icon ti-btn-sm shrink-0 ti-btn-danger"
                 title={
                   row.original.status?.toLowerCase() === "cancelled"
                     ? "Remove cancelled series permanently"
@@ -898,16 +951,19 @@ export default function InternalMeetingsClient() {
               </button>
             ) : null}
           </div>
-        ),
+          )
+        },
       },
     ],
     [
       selectedRows,
       copiedLinkId,
       copyMeetingLink,
+      joinMeeting,
       openEditModal,
       handleCancelMeeting,
       handleDeleteEntireSeries,
+      canView,
       canViewRecordings,
       canCopyLink,
       canEdit,

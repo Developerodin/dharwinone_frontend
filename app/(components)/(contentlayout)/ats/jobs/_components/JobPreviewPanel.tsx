@@ -19,6 +19,7 @@ import {
   INTERVIEW_SCHEDULE_REJECTED_MESSAGE,
   isInterviewSchedulingBlocked,
 } from '@/shared/lib/ats/applicationPipeline'
+import { CompanyWebsiteLink } from '@/shared/components/ats/CompanyWebsiteLink'
 
 const FUNNEL_TONES: Record<string, string> = {
   Applied: 'bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-300',
@@ -514,41 +515,34 @@ const JobPreviewPanel: React.FC<JobPreviewPanelProps> = ({
                     const website = (ci.website as string) || ''
                     if (!industry && !founded && !size && !website) return null
                     return (
-                      <div className="p-4 border border-gray-200 dark:border-defaultborder/10 rounded-lg">
+                      <div className="min-w-0 overflow-hidden rounded-lg border border-gray-200 p-4 dark:border-defaultborder/10">
                         <h6 className="font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
                           <i className="ri-building-line text-primary"></i>
                           Company Information
                         </h6>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="grid min-w-0 grid-cols-2 gap-4 md:grid-cols-4">
                           {industry && (
-                            <div>
+                            <div className="min-w-0">
                               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Industry</div>
-                              <div className="font-medium text-gray-800 dark:text-white">{industry}</div>
+                              <div className="font-medium text-gray-800 dark:text-white break-words">{industry}</div>
                             </div>
                           )}
                           {size && (
-                            <div>
+                            <div className="min-w-0">
                               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Company Size</div>
-                              <div className="font-medium text-gray-800 dark:text-white">{size} employees</div>
+                              <div className="font-medium text-gray-800 dark:text-white break-words">{size} employees</div>
                             </div>
                           )}
                           {founded && (
-                            <div>
+                            <div className="min-w-0">
                               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Founded</div>
                               <div className="font-medium text-gray-800 dark:text-white">{founded}</div>
                             </div>
                           )}
                           {website && (
-                            <div>
+                            <div className="min-w-0">
                               <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Website</div>
-                              <a
-                                href={/^https?:\/\//i.test(website) ? website : `https://${website}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-medium text-primary hover:underline"
-                              >
-                                {website}
-                              </a>
+                              <CompanyWebsiteLink website={website} />
                             </div>
                           )}
                         </div>

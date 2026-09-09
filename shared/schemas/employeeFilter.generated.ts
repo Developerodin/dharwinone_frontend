@@ -6,16 +6,19 @@
 
 export type EmployeeCompensationType = 'paid' | 'unpaid';
 export type EmployeeEmploymentStatus = 'current' | 'resigned' | 'all';
+export type EmployeeEmploymentType = 'Full-time' | 'Part-time' | 'Contract' | 'Temporary' | 'Internship' | 'Freelance';
 
 export type EmployeeFilters = {
   employmentStatus?: 'current' | 'resigned' | 'all';
   compensationType?: 'paid' | 'unpaid';
+  employmentType?: 'Full-time' | 'Part-time' | 'Contract' | 'Temporary' | 'Internship' | 'Freelance';
   search?: string;
   fullName?: string;
   email?: string;
   employeeId?: string;
   id?: string;
   agent?: string;
+  designation?: string;
   agentIds?: string[];
 };
 
@@ -33,3 +36,4 @@ export type EmployeeStructuredQuery = {
 
 export const COMPENSATION_TYPE_OPTIONS: EmployeeCompensationType[] = ['paid', 'unpaid'];
 export const EMPLOYMENT_STATUS_OPTIONS: EmployeeEmploymentStatus[] = ['current', 'resigned', 'all'];
+export const EMPLOYMENT_TYPE_OPTIONS: EmployeeEmploymentType[] = ['Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship', 'Freelance'];

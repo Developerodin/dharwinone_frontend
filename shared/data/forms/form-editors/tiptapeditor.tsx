@@ -162,12 +162,24 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
   const [popoverError, setPopoverError] = useState('')
   const popoverInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const savedColorSelectionRef = useRef<{ from: number; to: number } | null>(null)
+  const savedSelectionRef = useRef<{ from: number; to: number } | null>(null)
 
-  const saveColorSelection = () => {
+  const saveSelection = () => {
     if (!editor) return
     const { from, to } = editor.state.selection
-    savedColorSelectionRef.current = { from, to }
+    savedSelectionRef.current = { from, to }
+  }
+
+  /** Keep ProseMirror focused so toolbar clicks do not collapse the selection. */
+  const preventToolbarMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+  }
+
+  const chainWithSavedSelection = () => {
+    const chain = editor!.chain().focus()
+    const saved = savedSelectionRef.current
+    if (saved) chain.setTextSelection(saved)
+    return chain
   }
 
   /** Uploaded images embed as base64 data URIs so the saved HTML stays self-contained
@@ -224,34 +236,34 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
     const url = popoverValue.trim()
     if (popover === 'link') {
       if (!url) {
-        editor.chain().focus().extendMarkRange('link').unsetLink().run()
+        chainWithSavedSelection().extendMarkRange('link').unsetLink().run()
       } else if (!isSafeLinkUrl(url)) {
         setPopoverError('Enter a valid http(s), mailto, or tel link.')
         return
-      } else if (editor.state.selection.empty) {
+      } else if (!savedSelectionRef.current || savedSelectionRef.current.from === savedSelectionRef.current.to) {
         // No selection: insert the URL itself as a clickable link.
         // Structured insert (not string HTML) so the URL can never be parsed as markup.
-        editor.chain().focus().insertContent({
+        chainWithSavedSelection().insertContent({
           type: 'text',
           text: url,
           marks: [{ type: 'link', attrs: { href: url } }],
         }).run()
       } else {
-        editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+        chainWithSavedSelection().extendMarkRange('link').setLink({ href: url }).run()
       }
     } else if (popover === 'image' && url) {
       if (!isSafeImageUrl(url)) {
         setPopoverError('Enter a valid http(s) image URL.')
         return
       }
-      editor.chain().focus().setImage({ src: url }).run()
+      chainWithSavedSelection().setImage({ src: url }).run()
     }
     closePopover()
   }
 
   const removeLink = () => {
     if (!editor) return
-    editor.chain().focus().extendMarkRange('link').unsetLink().run()
+    chainWithSavedSelection().extendMarkRange('link').unsetLink().run()
     closePopover()
   }
 
@@ -268,6 +280,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
       >
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleBold().run()}
           disabled={!editor.can().chain().focus().toggleBold().run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('bold') ? '!bg-primary !text-white' : ''}`}
@@ -277,6 +290,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleItalic().run()}
           disabled={!editor.can().chain().focus().toggleItalic().run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('italic') ? '!bg-primary !text-white' : ''}`}
@@ -286,6 +300,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleUnderline().run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('underline') ? '!bg-primary !text-white' : ''}`}
           title="Underline"
@@ -294,6 +309,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleStrike().run()}
           disabled={!editor.can().chain().focus().toggleStrike().run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('strike') ? '!bg-primary !text-white' : ''}`}
@@ -304,10 +320,12 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         <div className="border-l dark:border-defaultborder/10 mx-1"></div>
         <select
           value={editor.getAttributes('textStyle').fontFamily || ''}
+          onMouseDown={saveSelection}
           onChange={(e) => {
             const v = e.target.value
-            if (v) editor.chain().focus().setFontFamily(v).run()
-            else editor.chain().focus().unsetFontFamily().run()
+            const chain = chainWithSavedSelection()
+            if (v) chain.setFontFamily(v).run()
+            else chain.unsetFontFamily().run()
           }}
           className="tiptap-select text-xs leading-tight rounded-md border border-gray-200 dark:border-defaultborder/10 bg-white dark:bg-bodybg2 text-defaulttextcolor min-w-[7rem] pl-2 pr-7 py-1.5 cursor-pointer focus:outline-none focus:border-primary"
           title="Font family"
@@ -321,10 +339,12 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </select>
         <select
           value={editor.getAttributes('textStyle').fontSize || ''}
+          onMouseDown={saveSelection}
           onChange={(e) => {
             const v = e.target.value
-            if (v) editor.chain().focus().setFontSize(v).run()
-            else editor.chain().focus().unsetFontSize().run()
+            const chain = chainWithSavedSelection()
+            if (v) chain.setFontSize(v).run()
+            else chain.unsetFontSize().run()
           }}
           className="tiptap-select text-xs leading-tight rounded-md border border-gray-200 dark:border-defaultborder/10 bg-white dark:bg-bodybg2 text-defaulttextcolor min-w-[6.5rem] pl-2 pr-7 py-1.5 cursor-pointer focus:outline-none focus:border-primary"
           title="Font size"
@@ -342,10 +362,6 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         <label
           className="ti-btn ti-btn-sm ti-btn-light relative cursor-pointer"
           title="Text color"
-          onMouseDown={(e) => {
-            e.preventDefault()
-            saveColorSelection()
-          }}
         >
           <i className="ri-font-color"></i>
           <span
@@ -356,17 +372,16 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
           <input
             type="color"
             value={editor.getAttributes('textStyle').color || '#000000'}
-            onFocus={saveColorSelection}
-            onClick={saveColorSelection}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              saveSelection()
+            }}
             /* React maps onChange to the DOM `input` event, and `type="color"` is a text-input
              * type, so this fires on every drag inside the native picker — not once on close.
              * The saved range is deliberately NOT cleared here: each fire must re-target the same
-             * text, and the next open refreshes it via mousedown/focus/click. */
+             * text, and the next open refreshes it via mousedown. */
             onChange={(e) => {
-              const saved = savedColorSelectionRef.current
-              const chain = editor.chain().focus()
-              if (saved) chain.setTextSelection(saved)
-              chain.setColor(e.target.value).run()
+              chainWithSavedSelection().setColor(e.target.value).run()
             }}
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
             aria-label="Text color"
@@ -374,6 +389,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </label>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().unsetColor().run()}
           className="ti-btn ti-btn-sm ti-btn-light"
           title="Clear color"
@@ -383,6 +399,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         <div className="border-l dark:border-defaultborder/10 mx-1"></div>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('heading', { level: 1 }) ? '!bg-primary !text-white' : ''}`}
           title="Heading 1"
@@ -391,6 +408,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('heading', { level: 2 }) ? '!bg-primary !text-white' : ''}`}
           title="Heading 2"
@@ -400,6 +418,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         <div className="border-l dark:border-defaultborder/10 mx-1"></div>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleBulletList().run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('bulletList') ? '!bg-primary !text-white' : ''}`}
           title="Bullet List"
@@ -408,6 +427,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('orderedList') ? '!bg-primary !text-white' : ''}`}
           title="Numbered List"
@@ -416,6 +436,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().toggleBlockquote().run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive('blockquote') ? '!bg-primary !text-white' : ''}`}
           title="Blockquote"
@@ -425,6 +446,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         <div className="border-l dark:border-defaultborder/10 mx-1"></div>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().setTextAlign('left').run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${
             editor.isActive({ textAlign: 'left' }) ||
@@ -440,6 +462,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().setTextAlign('center').run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive({ textAlign: 'center' }) ? '!bg-primary !text-white' : ''}`}
           title="Align center"
@@ -448,6 +471,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().setTextAlign('right').run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive({ textAlign: 'right' }) ? '!bg-primary !text-white' : ''}`}
           title="Align right"
@@ -456,6 +480,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().setTextAlign('justify').run()}
           className={`ti-btn ti-btn-sm ti-btn-light ${editor.isActive({ textAlign: 'justify' }) ? '!bg-primary !text-white' : ''}`}
           title="Justify"
@@ -465,6 +490,10 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         <div className="border-l dark:border-defaultborder/10 mx-1"></div>
         <button
           type="button"
+          onMouseDown={(e) => {
+            preventToolbarMouseDown(e)
+            saveSelection()
+          }}
           onClick={() => (popover === 'link' ? closePopover() : openLinkPopover())}
           className={`ti-btn ti-btn-sm ti-btn-light ${linkActive || popover === 'link' ? '!bg-primary !text-white' : ''}`}
           title="Link"
@@ -475,6 +504,10 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={(e) => {
+            preventToolbarMouseDown(e)
+            saveSelection()
+          }}
           onClick={() => (popover === 'image' ? closePopover() : openImagePopover())}
           className={`ti-btn ti-btn-sm ti-btn-light ${popover === 'image' ? '!bg-primary !text-white' : ''}`}
           title="Image"
@@ -486,6 +519,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         <div className="border-l dark:border-defaultborder/10 mx-1"></div>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().undo().run()}
           disabled={!editor.can().chain().focus().undo().run()}
           className="ti-btn ti-btn-sm ti-btn-light"
@@ -495,6 +529,7 @@ const TiptapEditor: React.FC<TiptapEditorProps> = ({
         </button>
         <button
           type="button"
+          onMouseDown={preventToolbarMouseDown}
           onClick={() => editor.chain().focus().redo().run()}
           disabled={!editor.can().chain().focus().redo().run()}
           className="ti-btn ti-btn-sm ti-btn-light"

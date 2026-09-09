@@ -241,11 +241,32 @@ function mapFormToUpdatePayload(form: TeamMemberFormState) {
   };
 }
 
+function resolveMemberSearchQuery(
+  params: { search?: string } | undefined,
+  searchQuery: string
+): string | undefined {
+  const raw = params && "search" in params ? params.search : searchQuery;
+  const trimmed = (raw ?? "").trim();
+  return trimmed || undefined;
+}
+
+/** ponytail: cap page buttons when roster pagination grows large */
+function rosterPaginationPages(current: number, total: number): number[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const pages = new Set([1, total, current, current - 1, current + 1]);
+  return [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+}
+
 interface TeamMemberCardProps {
   member: TeamMember;
   candidateAvatarByEmail: ReadonlyMap<string, string>;
   sessionUserAvatar?: { email: string; url: string } | null;
   staggerIndex?: number;
+  teamLabel?: string;
+  canManage?: boolean;
+  onGoToTeam?: (teamId: string) => void;
   onMoveTo: (member: TeamMember) => void;
   onEdit: (member: TeamMember) => void;
   onDelete: (member: TeamMember) => void;
@@ -257,6 +278,9 @@ function TeamMemberCard({
   candidateAvatarByEmail,
   sessionUserAvatar,
   staggerIndex = 0,
+  teamLabel,
+  canManage = true,
+  onGoToTeam,
   onMoveTo,
   onEdit,
   onDelete,
@@ -376,6 +400,9 @@ function TeamMemberCard({
     onDelete(member);
   };
 
+  const memberName = memberDisplayName(member);
+  const memberTeamId = getTeamIdFromRef(member.teamId);
+
   return (
     <div
       className="xxl:col-span-4 xl:col-span-6 lg:col-span-6 md:col-span-6 sm:col-span-12 col-span-12 motion-safe:animate-pm-panel-in motion-reduce:animate-none"
@@ -415,9 +442,10 @@ function TeamMemberCard({
           </span>
           <button
             type="button"
-            aria-label="star"
-            onClick={() => onToggleStar(member)}
-            className={`team-member-star ${member.isStarred ? "text-warning" : "text-white"}`}
+            aria-label={member.isStarred ? `Unstar ${memberName}` : `Star ${memberName}`}
+            onClick={() => canManage && onToggleStar(member)}
+            disabled={!canManage}
+            className={`team-member-star ${member.isStarred ? "text-warning" : "text-white"} ${!canManage ? "cursor-not-allowed opacity-50" : ""}`}
           >
             <i className="ri-star-fill text-[1rem]" />
           </button>
@@ -431,6 +459,16 @@ function TeamMemberCard({
               <p className="mb-0 text-[0.75rem] text-[#8c9097] dark:text-white/50 text-truncate">
                 {memberDisplayEmail(member)}
               </p>
+              {teamLabel ? (
+                <button
+                  type="button"
+                  className="mt-1 inline-flex max-w-full items-center rounded-full bg-primary/10 px-2 py-0.5 text-[0.65rem] font-semibold text-primary hover:bg-primary/15"
+                  title={`View ${teamLabel} roster`}
+                  onClick={() => memberTeamId && onGoToTeam?.(memberTeamId)}
+                >
+                  {teamLabel}
+                </button>
+              ) : null}
               {member.isOrphan && (
                 <span
                   className="badge bg-warning/10 text-warning mt-1 inline-block text-[0.65rem]"
@@ -440,11 +478,13 @@ function TeamMemberCard({
                 </span>
               )}
             </div>
+            {canManage ? (
             <div className="hs-dropdown ti-dropdown" ref={dropdownRef}>
               <button
                 className="ti-btn ti-btn-sm ti-btn-light"
                 type="button"
-                aria-label="button"
+                aria-label={`Actions for ${memberName}`}
+                aria-haspopup="menu"
                 aria-expanded="false"
                 onClick={toggleDropdown}
               >
@@ -480,6 +520,7 @@ function TeamMemberCard({
                 </li>
               </ul>
             </div>
+            ) : null}
           </div>
           <div className="team-member-stats sm:flex items-center justify-evenly">
             <div className="text-center p-4 w-full">
@@ -497,7 +538,7 @@ function TeamMemberCard({
             <div className="text-center p-4 w-full">
               <p className="font-semibold mb-0">Position</p>
               <span className="text-[#8c9097] dark:text-white/50 text-[0.75rem]">
-                {member.position || "—"}
+                {member.seniority || member.position || "—"}
               </span>
             </div>
           </div>
@@ -632,24 +673,14 @@ function TeamMemberFormModal({
     return form.email.trim() ? findCandidateByFormEmail(allCandidates, form.email) : undefined;
   }, [allCandidates, form.email, form.employeeId]);
 
-  const avatarPreview = useMemo(() => {
-    const override = form.avatarImageUrl.trim();
-    const fromAts = (matchedCandidate?.profilePictureUrl || "").trim();
-    const hasPhoto = !!(override || fromAts);
-    const imgSrc = resolvePublicImageUrl(override || fromAts, DEFAULT_TEAM_AVATAR);
-    return { hasPhoto, imgSrc };
-  }, [form.avatarImageUrl, matchedCandidate?.profilePictureUrl]);
-
-  const [avatarPreviewBroken, setAvatarPreviewBroken] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarRemoving, setAvatarRemoving] = useState(false);
   const [photoHint, setPhotoHint] = useState<string | null>(null);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setAvatarPreviewBroken(false);
     setPhotoHint(null);
-  }, [open, avatarPreview.imgSrc, avatarPreview.hasPhoto, form.email]);
+  }, [open, form.email]);
 
   const handleAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -781,38 +812,19 @@ function TeamMemberFormModal({
 
         <div className="ti-modal-body px-4 py-4 sm:px-5 overflow-y-auto flex-1 space-y-4">
           <div className={styles.memberModalSection}>
-            <h3 className={styles.memberModalSectionTitle}>Live preview</h3>
-            <div className={styles.memberPreviewStrip}>
-              <div className={`${styles.memberAvatarPreview} flex items-center justify-center`}>
-                {!avatarPreview.hasPhoto || avatarPreviewBroken ? (
-                  <span className="text-[0.95rem] font-semibold text-primary">
-                    {initialsFromName(form.name)}
-                  </span>
-                ) : (
-                  <img
-                    src={avatarPreview.imgSrc}
-                    alt=""
-                    className="h-full w-full object-cover"
-                    onError={() => setAvatarPreviewBroken(true)}
-                  />
-                )}
-              </div>
-              <p className={styles.memberModalHint}>
-                Avatar uses the{" "}
-                <strong className="font-semibold text-defaulttextcolor dark:text-white/80">
-                  ATS profile photo
-                </strong>{" "}
-                when the email matches a candidate. Upload or remove the photo below to update the
-                candidate (and linked user) the same way as personal settings. If there is no photo,
-                initials show on cards.
-              </p>
-            </div>
-          </div>
-
-          <div className={styles.memberModalSection}>
             <h3 className={styles.memberModalSectionTitle}>Candidate &amp; team</h3>
             <div className="grid grid-cols-12 gap-x-4 gap-y-3">
               <div className="xl:col-span-12 col-span-12">
+                {isEdit ? (
+                  <div>
+                    <span className="form-label">Candidate (ATS)</span>
+                    <p className="mb-0 text-[0.8125rem] text-defaulttextcolor dark:text-white/85">
+                      {form.name || "—"}
+                    </p>
+                    <p className="mb-0 text-[0.72rem] text-muted dark:text-white/45">{form.email || "—"}</p>
+                  </div>
+                ) : (
+                <>
                 <label htmlFor="member-candidate" className="form-label">
                   Candidate (ATS)
                 </label>
@@ -856,34 +868,50 @@ function TeamMemberFormModal({
                     Linked to ATS record for <span className="font-medium">{matchedCandidate.email}</span>
                   </p>
                 )}
+                </>
+                )}
               </div>
               <div className="xl:col-span-12 col-span-12">
-                <label className="form-label" htmlFor="member-team-select">
-                  Team
-                </label>
-                <Select
-                  inputId="member-team-select"
-                  classNamePrefix="Select2"
-                  className="basic-multi-select"
-                  menuPlacement="auto"
-                  value={
-                    form.teamId
-                      ? teamOptions.find((o) => o.value === form.teamId) ?? {
-                          value: form.teamId,
-                          label: form.teamId,
-                        }
-                      : teamOptions.length > 0
-                        ? { value: teamOptions[0].value, label: teamOptions[0].label }
-                        : null
-                  }
-                  options={teamOptions}
-                  onChange={(opt) => {
-                    const val = (opt as { value: string } | null)?.value ?? "";
-                    onChange({ teamId: val });
-                  }}
-                  menuPortalTarget={selectMenuPortalTarget}
-                  styles={selectMenuLayerStyles}
-                />
+                {isEdit ? (
+                  <div>
+                    <span className="form-label">Team</span>
+                    <p className="mb-0 text-[0.8125rem] text-defaulttextcolor dark:text-white/85">
+                      {(teamOptions.find((o) => o.value === form.teamId)?.label ?? form.teamId) || "—"}
+                    </p>
+                    <p className="mb-0 mt-1 text-[0.72rem] text-muted dark:text-white/45">
+                      To change teams, close this dialog and use <strong>Move To</strong> on the member card.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <label className="form-label" htmlFor="member-team-select">
+                      Team
+                    </label>
+                    <Select
+                      inputId="member-team-select"
+                      classNamePrefix="Select2"
+                      className="basic-multi-select"
+                      menuPlacement="auto"
+                      value={
+                        form.teamId
+                          ? teamOptions.find((o) => o.value === form.teamId) ?? {
+                              value: form.teamId,
+                              label: form.teamId,
+                            }
+                          : teamOptions.length > 0
+                            ? { value: teamOptions[0].value, label: teamOptions[0].label }
+                            : null
+                      }
+                      options={teamOptions}
+                      onChange={(opt) => {
+                        const val = (opt as { value: string } | null)?.value ?? "";
+                        onChange({ teamId: val });
+                      }}
+                      menuPortalTarget={selectMenuPortalTarget}
+                      styles={selectMenuLayerStyles}
+                    />
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -891,36 +919,7 @@ function TeamMemberFormModal({
           <div className={styles.memberModalSection}>
             <h3 className={styles.memberModalSectionTitle}>Roster details</h3>
             <div className="grid grid-cols-12 gap-x-4 gap-y-3">
-              <div className="xl:col-span-6 col-span-12">
-                <label htmlFor="member-since" className="form-label">
-                  Member since <span className="text-muted font-normal">(label)</span>
-                </label>
-                <input
-                  id="member-since"
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. 16 months"
-                  value={form.memberSinceLabel}
-                  onChange={(e) => onChange({ memberSinceLabel: e.target.value })}
-                  autoComplete="off"
-                />
-              </div>
-              <div className="xl:col-span-6 col-span-12">
-                <label htmlFor="member-projects" className="form-label">
-                  Projects count
-                </label>
-                <input
-                  id="member-projects"
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  className="form-control"
-                  placeholder="0"
-                  value={form.projectsCount}
-                  onChange={(e) => onChange({ projectsCount: e.target.value })}
-                />
-              </div>
-              <div className="xl:col-span-6 col-span-12">
+              <div className="xl:col-span-12 col-span-12">
                 <label htmlFor="member-position" className="form-label">
                   Position
                 </label>
@@ -934,73 +933,34 @@ function TeamMemberFormModal({
                   autoComplete="organization-title"
                 />
               </div>
-              <div className="xl:col-span-6 col-span-12">
-                <label className="form-label" htmlFor="member-status-select">
-                  Presence
-                </label>
-                <Select
-                  inputId="member-status-select"
-                  classNamePrefix="Select2"
-                  className="basic-multi-select"
-                  menuPlacement="auto"
-                  value={{
-                    value: form.onlineStatus,
-                    label: form.onlineStatus === "online" ? "Online" : "Offline",
-                  }}
-                  options={[
-                    { value: "online", label: "Online" },
-                    { value: "offline", label: "Offline" },
-                  ]}
-                  onChange={(opt) =>
-                    onChange({
-                      onlineStatus:
-                        (opt as { value: "online" | "offline" } | null)?.value ?? "online",
-                    })
-                  }
-                  menuPortalTarget={selectMenuPortalTarget}
-                  styles={selectMenuLayerStyles}
-                />
-              </div>
-              <div className="xl:col-span-12 col-span-12">
-                <label htmlFor="member-lastseen" className="form-label">
-                  Last seen label
-                </label>
-                <input
-                  id="member-lastseen"
-                  type="text"
-                  className="form-control"
-                  placeholder="e.g. 8 min (shown when offline)"
-                  value={form.lastSeenLabel}
-                  onChange={(e) => onChange({ lastSeenLabel: e.target.value })}
-                  autoComplete="off"
-                />
-              </div>
-              <div className="xl:col-span-12 col-span-12">
-                <div className={styles.memberStarRow}>
-                  <div>
-                    <span className="block text-[0.8125rem] font-medium text-defaulttextcolor dark:text-white/90">
-                      Star on roster
-                    </span>
-                    <span className="text-[0.72rem] text-muted dark:text-white/45">
-                      Highlights this member in the team list.
-                    </span>
-                  </div>
-                  <div className="form-check form-switch mb-0 d-flex align-items-center">
-                    <input
-                      id="member-starred"
-                      type="checkbox"
-                      role="switch"
-                      className="form-check-input float-none m-0"
-                      checked={form.isStarred}
-                      onChange={(e) => onChange({ isStarred: e.target.checked })}
-                      aria-label="Star this member on the roster"
-                    />
-                    <label className="form-check-label sr-only" htmlFor="member-starred">
-                      Star on roster
-                    </label>
+              {isEdit ? (
+                <div className="xl:col-span-12 col-span-12">
+                  <div className={styles.memberStarRow}>
+                    <div>
+                      <span className="block text-[0.8125rem] font-medium text-defaulttextcolor dark:text-white/90">
+                        Star on roster
+                      </span>
+                      <span className="text-[0.72rem] text-muted dark:text-white/45">
+                        Highlights this member in the team list.
+                      </span>
+                    </div>
+                    <div className="form-check form-switch mb-0 d-flex align-items-center">
+                      <input
+                        id="member-starred"
+                        type="checkbox"
+                        role="switch"
+                        className="form-check-input float-none m-0"
+                        checked={form.isStarred}
+                        onChange={(e) => onChange({ isStarred: e.target.checked })}
+                        aria-label="Star this member on the roster"
+                      />
+                      <label className="form-check-label sr-only" htmlFor="member-starred">
+                        Star on roster
+                      </label>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : null}
             </div>
           </div>
 
@@ -1123,6 +1083,9 @@ const TeamsPage = () => {
   const auth = useAuth();
   const { user } = auth;
   const canManageTeams = hasPermission(auth, "update_team");
+  const canCreateRoster = hasPermission(auth, "create_team");
+  const canDeleteRoster = hasPermission(auth, "delete_team");
+  const canAddMembers = canManageTeams || canCreateRoster;
   const { menuPortalTarget: createTeamSelectPortalTarget, styles: createTeamSelectStyles } =
     usePmReactSelectStyles();
   const sessionUserAvatar = useMemo(() => {
@@ -1189,6 +1152,7 @@ const TeamsPage = () => {
     [teamGroups, selectedTeamId]
   );
   const mainTeamTitle = displayTeamLabel(selectedTeam?.name, selectedTeamId || "");
+  const isGlobalSearch = Boolean(searchQuery.trim());
 
   const fetchSidebarRoster = useCallback(async () => {
     const seq = ++sidebarFetchSeq.current;
@@ -1218,7 +1182,10 @@ const TeamsPage = () => {
     async (params?: { page?: number; search?: string }) => {
       setLoading(true);
       try {
-        if (teamGroups.length > 0 && !selectedTeamId) {
+        const activeSearch = resolveMemberSearchQuery(params, searchQuery);
+        const teamIdForQuery = activeSearch ? undefined : selectedTeamId;
+
+        if (teamGroups.length > 0 && !teamIdForQuery && !activeSearch) {
           setMembers([]);
           setTotalPages(0);
           setTotalResults(0);
@@ -1227,10 +1194,10 @@ const TeamsPage = () => {
         const result = await listTeamMembers({
           // "search" in params means caller set it explicitly (incl. cleared to
           // undefined); ?? would wrongly fall back to stale searchQuery on clear.
-          search: params && "search" in params ? params.search : searchQuery || undefined,
+          search: activeSearch,
           page: params?.page ?? page,
           limit: PAGE_SIZE,
-          ...(selectedTeamId ? { teamId: selectedTeamId } : {}),
+          ...(teamIdForQuery ? { teamId: teamIdForQuery } : {}),
         });
         setMembers(result.results ?? []);
         setTotalPages(result.totalPages ?? 0);
@@ -1318,6 +1285,13 @@ const TeamsPage = () => {
     fetchMembers({ page: 1, search: trimmed || undefined });
   };
 
+  const clearSearch = useCallback(() => {
+    setSearchInput("");
+    setSearchQuery("");
+    setPage(1);
+    fetchMembers({ page: 1, search: undefined });
+  }, [fetchMembers]);
+
   // Debounced live search — fires 400ms after typing stops. Button/Enter still
   // force it immediately; the early-return skips the fetch they already ran.
   useEffect(() => {
@@ -1347,6 +1321,8 @@ const TeamsPage = () => {
 
   const selectTeam = (tid: string) => {
     setPage(1);
+    setSearchInput("");
+    setSearchQuery("");
     setSelectedTeamId(tid);
   };
 
@@ -1420,7 +1396,8 @@ const TeamsPage = () => {
     try {
       await deleteTeamMember(getMemberId(member));
       await Swal.fire("Removed", "Team member removed.", "success");
-      fetchMembers({ page, search: searchQuery || undefined });
+      const nextPage = members.length <= 1 && page > 1 ? page - 1 : page;
+      fetchMembers({ page: nextPage, search: searchQuery || undefined });
       void fetchSidebarRoster();
     } catch {
       Swal.fire("Error", "Failed to remove team member.", "error");
@@ -1432,13 +1409,19 @@ const TeamsPage = () => {
     const inputOptions: Record<string, string> = {};
     teamGroups.forEach((t) => {
       const id = getTeamGroupId(t);
-      inputOptions[id] = displayTeamLabel(t.name, id);
+      if (id && id !== teamIdFromMember) {
+        inputOptions[id] = displayTeamLabel(t.name, id);
+      }
     });
+    if (!Object.keys(inputOptions).length) {
+      await Swal.fire("No other teams", "This member is not assigned to another team to move to.", "info");
+      return;
+    }
     const { value: selectedId } = await Swal.fire<string>({
       title: "Move member to team",
       input: "select",
       inputOptions: Object.keys(inputOptions).length > 0 ? inputOptions : { "": "No teams" },
-      inputValue: teamIdFromMember ?? "",
+      inputValue: Object.keys(inputOptions)[0],
       showCancelButton: true,
     });
     if (selectedId == null || selectedId === "") return;
@@ -1652,7 +1635,7 @@ const TeamsPage = () => {
               {totalResults.toString().padStart(2, "0")}{" "}
               <span className="text-slate-400">member{totalResults === 1 ? "" : "s"}</span>
             </span>
-            {!loading && selectedTeamId ? (
+            {!loading && selectedTeamId && !isGlobalSearch ? (
               <span
                 className="hidden max-w-[14rem] truncate text-[11px] text-slate-500 sm:inline dark:text-slate-400"
                 title={selectedTeam?.name || mainTeamTitle}
@@ -1661,19 +1644,28 @@ const TeamsPage = () => {
                 {totalPages > 1 ? ` · ${page}/${totalPages}` : ""}
               </span>
             ) : null}
+            {!loading && isGlobalSearch ? (
+              <span className="hidden text-[11px] text-slate-500 sm:inline dark:text-slate-400">
+                · across all teams
+              </span>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {canAddMembers && (
             <button
               type="button"
               onClick={() => openCreateForm()}
               className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-white transition hover:bg-slate-700 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
             >
-              <i className="ri-add-line" /> New member
+              <i className="ri-add-line" /> {selectedTeamId ? `Add to ${mainTeamTitle}` : "New member"}
             </button>
+            )}
+            {canManageTeams && (
             <TeamExcelDropdown
               onImportSuccess={handleImportSuccess}
-              filter={selectedTeamId ? { teamId: selectedTeamId } : undefined}
+              filter={selectedTeamId && !isGlobalSearch ? { teamId: selectedTeamId } : undefined}
             />
+            )}
           </div>
         </div>
 
@@ -1683,8 +1675,8 @@ const TeamsPage = () => {
             <input
               type="search"
               className="h-9 w-full rounded-full border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-900 focus:outline-none dark:border-white/10 dark:bg-bodybg2 dark:text-slate-200 dark:focus:border-white/40"
-              placeholder="Search by name or role"
-              aria-label="Search roster"
+              placeholder="Search all teams by name or role"
+              aria-label="Search roster across all teams"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -1698,6 +1690,16 @@ const TeamsPage = () => {
             Search
           </button>
         </div>
+        {isGlobalSearch ? (
+          <p className="mt-2 text-[0.72rem] text-slate-500 dark:text-white/45">
+            Showing matches across all teams. Pick a team under <strong>All teams</strong> to browse one roster
+            without search.
+          </p>
+        ) : selectedTeamId ? (
+          <p className="mt-2 text-[0.72rem] text-slate-500 dark:text-white/45">
+            Browsing <strong>{mainTeamTitle}</strong>. Search to find members on any team.
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-2 grid grid-cols-12 gap-6 sm:mt-4">
@@ -1713,7 +1715,7 @@ const TeamsPage = () => {
                   className="grid grid-cols-12 gap-x-6 gap-y-6 content-start"
                   aria-live="polite"
                 >
-                  {!selectedTeamId ? (
+                  {!selectedTeamId && !isGlobalSearch ? (
                     <div className="col-span-12">
                       <div className="box custom-box overflow-hidden rounded-xl border border-dashed border-defaultborder/80 dark:border-white/15">
                         <div className="box-body flex min-h-[min(42vh,480px)] flex-col items-center justify-center gap-3 px-6 py-14 text-center">
@@ -1741,12 +1743,16 @@ const TeamsPage = () => {
                             <>
                               <p className="mb-0 max-w-md text-[0.8125rem] text-muted dark:text-white/50">
                                 No members match{" "}
-                                <strong className="text-defaulttextcolor">“{searchQuery}”</strong>. Try a different
-                                name, email, or role.
+                                <strong className="text-defaulttextcolor">“{searchQuery}”</strong>
+                                {isGlobalSearch
+                                  ? " across any team."
+                                  : ` in ${mainTeamTitle}.`}
+                                {" "}Try a different name, email, or role
+                                {isGlobalSearch ? "" : ", or search all teams above."}
                               </p>
                               <button
                                 type="button"
-                                onClick={() => setSearchInput("")}
+                                onClick={clearSearch}
                                 className="mt-1 inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600 transition hover:bg-slate-50 dark:border-white/15 dark:text-slate-300 dark:hover:bg-white/5"
                               >
                                 <i className="ri-close-line" /> Clear search
@@ -1770,6 +1776,9 @@ const TeamsPage = () => {
                         candidateAvatarByEmail={candidateAvatarByEmail}
                         sessionUserAvatar={sessionUserAvatar}
                         staggerIndex={index}
+                        teamLabel={isGlobalSearch ? getMemberTeamName(member) : undefined}
+                        canManage={canManageTeams}
+                        onGoToTeam={selectTeam}
                         onMoveTo={handleMoveTo}
                         onEdit={openEditForm}
                         onDelete={handleDeleteMember}
@@ -1779,7 +1788,7 @@ const TeamsPage = () => {
                   )}
                 </div>
 
-                {totalPages > 1 && selectedTeamId && hasMembers ? (
+                {totalPages > 1 && (selectedTeamId || isGlobalSearch) && hasMembers ? (
                   <nav className="mt-4 shrink-0" aria-label="Page navigation">
                     <ul className="ti-pagination mb-0 justify-end">
                       <li className={`page-item ${page <= 1 ? "disabled" : ""}`}>
@@ -1796,7 +1805,7 @@ const TeamsPage = () => {
                           Previous
                         </button>
                       </li>
-                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                      {rosterPaginationPages(page, totalPages).map((p) => (
                         <li key={p} className={`page-item ${p === page ? "active" : ""}`}>
                           <button
                             type="button"
@@ -1839,6 +1848,7 @@ const TeamsPage = () => {
                 All teams
               </span>
               <div className="flex flex-wrap gap-1">
+                {canCreateRoster && (
                 <button
                   type="button"
                   className="ti-btn ti-btn-light !mb-0 !px-2 !py-1 !text-[0.75rem]"
@@ -1850,6 +1860,8 @@ const TeamsPage = () => {
                   New team
                   <i className="ri-add-line ms-1 align-middle" />
                 </button>
+                )}
+                {canAddMembers && (
                 <button
                   type="button"
                   className="ti-btn ti-btn-primary !mb-0 !px-2 !py-1 !text-[0.75rem]"
@@ -1858,6 +1870,7 @@ const TeamsPage = () => {
                   Add member
                   <i className="ri-add-line ms-1 align-middle" />
                 </button>
+                )}
               </div>
             </div>
             <div className="box-body min-h-0 flex-1 !p-0">
@@ -1905,6 +1918,7 @@ const TeamsPage = () => {
                                 {displayTeamLabel(team.name, tid)}
                               </button>
                               <div className="flex items-center gap-0.5 shrink-0 mb-2">
+                                {canManageTeams && (
                                 <button
                                   type="button"
                                   aria-label="Rename team"
@@ -1913,6 +1927,8 @@ const TeamsPage = () => {
                                 >
                                   <i className="ri-pencil-line text-[0.95rem]" />
                                 </button>
+                                )}
+                                {canDeleteRoster && (
                                 <button
                                   type="button"
                                   aria-label="Delete team"
@@ -1921,6 +1937,8 @@ const TeamsPage = () => {
                                 >
                                   <i className="ri-delete-bin-line text-[0.95rem]" />
                                 </button>
+                                )}
+                                {canAddMembers && (
                                 <button
                                   type="button"
                                   aria-label="Add member to team"
@@ -1929,6 +1947,7 @@ const TeamsPage = () => {
                                 >
                                   <i className="ri-add-line" />
                                 </button>
+                                )}
                               </div>
                             </div>
                           </li>
@@ -1938,7 +1957,9 @@ const TeamsPage = () => {
                               <button
                                 type="button"
                                 className={styles.memberPreview}
-                                onClick={() => openEditForm(member)}
+                                aria-label={`Edit ${memberDisplayName(member)}`}
+                                onClick={() => canManageTeams ? openEditForm(member) : undefined}
+                                disabled={!canManageTeams}
                               >
                                 <div className="flex items-center gap-2">
                                   <span
@@ -2019,6 +2040,7 @@ const TeamsPage = () => {
                   setCreateTeamOpen(false);
                   setCreateTeamEmployees([]);
                 }}
+                aria-label="Close dialog"
               >
                 <i className="ri-close-line" />
               </button>

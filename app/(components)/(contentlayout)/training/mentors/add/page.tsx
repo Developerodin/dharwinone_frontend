@@ -7,6 +7,8 @@ import Seo from '@/shared/layout-components/seo/seo'
 import Swal from 'sweetalert2'
 import { AxiosError } from 'axios'
 import * as authApi from '@/shared/lib/api/auth'
+import { useAuth } from '@/shared/contexts/auth-context'
+import { hasPermission } from '@/shared/lib/permissions'
 import type { RegisterMentorPayload } from '@/shared/lib/api/auth'
 
 const PASSWORD_MIN_LENGTH = 8
@@ -23,6 +25,8 @@ function getErrorMessage(err: any): string {
 
 const AddMentor = () => {
   const router = useRouter()
+  const auth = useAuth()
+  const canManageMentors = hasPermission(auth, 'manage_training_mentors')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -32,37 +36,42 @@ const AddMentor = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  const validateForm = (): string | null => {
+    const trimmedName = name.trim()
+    const trimmedEmail = email.trim().toLowerCase()
+
+    if (!trimmedName) return 'Name is required.'
+    if (!trimmedEmail) return 'Email is required.'
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      return 'Please enter a valid email address.'
+    }
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      return 'Password must be at least 8 characters.'
+    }
+    if (!/[A-Z]/.test(password) || !/\d/.test(password)) {
+      return 'Password must contain at least 1 capital letter and 1 number.'
+    }
+    if (password !== confirmPassword) return 'Passwords do not match.'
+    return null
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
+    if (!canManageMentors) {
+      setError('You do not have permission to create mentors.')
+      return
+    }
+
+    const validationError = validateForm()
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+
     const trimmedName = name.trim()
     const trimmedEmail = email.trim().toLowerCase()
-
-    if (!trimmedName) {
-      setError('Name is required.')
-      return
-    }
-    if (!trimmedEmail) {
-      setError('Email is required.')
-      return
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setError('Please enter a valid email address.')
-      return
-    }
-    if (password.length < PASSWORD_MIN_LENGTH) {
-      setError('Password must be at least 8 characters.')
-      return
-    }
-    if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
-      setError('Password must contain at least 1 letter and 1 number.')
-      return
-    }
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.')
-      return
-    }
 
     setLoading(true)
 
@@ -124,7 +133,7 @@ const AddMentor = () => {
               <div className="box-body">
                 <form onSubmit={handleSubmit}>
                   {error && (
-                    <div className="mb-6 p-4 bg-danger/10 border border-danger/30 text-danger rounded-md text-sm">
+                    <div className="mb-6 p-4 bg-danger/10 border border-danger/30 text-danger rounded-md text-sm" role="alert" aria-live="polite">
                       {error}
                     </div>
                   )}
@@ -185,7 +194,7 @@ const AddMentor = () => {
                         id="mentor-password"
                         type={showPassword ? 'text' : 'password'}
                         className="form-control pe-10"
-                        placeholder="Min 8 characters, at least 1 letter and 1 number"
+                        placeholder="Min 8 characters, at least 1 capital letter and 1 number"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         autoComplete="new-password"
@@ -202,7 +211,7 @@ const AddMentor = () => {
                       </button>
                     </div>
                     <p className="text-[0.75rem] text-defaulttextcolor/70 mt-1 mb-0">
-                      Minimum 8 characters; must contain at least 1 letter and 1 number.
+                      Minimum 8 characters; must contain at least 1 capital letter and 1 number.
                     </p>
                   </div>
 
@@ -241,7 +250,7 @@ const AddMentor = () => {
                     <button
                       type="submit"
                       className="ti-btn ti-btn-primary"
-                      disabled={loading}
+                      disabled={loading || !canManageMentors}
                     >
                       {loading ? 'Adding...' : 'Add Mentor'}
                     </button>

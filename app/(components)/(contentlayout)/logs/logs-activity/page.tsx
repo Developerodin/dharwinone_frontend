@@ -29,6 +29,7 @@ import {
 } from "@/shared/lib/activity-log-catalog";
 import { ActivityLogFilterSelect } from "@/shared/components/activity-log-filter-select";
 import { ActivityLogLocationCell } from "@/shared/components/activity-log-location-cell";
+import { ActivityLogChangesBlock } from "@/shared/components/activity-log-changes";
 import ListPagination from "@/shared/components/ListPagination";
 import { getActivityLogDisplayIp } from "@/shared/lib/activity-log-location-display";
 import { formatYmdLocal, parseYmdLocal } from "@/shared/lib/leave-date-range";
@@ -1049,6 +1050,8 @@ export default function LogsActivityPage() {
                                   </div>
                                 </div>
                               </div>
+
+                              <ActivityLogChangesBlock log={log} />
 
                               <details className="rounded-md border border-defaultborder/70 bg-gray-50/60 dark:bg-gray-800/30 px-3 py-2 text-[0.75rem]">
                                 <summary className="cursor-pointer font-medium text-primary select-none">

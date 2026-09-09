@@ -33,6 +33,7 @@ export type WizardContextValue = {
 
   /** Centered overlay for blocking validation feedback (replaces top banner). */
   validationOverlay: WizardFeedbackOverlayState;
+  dismissValidationOverlay: () => void;
 
   submit: () => Promise<void>;
   goNext: () => void;

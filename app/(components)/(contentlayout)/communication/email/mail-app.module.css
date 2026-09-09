@@ -152,8 +152,58 @@
   margin-top: 0.75rem;
   margin-bottom: 0;
   color: var(--mail-ink-soft);
-  font-size: 0.77rem;
+  font-size: 0.8125rem;
   line-height: 1.45;
+}
+
+.remoteImagesBanner {
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--mail-radius-sm);
+  background: rgb(254 252 232 / 0.9);
+  border: 1px solid rgb(250 204 21 / 0.35);
+}
+
+:global(.dark) .remoteImagesBanner {
+  background: rgb(66 32 6 / 0.45);
+  border-color: rgb(180 83 9 / 0.35);
+}
+
+:global(.mail-html-body) img[data-remote-image="blocked"] {
+  display: inline-block;
+  min-width: 3rem;
+  min-height: 2rem;
+  background: rgb(231 229 228 / 0.65);
+  border-radius: 0.25rem;
+}
+
+:global(.dark .mail-html-body) img[data-remote-image="blocked"] {
+  background: rgb(68 64 60 / 0.65);
+}
+
+/* Third-party HTML emails hardcode light-mode inline colors (#000, #212121).
+   In dark app theme, render the body on a fixed light "paper" canvas (Gmail pattern). */
+:global(.dark) .mailHtmlCanvas {
+  background: #faf8f5;
+  color: #1c1917;
+  color-scheme: light;
+  border-radius: calc(var(--mail-radius-sm) + 2px);
+  border: 1px solid rgba(28, 25, 23, 0.1);
+  padding: 1rem 1.125rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+:global(.dark) .mailHtmlCanvas :global(img[data-remote-image="blocked"]) {
+  background: rgb(231 229 228 / 0.65);
+}
+
+.mailRoot :global(.dark) .mailHtmlCanvas :global(.mail-quoted) {
+  border-top-color: rgba(120, 113, 108, 0.12);
+}
+
+.mailRoot :global(.dark) .mailHtmlCanvas :global(.mail-quoted blockquote),
+.mailRoot :global(.dark) .mailHtmlCanvas :global(blockquote) {
+  border-left-color: rgba(194, 65, 12, 0.45);
+  background: rgba(120, 113, 108, 0.05);
 }
 
 .composeError {
@@ -497,6 +547,123 @@
   min-width: 0;
 }
 
+.threadListSelectionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+  min-height: 3.25rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid rgba(28, 25, 23, 0.08);
+  background: var(--mail-accent-mist);
+}
+
+:global(.dark) .threadListSelectionBar {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.threadListSelectionCount {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--mail-accent);
+  white-space: nowrap;
+}
+
+.threadListSelectionActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.selectionActionBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: var(--mail-radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.selectionActionBtn:focus-visible {
+  outline: 2px solid var(--mail-accent);
+  outline-offset: 2px;
+}
+
+.selectionActionBtnNeutral {
+  background: var(--mail-paper-elevated);
+  border-color: rgba(28, 25, 23, 0.12);
+  color: var(--mail-ink);
+}
+
+.selectionActionBtnNeutral:hover {
+  background: var(--mail-accent-mist);
+  border-color: rgba(194, 65, 12, 0.2);
+  color: var(--mail-accent);
+}
+
+:global(.dark) .selectionActionBtnNeutral {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+:global(.dark) .selectionActionBtnNeutral:hover {
+  border-color: rgba(251, 146, 60, 0.3);
+}
+
+.selectionActionBtnDanger {
+  background: rgba(220, 38, 38, 0.1);
+  border-color: rgba(220, 38, 38, 0.28);
+  color: #b91c1c;
+}
+
+.selectionActionBtnDanger:hover {
+  background: rgba(220, 38, 38, 0.16);
+  border-color: rgba(220, 38, 38, 0.4);
+  color: #991b1b;
+}
+
+:global(.dark) .selectionActionBtnDanger {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.28);
+  color: #fca5a5;
+}
+
+:global(.dark) .selectionActionBtnDanger:hover {
+  background: rgba(248, 113, 113, 0.2);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #fecaca;
+}
+
+@media (max-width: 420px) {
+  .selectionActionBtnLabel {
+    display: none;
+  }
+
+  .selectionActionBtn {
+    padding: 0.5rem;
+  }
+}
+
 .threadListScroll {
   flex: 1 1 0%;
   min-height: 0;
@@ -625,6 +792,123 @@
 
 :global(.dark) .modalPanel {
   border-color: rgba(255, 255, 255, 0.08);
+}
+
+.confirmDialog {
+  width: 100%;
+  max-width: 22rem;
+  padding: 1.25rem;
+  background: var(--mail-paper-elevated);
+  color: var(--mail-ink);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.confirmDialogTitle {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.confirmDialogMessage {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--mail-ink-soft);
+}
+
+.confirmDialogActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 0.25rem;
+}
+
+.confirmDialogCancel,
+.confirmDialogDanger,
+.confirmDialogPrimary {
+  min-height: 44px;
+  min-width: 5.5rem;
+  padding: 0 1rem;
+  border-radius: var(--mail-radius-sm);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.confirmDialogCancel {
+  background: var(--mail-paper);
+  color: var(--mail-ink);
+  border-color: rgba(28, 25, 23, 0.12);
+}
+
+:global(.dark) .confirmDialogCancel {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.confirmDialogCancel:hover {
+  background: rgba(28, 25, 23, 0.04);
+}
+
+:global(.dark) .confirmDialogCancel:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.confirmDialogCancel:focus-visible,
+.confirmDialogDanger:focus-visible,
+.confirmDialogPrimary:focus-visible {
+  outline: 2px solid var(--mail-accent);
+  outline-offset: 2px;
+}
+
+.confirmDialogDanger {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.confirmDialogDanger:hover {
+  background: #b91c1c;
+}
+
+.confirmDialogPrimary {
+  background: var(--mail-accent);
+  color: #ffffff;
+}
+
+.confirmDialogPrimary:hover {
+  background: var(--mail-accent-hover);
+}
+
+/* Compose / quick-add modals: global .form-label uses dark:text-defaulttextcolor/70
+   (white) while dark:bg-bodydark is not a Tailwind token, so the body stays white. */
+.composeModalBody {
+  background: var(--mail-paper-elevated);
+  color: var(--mail-ink);
+}
+
+.composeModalBody :global(.form-label) {
+  color: var(--mail-ink) !important;
+}
+
+.composeEditor {
+  background: var(--mail-paper-elevated);
+  border-color: rgba(28, 25, 23, 0.1);
+}
+
+:global(.dark) .composeEditor {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.composeEditor :global(.tiptap-toolbar),
+.composeEditor :global(.tiptap-content),
+.composeEditor :global(.ProseMirror) {
+  background: var(--mail-paper-elevated) !important;
+  color: var(--mail-ink);
 }
 
 .quickAddInput:focus {
@@ -1255,4 +1539,158 @@
 
 .mailboxAvatarBtn:not(.mailboxAvatarBtnActive):hover .mailboxProviderBadge {
   transform: scale(1.08);
+}
+
+/* ── Inline notice ─────────────────────────────────────────────────────────
+   Replaces alert() for action feedback. alert() steals focus, is announced as a
+   system dialog rather than page content, and gave the user no way to retry.
+   Anchored bottom-right so it never covers the reading pane's action bar. */
+.mailNotice {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  width: min(26rem, calc(100vw - 2.5rem));
+  padding: 0.875rem 0.875rem 0.875rem 1rem;
+  border-radius: var(--mail-radius-sm);
+  background: var(--mail-paper-elevated);
+  color: var(--mail-ink);
+  border: 1px solid rgba(28, 25, 23, 0.08);
+  border-left: 3px solid var(--mail-notice-tone, var(--mail-ink-faint));
+  box-shadow: var(--mail-shadow-hover);
+  animation: mailFadeUp 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+:global(.dark) .mailNotice {
+  border-color: rgba(255, 255, 255, 0.08);
+  border-left-color: var(--mail-notice-tone, var(--mail-ink-faint));
+}
+
+.mailNoticeError {
+  --mail-notice-tone: #b91c1c;
+}
+
+.mailNoticeSuccess {
+  --mail-notice-tone: var(--mail-success);
+}
+
+:global(.dark) .mailNoticeError {
+  --mail-notice-tone: #f87171;
+}
+
+.mailNoticeIcon {
+  flex-shrink: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+  color: var(--mail-notice-tone);
+}
+
+.mailNoticeBody {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--mail-ink);
+}
+
+.mailNoticeAction {
+  margin-top: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--mail-accent);
+  background: var(--mail-accent-mist);
+  border: 0;
+  cursor: pointer;
+}
+
+.mailNoticeAction:hover {
+  color: var(--mail-accent-hover);
+}
+
+/* Visual glyph is small, but the hit area meets the 44px minimum. */
+.mailNoticeDismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -0.625rem -0.5rem -0.625rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--mail-ink-faint);
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.mailNoticeDismiss:hover {
+  color: var(--mail-ink);
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────
+   The empty stage runs an 80s mesh drift and a 120s orbit, the mailbox rail
+   pulses a halo forever, and the list shimmer never stops. All of that is
+   decorative; none of it should run for someone who asked the OS for less. */
+@media (prefers-reduced-motion: reduce) {
+  .mailRoot *,
+  .mailRoot *::before,
+  .mailRoot *::after,
+  .mailNotice {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .mailEmptyMesh,
+  .mailEmptyOrbit {
+    display: none;
+  }
+}
+
+/* ── Keyboard focus ────────────────────────────────────────────────────────
+   Folder rows and thread rows are operable by keyboard now, so focus has to be
+   visible. Uses the accent colour rather than the UA default, which is close to
+   invisible on the dark paper. */
+.threadRow:focus-visible,
+.navItem button:focus-visible,
+.mailboxAvatarBtn:focus-visible,
+.mailNoticeAction:focus-visible,
+.mailNoticeDismiss:focus-visible {
+  outline: 2px solid var(--mail-accent);
+  outline-offset: -2px;
+  border-radius: var(--mail-radius-sm);
+}
+
+:global(.dark) .threadRow:focus-visible,
+:global(.dark) .navItem button:focus-visible,
+:global(.dark) .mailboxAvatarBtn:focus-visible {
+  outline-color: #fb923c;
+}
+
+/* ── Touch targets ─────────────────────────────────────────────────────────
+   The per-row star and mark-unread controls sit at roughly 24px, well under the
+   44px minimum, and the quick-contact remove button is 16px and only appears on
+   hover - unreachable on a touch screen. Grow them for coarse pointers only, so
+   the desktop layout is unchanged. */
+@media (pointer: coarse) {
+  .rowIconBtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .quickRemoveBtn {
+    width: 28px;
+    height: 28px;
+    /* Hover cannot reveal anything on touch, so it is always visible there. */
+    opacity: 1;
+  }
 }

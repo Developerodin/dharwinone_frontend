@@ -9,6 +9,7 @@ export interface WizardFeedbackOverlayProps {
   status: WizardFeedbackOverlayStatus;
   title: string;
   description?: string;
+  onDismiss?: () => void;
   testId?: string;
   titleId?: string;
   descId?: string;
@@ -22,6 +23,7 @@ export function WizardFeedbackOverlay({
   status,
   title,
   description,
+  onDismiss,
   testId = "wizard-feedback-overlay",
   titleId = "wizard-feedback-title",
   descId = "wizard-feedback-desc",
@@ -87,7 +89,7 @@ export function WizardFeedbackOverlay({
             </svg>
           )}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p id={titleId} className={`${styles.title} text-defaulttextcolor`}>
             {title}
           </p>
@@ -101,6 +103,16 @@ export function WizardFeedbackOverlay({
             </p>
           ) : null}
         </div>
+        {isError && onDismiss ? (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className={styles.dismiss}
+            aria-label="Dismiss validation message"
+          >
+            <i className="ri-close-line" aria-hidden="true" />
+          </button>
+        ) : null}
       </div>
     </WizardOverlayShell>
   );

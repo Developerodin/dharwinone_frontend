@@ -1,7 +1,7 @@
 "use client"
 import Seo from '@/shared/layout-components/seo/seo'
 import React, { Fragment, useMemo, useState, useEffect, useCallback, useRef } from 'react'
-import { useTable, useSortBy } from 'react-table'
+import { useTable } from 'react-table'
 import Link from 'next/link'
 import Swal from 'sweetalert2'
 import { AxiosError } from 'axios'
@@ -9,43 +9,119 @@ import * as mentorsApi from '@/shared/lib/api/mentors'
 import type { Mentor } from '@/shared/lib/api/mentors'
 import MentorViewModal from './_components/MentorViewModal'
 import MentorProfileImageModal from './_components/MentorProfileImageModal'
+import ListPagination from '@/shared/components/ListPagination'
+import { useAuth } from '@/shared/contexts/auth-context'
+import { hasPermission } from '@/shared/lib/permissions'
+import { getInitials } from '@/shared/lib/initials'
+import { openHsOverlay, closeHsOverlay } from '../evaluation/_components/evaluation-overlay'
 
-// Interface for display purposes
+const ALLOWED_PROFILE_IMAGE_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp'])
+const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024
+
+function getMentorStatusBadgeClass(status: string): string {
+  const normalized = status.toLowerCase()
+  if (normalized === 'active') {
+    return 'bg-success/10 text-success border border-success/30'
+  }
+  if (normalized === 'inactive') {
+    return 'bg-gray-100 dark:bg-black/20 text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600'
+  }
+  return 'bg-warning/10 text-warning border border-warning/30'
+}
+
+function MentorRowAvatar({
+  name,
+  imageUrl,
+  className = 'w-10 h-10 rounded-full',
+  onClick,
+  onKeyDown,
+}: {
+  name: string
+  imageUrl?: string | null
+  className?: string
+  onClick?: () => void
+  onKeyDown?: (e: React.KeyboardEvent) => void
+}) {
+  const [imgFailed, setImgFailed] = useState(false)
+  const showImg = Boolean(imageUrl) && !imgFailed
+  const interactive = Boolean(onClick)
+
+  if (showImg) {
+    return (
+      <img
+        src={imageUrl!}
+        alt={name}
+        className={`object-cover flex-shrink-0 ${interactive ? 'cursor-pointer' : ''} ${className}`}
+        role={interactive ? 'button' : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        onKeyDown={onKeyDown}
+        onClick={onClick}
+        onError={() => setImgFailed(true)}
+      />
+    )
+  }
+
+  return (
+    <span
+      className={`flex items-center justify-center bg-primary/10 text-primary font-semibold text-sm flex-shrink-0 ring-1 ring-primary/15 ${interactive ? 'cursor-pointer' : ''} ${className}`}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={onKeyDown}
+      onClick={onClick}
+      aria-label={name}
+    >
+      {getInitials(name)}
+    </span>
+  )
+}
+
 interface MentorRow {
   id: string
   name: string
   displayPicture: string
+  profileImageUrl?: string | null
   phone: string
   email: string
   skills: string[]
   expertise: string
   experience: number
   bio: string
+  status: string
 }
 
 const Mentors = () => {
+  const auth = useAuth()
+  const canManageMentors = hasPermission(auth, 'manage_training_mentors')
   const [mentors, setMentors] = useState<MentorRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [listError, setListError] = useState<string | null>(null)
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [viewMentor, setViewMentor] = useState<Mentor | null>(null)
   const [viewMentorLoading, setViewMentorLoading] = useState(false)
+  const [viewingMentorId, setViewingMentorId] = useState<string | null>(null)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'' | 'active' | 'inactive'>('')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [totalResults, setTotalResults] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
   const [sortBy, setSortBy] = useState<string>('createdAt:desc')
 
-  // Profile image modal state
   const [profileImageMentor, setProfileImageMentor] = useState<MentorRow | null>(null)
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null)
   const [profileImageLoading, setProfileImageLoading] = useState(false)
   const [profileImageUploading, setProfileImageUploading] = useState(false)
   const [profileImageError, setProfileImageError] = useState<string | null>(null)
 
-  // Helper function to map Mentor API response to MentorRow format
+  const fetchMentorsRef = useRef<() => Promise<void>>()
+  const fetchGenerationRef = useRef(0)
+  const viewRequestIdRef = useRef(0)
+
+  const hasActiveFilters = Boolean(debouncedSearchQuery.trim() || statusFilter)
+
   const mapMentorToRow = useCallback((mentor: Mentor): MentorRow => {
-    // Format expertise from array to string
     const expertiseStr = mentor.expertise && mentor.expertise.length > 0
       ? mentor.expertise.map(exp => {
           const parts = []
@@ -56,7 +132,6 @@ const Mentors = () => {
         }).filter(Boolean).join(', ')
       : ''
 
-    // Calculate experience from experience array
     const experienceYears = mentor.experience && mentor.experience.length > 0
       ? mentor.experience.reduce((total, exp) => {
           if (exp.startDate && exp.endDate) {
@@ -67,7 +142,7 @@ const Mentors = () => {
                 const years = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 365)
                 return total + Math.max(0, years)
               }
-            } catch (e) {
+            } catch {
               // Invalid date, skip
             }
           }
@@ -78,37 +153,41 @@ const Mentors = () => {
     return {
       id: mentor.id,
       name: mentor.user?.name || 'Unknown',
-      displayPicture: mentor.profileImageUrl || '/assets/images/faces/1.jpg',
+      displayPicture: mentor.profileImageUrl || '',
+      profileImageUrl: mentor.profileImageUrl || null,
       phone: mentor.phone || '',
       email: mentor.user?.email || '',
       skills: mentor.skills || [],
       expertise: expertiseStr,
       experience: Math.round(experienceYears),
       bio: mentor.bio || '',
+      status: mentor.status || 'active',
     }
   }, [])
 
-  // Use ref to store fetchMentors to avoid circular dependencies
-  const fetchMentorsRef = useRef<() => Promise<void>>()
-
-  // Fetch mentors from Mentors API
   const fetchMentors = useCallback(async () => {
+    const generation = ++fetchGenerationRef.current
     setLoading(true)
+    setListError(null)
     try {
       const params: mentorsApi.ListMentorsParams = {
         page: currentPage,
         limit: pageSize,
         sortBy,
-        ...(searchQuery.trim() && { search: searchQuery.trim() }),
+        ...(debouncedSearchQuery.trim() && { search: debouncedSearchQuery.trim() }),
+        ...(statusFilter && { status: statusFilter }),
       }
-      
+
       const response = await mentorsApi.listMentors(params)
-      
+      if (generation !== fetchGenerationRef.current) return
+
       const mappedMentors = response.results.map(mapMentorToRow)
       setMentors(mappedMentors)
       setTotalResults(response.totalResults)
       setTotalPages(response.totalPages)
     } catch (err) {
+      if (generation !== fetchGenerationRef.current) return
+
       console.error('Error fetching mentors:', err)
       const msg =
         err instanceof AxiosError && err.response?.data?.message
@@ -116,45 +195,59 @@ const Mentors = () => {
           : err instanceof Error
           ? err.message
           : 'Failed to load mentors.'
-      await Swal.fire({
-        icon: 'error',
-        title: 'Failed to load mentors',
-        text: msg,
-        toast: true,
-        position: 'top-end',
-        timer: 4000,
-        showConfirmButton: false,
-        timerProgressBar: true,
-      })
+      setListError(msg)
       setMentors([])
       setTotalResults(0)
       setTotalPages(0)
     } finally {
-      setLoading(false)
+      if (generation === fetchGenerationRef.current) {
+        setLoading(false)
+      }
     }
-  }, [currentPage, pageSize, sortBy, searchQuery])
+  }, [currentPage, pageSize, sortBy, debouncedSearchQuery, statusFilter, mapMentorToRow])
 
-  // Update ref when fetchMentors changes
   useEffect(() => {
     fetchMentorsRef.current = fetchMentors
   }, [fetchMentors])
 
-  // Fetch mentors when dependencies change
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [searchQuery])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [debouncedSearchQuery, statusFilter, sortBy, pageSize])
+
+  useEffect(() => {
+    setSelectedRows(new Set())
+  }, [currentPage, pageSize, sortBy, debouncedSearchQuery, statusFilter])
+
   useEffect(() => {
     fetchMentors()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, pageSize, sortBy, searchQuery])
+  }, [fetchMentors])
 
-  // Handle view mentor - fetch full details and open modal
+  const dismissViewMentorModal = useCallback(() => {
+    closeHsOverlay('#view-mentor-modal')
+    setViewMentor(null)
+  }, [])
+
   const handleViewMentor = async (mentorId: string) => {
+    const requestId = ++viewRequestIdRef.current
+    setViewMentor(null)
     setViewMentorLoading(true)
+    setViewingMentorId(mentorId)
+    openHsOverlay('#view-mentor-modal')
     try {
       const mentor = await mentorsApi.getMentor(mentorId)
+      if (requestId !== viewRequestIdRef.current) return
       setViewMentor(mentor)
-      setTimeout(() => {
-        ;(window as any).HSOverlay?.open(document.querySelector('#view-mentor-modal'))
-      }, 100)
     } catch (err) {
+      if (requestId !== viewRequestIdRef.current) return
+      setViewMentor(null)
+      closeHsOverlay('#view-mentor-modal')
       const msg =
         err instanceof AxiosError && err.response?.data?.message
           ? String(err.response.data.message)
@@ -170,12 +263,16 @@ const Mentors = () => {
         timerProgressBar: true,
       })
     } finally {
-      setViewMentorLoading(false)
+      if (requestId === viewRequestIdRef.current) {
+        setViewMentorLoading(false)
+        setViewingMentorId(null)
+      }
     }
   }
 
   const openProfileImageModal = useCallback(
     async (mentor: MentorRow) => {
+      if (!canManageMentors) return
       setProfileImageMentor(mentor)
       setProfileImageUrl(null)
       setProfileImageError(null)
@@ -183,26 +280,35 @@ const Mentors = () => {
 
       try {
         const info = await mentorsApi.getMentorProfileImage(mentor.id)
-        setProfileImageUrl(info?.url ?? null)
+        setProfileImageUrl(info?.url ?? mentor.profileImageUrl ?? null)
       } catch (err) {
-        // 404 or other errors – just log and keep placeholder
         console.error('Failed to fetch profile image URL', err)
+        setProfileImageUrl(mentor.profileImageUrl ?? null)
       } finally {
         setProfileImageLoading(false)
       }
 
-      setTimeout(() => {
-        ;(window as any).HSOverlay?.open(document.querySelector('#mentor-profile-image-modal'))
-      }, 50)
+      setTimeout(() => openHsOverlay('#mentor-profile-image-modal'), 50)
     },
-    []
+    [canManageMentors]
   )
 
   const handleProfileImageFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = e.target.files?.[0]
-    if (!file || !profileImageMentor) return
+    if (!file || !profileImageMentor || !canManageMentors) return
+
+    if (!ALLOWED_PROFILE_IMAGE_TYPES.has(file.type)) {
+      setProfileImageError('Please choose a PNG, JPG, or WEBP image.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > MAX_PROFILE_IMAGE_BYTES) {
+      setProfileImageError('Image must be 5 MB or smaller.')
+      e.target.value = ''
+      return
+    }
 
     setProfileImageUploading(true)
     setProfileImageError(null)
@@ -210,11 +316,9 @@ const Mentors = () => {
     try {
       await mentorsApi.uploadMentorProfileImage(profileImageMentor.id, file)
 
-      // Refresh image URL
       const info = await mentorsApi.getMentorProfileImage(profileImageMentor.id)
       setProfileImageUrl(info?.url ?? null)
 
-      // Optionally refresh mentors list to reflect any backend changes
       if (fetchMentorsRef.current) {
         await fetchMentorsRef.current()
       }
@@ -252,8 +356,19 @@ const Mentors = () => {
     }
   }
 
-  // Delete a single mentor
+  const refreshAfterDelete = useCallback(async (deletedCount: number) => {
+    const shouldDecrementPage = mentors.length <= deletedCount && currentPage > 1
+    if (shouldDecrementPage) {
+      setCurrentPage((page) => Math.max(1, page - 1))
+      return
+    }
+    if (fetchMentorsRef.current) {
+      await fetchMentorsRef.current()
+    }
+  }, [mentors.length, currentPage])
+
   const handleDelete = useCallback(async (id: string) => {
+    if (!canManageMentors) return
     const result = await Swal.fire({
       title: 'Are you sure?',
       text: "You won't be able to revert this!",
@@ -283,10 +398,7 @@ const Mentors = () => {
         newSet.delete(id)
         return newSet
       })
-      // Trigger refetch using ref to avoid circular dependency
-      if (fetchMentorsRef.current) {
-        await fetchMentorsRef.current()
-      }
+      await refreshAfterDelete(1)
     } catch (err) {
       const msg =
         err instanceof AxiosError && err.response?.data?.message
@@ -303,10 +415,10 @@ const Mentors = () => {
         timerProgressBar: true,
       })
     }
-  }, [])
+  }, [canManageMentors, refreshAfterDelete])
 
-  // Delete selected mentors
   const handleDeleteSelected = useCallback(async () => {
+    if (!canManageMentors) return
     if (selectedRows.size === 0) {
       await Swal.fire({
         icon: 'warning',
@@ -333,42 +445,51 @@ const Mentors = () => {
 
     if (!result.isConfirmed) return
 
+    setBulkDeleting(true)
+    const ids = Array.from(selectedRows)
     try {
-      await Promise.all(Array.from(selectedRows).map(id => mentorsApi.deleteMentor(id)))
-      await Swal.fire({
-        icon: 'success',
-        title: 'Deleted!',
-        text: `${selectedRows.size} mentor(s) have been deleted.`,
-        toast: true,
-        position: 'top-end',
-        timer: 3000,
-        showConfirmButton: false,
-        timerProgressBar: true,
-      })
-      setSelectedRows(new Set())
-      // Trigger refetch using ref to avoid circular dependency
-      if (fetchMentorsRef.current) {
-        await fetchMentorsRef.current()
-      }
-    } catch (err) {
-      const msg =
-        err instanceof AxiosError && err.response?.data?.message
-          ? String(err.response.data.message)
-          : 'Failed to delete mentors.'
-      await Swal.fire({
-        icon: 'error',
-        title: 'Failed to delete mentors',
-        text: msg,
-        toast: true,
-        position: 'top-end',
-        timer: 4000,
-        showConfirmButton: false,
-        timerProgressBar: true,
-      })
-    }
-  }, [selectedRows])
+      const results = await Promise.allSettled(ids.map((id) => mentorsApi.deleteMentor(id)))
+      const succeededIds = ids.filter((_, index) => results[index].status === 'fulfilled')
+      const failed = results.length - succeededIds.length
 
-  // Handle individual row checkbox
+      if (failed === 0) {
+        await Swal.fire({
+          icon: 'success',
+          title: 'Deleted!',
+          text: `${succeededIds.length} mentor(s) have been deleted.`,
+          toast: true,
+          position: 'top-end',
+          timer: 3000,
+          showConfirmButton: false,
+          timerProgressBar: true,
+        })
+        setSelectedRows(new Set())
+        await refreshAfterDelete(succeededIds.length)
+      } else {
+        const failedIds = new Set(ids.filter((_, index) => results[index].status === 'rejected'))
+        setSelectedRows(failedIds)
+        await Swal.fire({
+          icon: failed === results.length ? 'error' : 'warning',
+          title: failed === results.length ? 'Delete failed' : 'Partially deleted',
+          text:
+            failed === results.length
+              ? 'Failed to delete the selected mentors.'
+              : `${succeededIds.length} deleted, ${failed} failed.`,
+          toast: true,
+          position: 'top-end',
+          timer: 4000,
+          showConfirmButton: false,
+          timerProgressBar: true,
+        })
+        if (succeededIds.length > 0) {
+          await refreshAfterDelete(succeededIds.length)
+        }
+      }
+    } finally {
+      setBulkDeleting(false)
+    }
+  }, [selectedRows, canManageMentors, refreshAfterDelete])
+
   const handleRowSelect = useCallback((id: string) => {
     setSelectedRows((prev) => {
       const newSelected = new Set(prev)
@@ -381,13 +502,9 @@ const Mentors = () => {
     })
   }, [])
 
-  // Handle select all checkbox - use mentors directly to avoid dependency issues
   const handleSelectAll = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      setSelectedRows((prev) => {
-        const allIds = new Set(mentors.map((mentor) => mentor.id))
-        return allIds
-      })
+      setSelectedRows(new Set(mentors.map((mentor) => mentor.id)))
     } else {
       setSelectedRows(new Set())
     }
@@ -397,54 +514,64 @@ const Mentors = () => {
   const isAllSelected = selectedRows.size === filteredData.length && filteredData.length > 0
   const isIndeterminate = selectedRows.size > 0 && selectedRows.size < filteredData.length
 
-  // Table columns
   const columns = useMemo(
     () => [
-      {
-        Header: (
-          <input
-            className="form-check-input"
-            type="checkbox"
-            checked={isAllSelected}
-            ref={(input) => {
-              if (input) input.indeterminate = isIndeterminate
-            }}
-            onChange={handleSelectAll}
-            aria-label="Select all"
-          />
-        ),
-        accessor: 'checkbox',
-        disableSortBy: true,
-        Cell: ({ row }: any) => (
-          <input
-            className="form-check-input"
-            type="checkbox"
-            checked={selectedRows.has(row.original.id)}
-            onChange={() => handleRowSelect(row.original.id)}
-            aria-label={`Select ${row.original.name}`}
-          />
-        ),
-      },
+      ...(canManageMentors
+        ? [{
+            Header: (
+              <span className="sr-only">Select all mentors on this page</span>
+            ),
+            accessor: 'checkbox',
+            id: 'checkbox',
+            disableSortBy: true,
+            Cell: ({ row }: any) => (
+              <div className="flex items-center">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  checked={selectedRows.has(row.original.id)}
+                  onChange={() => handleRowSelect(row.original.id)}
+                  aria-label={`Select ${row.original.name}`}
+                />
+              </div>
+            ),
+          }]
+        : []),
       {
         Header: 'Mentor Info',
         accessor: 'name',
         Cell: ({ row }: any) => {
           const mentor = row.original
+          const avatarClick = canManageMentors ? () => openProfileImageModal(mentor) : undefined
+          const avatarKeyHandler = canManageMentors
+            ? (e: React.KeyboardEvent) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  openProfileImageModal(mentor)
+                }
+              }
+            : undefined
           return (
             <div className="flex items-center gap-3">
-              <img
-                src={mentor.displayPicture}
-                alt={mentor.name}
-                className="w-10 h-10 rounded-full object-cover cursor-pointer"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = '/assets/images/faces/1.jpg'
-                }}
-                onClick={() => openProfileImageModal(mentor)}
+              <MentorRowAvatar
+                name={mentor.name}
+                imageUrl={mentor.profileImageUrl || mentor.displayPicture}
+                onClick={avatarClick}
+                onKeyDown={avatarKeyHandler}
               />
               <div className="flex-1 min-w-0">
                 <div
                   className="font-semibold text-gray-800 dark:text-white truncate cursor-pointer hover:text-primary"
-                  onClick={() => handleViewMentor(mentor.id)}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`View ${mentor.name}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      void handleViewMentor(mentor.id)
+                    }
+                  }}
+                  onClick={() => { void handleViewMentor(mentor.id) }}
                 >
                   {mentor.name}
                 </div>
@@ -464,13 +591,36 @@ const Mentors = () => {
         },
       },
       {
+        Header: 'Status',
+        accessor: 'status',
+        Cell: ({ row }: any) => {
+          const mentor = row.original
+          const label = mentor.status || 'unknown'
+          return (
+            <div className="flex items-center">
+              <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium capitalize ${getMentorStatusBadgeClass(label)}`}>
+                {label}
+              </span>
+            </div>
+          )
+        },
+      },
+      {
         Header: 'Skills',
         accessor: 'skills',
         Cell: ({ row }: any) => {
           const mentor = row.original
+          if (!mentor.skills?.length) {
+            return (
+              <div className="flex items-center">
+                <span className="text-gray-400 text-sm">No skills listed</span>
+              </div>
+            )
+          }
           return (
-            <div className="flex flex-wrap gap-1.5">
-              {mentor.skills?.slice(0, 3).map((skill: string, index: number) => (
+            <div className="flex items-center">
+              <div className="flex flex-wrap gap-1.5">
+              {mentor.skills.slice(0, 3).map((skill: string, index: number) => (
                 <span
                   key={index}
                   className="badge bg-primary/10 text-primary border border-primary/30 px-2 py-1 rounded-md text-xs font-medium"
@@ -478,11 +628,12 @@ const Mentors = () => {
                   {skill}
                 </span>
               ))}
-              {mentor.skills?.length > 3 && (
+              {mentor.skills.length > 3 && (
                 <span className="badge bg-gray-100 dark:bg-black/20 text-gray-600 dark:text-gray-400 px-2 py-1 rounded-md text-xs font-medium">
                   +{mentor.skills.length - 3}
                 </span>
               )}
+              </div>
             </div>
           )
         },
@@ -490,21 +641,16 @@ const Mentors = () => {
       {
         Header: 'Expertise',
         accessor: 'expertise',
+        id: 'expertise',
         Cell: ({ row }: any) => {
           const mentor = row.original
           return (
-            <div 
-              className="text-sm text-gray-800 dark:text-white" 
-              style={{ 
-                maxWidth: '280px',
-                minHeight: '60px',
-                lineHeight: '1.5',
-                wordBreak: 'break-word'
-              }}
+            <div
+              className="hidden md:flex items-center justify-center text-sm text-gray-800 dark:text-white text-center mx-auto max-w-[280px] leading-6 break-words"
               title={mentor.expertise}
             >
               {mentor.expertise ? (
-                <div className="font-medium flex items-center gap-2">
+                <div className="font-medium flex items-center justify-center gap-2">
                   <i className="ri-star-line text-primary"></i>
                   <span>{mentor.expertise}</span>
                 </div>
@@ -518,24 +664,17 @@ const Mentors = () => {
       {
         Header: 'Bio',
         accessor: 'bio',
+        id: 'bio',
         Cell: ({ row }: any) => {
           const mentor = row.original
           return (
-            <div 
-              className="text-sm text-gray-700 dark:text-gray-300" 
-              style={{ 
-                maxWidth: '280px',
-                display: '-webkit-box',
-                WebkitLineClamp: 3,
-                WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                lineHeight: '1.5',
-                wordBreak: 'break-word'
-              }}
-              title={mentor.bio}
-            >
-              {mentor.bio || 'No bio available'}
+            <div className="hidden md:flex items-center">
+              <div
+                className="text-sm text-gray-700 dark:text-gray-300 max-w-[280px] line-clamp-3 leading-6 break-words"
+                title={mentor.bio}
+              >
+                {mentor.bio || <span className="text-gray-400">No bio available</span>}
+              </div>
             </div>
           )
         },
@@ -549,10 +688,12 @@ const Mentors = () => {
             <div className="hs-tooltip ti-main-tooltip">
               <button
                 type="button"
-                onClick={() => handleViewMentor(row.original.id)}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-success"
+                onClick={() => { void handleViewMentor(row.original.id) }}
+                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm md:ti-btn-sm !min-h-[2.25rem] !min-w-[2.25rem] ti-btn-success"
                 title="View Mentor"
-                disabled={viewMentorLoading}
+                aria-label={`View ${row.original.name}`}
+                disabled={viewingMentorId === row.original.id && viewMentorLoading}
+                aria-busy={viewingMentorId === row.original.id && viewMentorLoading}
               >
                 <i className="ri-eye-line"></i>
                 <span
@@ -562,40 +703,54 @@ const Mentors = () => {
                 </span>
               </button>
             </div>
-            <div className="hs-tooltip ti-main-tooltip">
-              <Link
-                href={`/training/mentors/edit/?id=${encodeURIComponent(row.original.id)}`}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-info"
-                title="Edit Mentor"
-              >
-                <i className="ri-pencil-line"></i>
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  Edit Mentor
-                </span>
-              </Link>
-            </div>
-            <div className="hs-tooltip ti-main-tooltip">
-              <button
-                type="button"
-                onClick={() => handleDelete(row.original.id)}
-                className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ti-btn-danger"
-                title="Delete Mentor"
-              >
-                <i className="ri-delete-bin-line"></i>
-                <span
-                  className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
-                  role="tooltip">
-                  Delete Mentor
-                </span>
-              </button>
-            </div>
+            {canManageMentors && (
+              <>
+                <div className="hs-tooltip ti-main-tooltip">
+                  <Link
+                    href={`/training/mentors/edit?id=${encodeURIComponent(row.original.id)}`}
+                    className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm md:ti-btn-sm !min-h-[2.25rem] !min-w-[2.25rem] ti-btn-info"
+                    title="Edit Mentor"
+                    aria-label={`Edit ${row.original.name}`}
+                  >
+                    <i className="ri-pencil-line"></i>
+                    <span
+                      className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
+                      role="tooltip">
+                      Edit Mentor
+                    </span>
+                  </Link>
+                </div>
+                <div className="hs-tooltip ti-main-tooltip">
+                  <button
+                    type="button"
+                    onClick={() => { void handleDelete(row.original.id) }}
+                    className="hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm md:ti-btn-sm !min-h-[2.25rem] !min-w-[2.25rem] ti-btn-danger"
+                    title="Delete Mentor"
+                    aria-label={`Delete ${row.original.name}`}
+                  >
+                    <i className="ri-delete-bin-line"></i>
+                    <span
+                      className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
+                      role="tooltip">
+                      Delete Mentor
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ),
       },
     ],
-    [selectedRows, isAllSelected, isIndeterminate, handleDelete, handleRowSelect, handleSelectAll, viewMentorLoading]
+    [
+      selectedRows,
+      canManageMentors,
+      handleDelete,
+      handleRowSelect,
+      viewingMentorId,
+      viewMentorLoading,
+      openProfileImageModal,
+    ]
   )
 
   const tableInstance: any = useTable(
@@ -603,9 +758,7 @@ const Mentors = () => {
       columns,
       data: filteredData,
       manualPagination: true,
-      manualSortBy: true,
-    },
-    useSortBy
+    }
   )
 
   const {
@@ -614,10 +767,23 @@ const Mentors = () => {
     headerGroups,
   } = tableInstance
 
+  const selectAllCheckbox = canManageMentors ? (
+    <input
+      className="form-check-input"
+      type="checkbox"
+      checked={isAllSelected}
+      ref={(input) => {
+        if (input) input.indeterminate = isIndeterminate
+      }}
+      onChange={handleSelectAll}
+      aria-label="Select all mentors on this page"
+    />
+  ) : null
+
   return (
     <Fragment>
       <Seo title="Mentors" />
-  
+
       <div className="mt-5 grid grid-cols-12 gap-6 h-[calc(100vh-8rem)] sm:mt-6">
         <div className="xl:col-span-12 col-span-12 h-full flex flex-col">
           <div className="box custom-box h-full flex flex-col">
@@ -625,10 +791,10 @@ const Mentors = () => {
               <div className="box-title">
                 Mentors
                 <span className="badge bg-light text-default rounded-full ms-1 text-[0.75rem] align-middle">
-                  {filteredData.length}
+                  {totalResults}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 items-center">
                 <select
                   className="form-control select-show-page-size !w-auto !py-1 !px-4 !text-[0.75rem] me-2"
                   value={pageSize}
@@ -636,6 +802,7 @@ const Mentors = () => {
                     setPageSize(Number(e.target.value))
                     setCurrentPage(1)
                   }}
+                  aria-label="Results per page"
                 >
                   {[10, 25, 50, 100].map((size) => (
                     <option key={size} value={size}>
@@ -643,12 +810,35 @@ const Mentors = () => {
                     </option>
                   ))}
                 </select>
-                <Link
-                  href="/training/mentors/add"
-                  className="ti-btn ti-btn-primary-full !py-1 !px-2 !text-[0.75rem] me-2"
+                <select
+                  className="form-control !w-auto !py-1 !px-2 !text-[0.75rem] me-2"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as '' | 'active' | 'inactive')}
+                  aria-label="Filter by status"
                 >
-                  <i className="ri-add-line font-semibold align-middle"></i>Add Mentor
-                </Link>
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+                <select
+                  className="form-control !w-auto !py-1 !px-2 !text-[0.75rem] me-2"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  aria-label="Sort mentors"
+                >
+                  <option value="createdAt:desc">Newest first</option>
+                  <option value="createdAt:asc">Oldest first</option>
+                  <option value="updatedAt:desc">Recently updated</option>
+                  <option value="status:asc">Status A–Z</option>
+                </select>
+                {canManageMentors && (
+                  <Link
+                    href="/training/mentors/add"
+                    className="ti-btn ti-btn-primary-full !py-1 !px-2 !text-[0.75rem] me-2"
+                  >
+                    <i className="ri-add-line font-semibold align-middle"></i>Add Mentor
+                  </Link>
+                )}
                 <div className="relative me-2">
                   <input
                     type="text"
@@ -657,22 +847,46 @@ const Mentors = () => {
                     value={searchQuery}
                     onChange={(e) => {
                       setSearchQuery(e.target.value)
-                      setCurrentPage(1)
                     }}
+                    aria-label="Search mentors"
                   />
                   <i className="ri-search-line absolute top-1/2 -translate-y-1/2 end-2 text-gray-400"></i>
                 </div>
-                <button
-                  type="button"
-                  className="ti-btn ti-btn-danger !py-1 !px-2 !text-[0.75rem]"
-                  onClick={handleDeleteSelected}
-                  disabled={selectedRows.size === 0}
-                >
-                  <i className="ri-delete-bin-line font-semibold align-middle me-1"></i>Delete
-                </button>
+                {canManageMentors && (
+                  <button
+                    type="button"
+                    className="ti-btn ti-btn-danger !py-1 !px-2 !text-[0.75rem]"
+                    onClick={() => { void handleDeleteSelected() }}
+                    disabled={selectedRows.size === 0 || bulkDeleting}
+                    aria-busy={bulkDeleting}
+                  >
+                    <i className="ri-delete-bin-line font-semibold align-middle me-1"></i>Delete
+                  </button>
+                )}
               </div>
             </div>
             <div className="box-body !p-0 flex-1 flex flex-col overflow-hidden">
+              {listError && (
+                <div className="flex items-center gap-2 flex-wrap px-4 py-3 bg-danger/10 border-b border-danger/20 text-danger text-sm">
+                  <i className="ri-error-warning-line shrink-0" aria-hidden="true" />
+                  <span className="flex-1">{listError}</span>
+                  <button
+                    type="button"
+                    className="ti-btn ti-btn-sm ti-btn-danger"
+                    onClick={() => { void fetchMentors() }}
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    className="text-danger/60 hover:text-danger"
+                    onClick={() => setListError(null)}
+                    aria-label="Dismiss error"
+                  >
+                    <i className="ri-close-line" />
+                  </button>
+                </div>
+              )}
               <div className="table-responsive flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
                 <table {...getTableProps()} className="table whitespace-nowrap min-w-full table-striped table-hover table-bordered border-gray-300 dark:border-gray-600">
                   <thead>
@@ -682,16 +896,15 @@ const Mentors = () => {
                           <th
                             {...column.getHeaderProps()}
                             scope="col"
-                            className="text-start sticky top-0 z-10 bg-gray-50 dark:bg-black/20"
+                            className={`sticky top-0 z-10 bg-gray-50 dark:bg-black/20 align-middle ${
+                              column.id === 'expertise' ? 'text-center hidden md:table-cell' : 'text-start'
+                            } ${column.id === 'bio' ? 'hidden md:table-cell' : ''}`}
                             key={column.id || `col-${j}`}
-                            style={{ 
-                              position: 'sticky', 
-                              top: 0, 
-                              zIndex: 10
-                            }}
                           >
-                            <div className="flex items-center gap-2">
-                              <span className="tabletitle">{column.render('Header')}</span>
+                            <div className={`flex items-center gap-2 ${column.id === 'expertise' ? 'justify-center' : ''}`}>
+                              {column.id === 'checkbox' ? selectAllCheckbox : (
+                                <span className="tabletitle">{column.render('Header')}</span>
+                              )}
                             </div>
                           </th>
                         ))}
@@ -708,12 +921,52 @@ const Mentors = () => {
                           </div>
                         </td>
                       </tr>
+                    ) : listError ? (
+                      <tr>
+                        <td colSpan={columns.length} className="text-center py-8">
+                          <div className="flex flex-col items-center justify-center gap-3">
+                            <i className="ri-error-warning-line text-4xl text-danger mb-1" aria-hidden="true"></i>
+                            <span className="text-gray-600 dark:text-gray-400">{listError}</span>
+                            <button
+                              type="button"
+                              className="ti-btn ti-btn-sm ti-btn-danger"
+                              onClick={() => { void fetchMentors() }}
+                            >
+                              Retry
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
                     ) : filteredData.length === 0 ? (
                       <tr>
                         <td colSpan={columns.length} className="text-center py-8">
-                          <div className="flex flex-col items-center justify-center">
-                            <i className="ri-inbox-line text-4xl text-gray-400 mb-2"></i>
-                            <span className="text-gray-600 dark:text-gray-400">No mentors found</span>
+                          <div className="flex flex-col items-center justify-center gap-3">
+                            <i className="ri-inbox-line text-4xl text-gray-400 mb-1" aria-hidden="true"></i>
+                            {hasActiveFilters ? (
+                              <>
+                                <span className="text-gray-600 dark:text-gray-400">No mentors match your search or filters.</span>
+                                <button
+                                  type="button"
+                                  className="ti-btn ti-btn-light ti-btn-sm"
+                                  onClick={() => {
+                                    setSearchQuery('')
+                                    setDebouncedSearchQuery('')
+                                    setStatusFilter('')
+                                  }}
+                                >
+                                  Clear filters
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-gray-600 dark:text-gray-400">No mentors yet.</span>
+                                {canManageMentors && (
+                                  <Link href="/training/mentors/add" className="ti-btn ti-btn-primary ti-btn-sm">
+                                    <i className="ri-add-line me-1"></i>Add Mentor
+                                  </Link>
+                                )}
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -732,16 +985,20 @@ const Mentors = () => {
                               }
                               return null
                             },
-                            getCellProps: () => ({})
-                          }))
+                            getCellProps: () => ({}),
+                          })),
                         }
                         return (
                           <tr className="border-b border-gray-300 dark:border-gray-600" key={mentor.id}>
-                            {row.cells.map((cell: any, idx: number) => (
-                              <td key={idx}>
-                                {cell.render('Cell')}
-                              </td>
-                            ))}
+                            {row.cells.map((cell: any, idx: number) => {
+                              const col = columns[idx]
+                              const hiddenOnMobile = col?.id === 'expertise' || col?.id === 'bio'
+                              return (
+                                <td key={idx} className={`align-middle${hiddenOnMobile ? ' hidden md:table-cell' : ''}`}>
+                                  {cell.render('Cell')}
+                                </td>
+                              )
+                            })}
                           </tr>
                         )
                       })
@@ -751,111 +1008,16 @@ const Mentors = () => {
               </div>
             </div>
             <div className="box-footer !border-t-0">
-              <div className="flex items-center flex-wrap gap-4">
-                <div>
-                  Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalResults)} of {totalResults} entries{' '}
-                  <i className="bi bi-arrow-right ms-2 font-semibold"></i>
-                </div>
-                <div className="ms-auto">
-                  <nav aria-label="Page navigation" className="pagination-style-4">
-                    <ul className="ti-pagination mb-0">
-                      <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
-                        <button
-                          className="page-link px-3 py-[0.375rem]"
-                          onClick={() => setCurrentPage(currentPage - 1)}
-                          disabled={currentPage === 1}
-                        >
-                          Prev
-                        </button>
-                      </li>
-                      {totalPages <= 7 ? (
-                        Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                          <li
-                            key={page}
-                            className={`page-item ${currentPage === page ? 'active' : ''}`}
-                          >
-                            <button
-                              className="page-link px-3 py-[0.375rem]"
-                              onClick={() => setCurrentPage(page)}
-                            >
-                              {page}
-                            </button>
-                          </li>
-                        ))
-                      ) : (
-                        <>
-                          {currentPage > 2 && (
-                            <>
-                              <li className="page-item">
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => setCurrentPage(1)}
-                                >
-                                  1
-                                </button>
-                              </li>
-                              {currentPage > 3 && (
-                                <li className="page-item disabled">
-                                  <span className="page-link px-3 py-[0.375rem]">...</span>
-                                </li>
-                              )}
-                            </>
-                          )}
-                          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                            let pageNum
-                            if (currentPage < 3) {
-                              pageNum = i + 1
-                            } else if (currentPage > totalPages - 3) {
-                              pageNum = totalPages - 4 + i
-                            } else {
-                              pageNum = currentPage - 2 + i
-                            }
-                            return (
-                              <li
-                                key={pageNum}
-                                className={`page-item ${currentPage === pageNum ? 'active' : ''}`}
-                              >
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => setCurrentPage(pageNum)}
-                                >
-                                  {pageNum}
-                                </button>
-                              </li>
-                            )
-                          })}
-                          {currentPage < totalPages - 2 && (
-                            <>
-                              {currentPage < totalPages - 3 && (
-                                <li className="page-item disabled">
-                                  <span className="page-link px-3 py-[0.375rem]">...</span>
-                                </li>
-                              )}
-                              <li className="page-item">
-                                <button
-                                  className="page-link px-3 py-[0.375rem]"
-                                  onClick={() => setCurrentPage(totalPages)}
-                                >
-                                  {totalPages}
-                                </button>
-                              </li>
-                            </>
-                          )}
-                        </>
-                      )}
-                      <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
-                        <button
-                          className="page-link px-3 py-[0.375rem]"
-                          onClick={() => setCurrentPage(currentPage + 1)}
-                          disabled={currentPage === totalPages}
-                        >
-                          Next
-                        </button>
-                      </li>
-                    </ul>
-                  </nav>
-                </div>
-              </div>
+              <ListPagination
+                page={currentPage}
+                totalPages={totalPages}
+                totalResults={totalResults}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+                gotoInputId="mentors-goto-page"
+                touchFriendly
+                ariaLabel="Mentors page navigation"
+              />
             </div>
           </div>
         </div>
@@ -864,7 +1026,8 @@ const Mentors = () => {
       <MentorViewModal
         mentor={viewMentor}
         isLoading={viewMentorLoading}
-        onClose={() => setViewMentor(null)}
+        canManageMentors={canManageMentors}
+        onClose={dismissViewMentorModal}
       />
 
       <MentorProfileImageModal
@@ -874,6 +1037,7 @@ const Mentors = () => {
         profileImageUploading={profileImageUploading}
         profileImageError={profileImageError}
         onClose={() => {
+          closeHsOverlay('#mentor-profile-image-modal')
           setProfileImageMentor(null)
           setProfileImageUrl(null)
           setProfileImageError(null)

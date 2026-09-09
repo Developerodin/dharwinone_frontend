@@ -2,13 +2,15 @@
 import Seo from '@/shared/layout-components/seo/seo'
 import React, { Fragment, useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
-import { useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTable, useSortBy } from 'react-table'
 import Link from 'next/link'
 import JobsFilterPanel from './_components/JobsFilterPanel'
+import { DROPDOWN_ITEM, PortalDropdown } from './_components/PortalDropdown'
 import JobPreviewPanel from './_components/JobPreviewPanel'
 import JobShareModal from './_components/JobShareModal'
 import ListPagination from '@/shared/components/ListPagination'
+import { CompanyWebsiteLink } from '@/shared/components/ats/CompanyWebsiteLink'
 import { useFeaturePermissions } from '@/shared/hooks/use-feature-permissions'
 import { useAuth } from '@/shared/contexts/auth-context'
 import { hasSalesAgentRole } from '@/shared/lib/roles'
@@ -25,13 +27,18 @@ import {
   listJobBookmarks,
   addJobBookmark,
   deleteJobBookmark,
+  listBookmarkedJobIds,
+  unsaveMyJobBookmarks,
+  searchJobFacet,
   type JobBookmarkNote,
+  type JobFacet,
   type JobFilterOptions,
 } from '@/shared/lib/api/jobs'
 import {
   buildJobExportParams,
   buildJobListParams,
-  filterJobFacetOptions,
+  readJobFiltersFromQuery,
+  writeJobFiltersToQuery,
   type JobSidebarFilters,
 } from '@/shared/lib/ats/job-list-filters'
 import {
@@ -48,6 +55,7 @@ import {
   formatJobDescriptionForDisplay,
   JOB_DESCRIPTION_PROSE_CLASS,
 } from '@/shared/lib/ats/jobDescriptionHtml'
+import { useConfirm } from '@/shared/components/ui/useConfirm'
 
 const AsyncSelect = dynamic(() => import('react-select/async'), { ssr: false })
 
@@ -63,8 +71,65 @@ const DEFAULT_EXPERIENCE_RANGE = { min: 0, max: 20 }
 
 interface FilterState extends JobSidebarFilters {}
 
+/**
+ * Debounced server-side facet lookup. These lists used to be filtered in the browser out of
+ * `getJobFilterOptions`, which only ever returns the first page of jobs -- so past that cap a
+ * matching title simply never appeared. Empty query still yields no options, as before.
+ */
+function useJobFacetSearch(
+  facet: JobFacet,
+  query: string,
+  status: string,
+  jobOrigin: '' | 'internal' | 'external'
+): { options: string[]; searching: boolean } {
+  const q = query.trim()
+  // Options are stamped with the request they answered, so a stale or aborted response can
+  // never overwrite a newer one, and "searching" is derived rather than set from the effect.
+  const key = `${facet}|${status}|${jobOrigin}|${q}`
+  const [result, setResult] = useState<{ key: string; options: string[] }>({ key: '', options: [] })
+
+  useEffect(() => {
+    if (!q) return undefined
+
+    let cancelled = false
+    const ac = new AbortController()
+    const timer = window.setTimeout(() => {
+      searchJobFacet(facet, q, { status, jobOrigin }, { signal: ac.signal })
+        .then((values) => {
+          if (!cancelled) setResult({ key, options: values })
+        })
+        .catch(() => {
+          if (!cancelled) setResult({ key, options: [] })
+        })
+    }, 300)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      ac.abort()
+    }
+  }, [facet, q, status, jobOrigin, key])
+
+  const ready = result.key === key
+  return { options: q && ready ? result.options : [], searching: Boolean(q) && !ready }
+}
+
 const salaryRangesConst = DEFAULT_SALARY_RANGE
 const experienceRangesConst = DEFAULT_EXPERIENCE_RANGE
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+
+/** The untouched list. Anything differing from this is what gets written to the URL. */
+const DEFAULT_JOB_FILTERS: JobSidebarFilters = {
+  jobTitle: [],
+  company: [],
+  experience: [experienceRangesConst.min, experienceRangesConst.max],
+  location: [],
+  salary: [salaryRangesConst.min, salaryRangesConst.max],
+  salaryNotSpecified: false,
+  status: 'Active',
+  postingDate: '',
+}
 
 type BookmarkNote = JobBookmarkNote
 
@@ -112,22 +177,44 @@ const COLUMN_VISIBILITY: Record<string, string> = {
 
 const Jobs = () => {
   const { canView, canCreate, canEdit, canDelete, isLoading: permissionsLoading } = useFeaturePermissions("ats.jobs")
+  const { confirm: askConfirm, confirmDialog } = useConfirm()
   const { roleNames } = useAuth()
   const isSalesAgent = hasSalesAgentRole(roleNames)
   const [jobsData, setJobsData] = useState<DisplayJob[]>([])
   const [jobsListFetching, setJobsListFetching] = useState(true)
   const jobsEverLoadedRef = useRef(false)
   const fetchGenerationRef = useRef(0)
-  const [listJobOrigin, setListJobOrigin] = useState<'' | 'internal' | 'external'>('')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  // Every list control is seeded once from the URL, so a refresh or a shared link rebuilds
+  // the same view. The effect further down writes them back as they change.
+  const [listJobOrigin, setListJobOrigin] = useState<'' | 'internal' | 'external'>(() => {
+    const raw = searchParams.get('origin')
+    return raw === 'internal' || raw === 'external' ? raw : ''
+  })
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const [currentPage, setCurrentPage] = useState(() => {
+    const raw = Number(searchParams.get('page'))
+    return Number.isInteger(raw) && raw >= 1 ? raw : 1
+  })
+  const [pageSize, setPageSize] = useState(() => {
+    const raw = Number(searchParams.get('limit'))
+    return PAGE_SIZE_OPTIONS.includes(raw) ? raw : 10
+  })
   const [totalResults, setTotalResults] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
-  const [sortBy, setSortBy] = useState<string>(DEFAULT_JOB_SORT_API)
-  const [debouncedJobNameSearch, setDebouncedJobNameSearch] = useState('')
+  const initialSortOption = searchParams.get('sort')?.trim() || 'newest-first'
+  const [sortBy, setSortBy] = useState<string>(() => sortOptionToApiSortBy(initialSortOption))
+  // Seeded alongside `jobNameSearch`; if it started empty the debounce would fire on mount
+  // and the "scope changed" effect would throw away the page seeded from ?page=.
+  const [debouncedJobNameSearch, setDebouncedJobNameSearch] = useState(
+    () => searchParams.get('q')?.trim() || ''
+  )
   /** Quick search — job name only (toolbar input). */
-  const [jobNameSearch, setJobNameSearch] = useState('')
+  const [jobNameSearch, setJobNameSearch] = useState(() => searchParams.get('q')?.trim() || '')
+  const [jobNameFocused, setJobNameFocused] = useState(false)
+  const jobNameInputRef = useRef<HTMLInputElement>(null)
   const [filterOptions, setFilterOptions] = useState<JobFilterOptions>({
     titles: [],
     companies: [],
@@ -137,6 +224,22 @@ const Jobs = () => {
   })
 
   const [bookmarkedJobs, setBookmarkedJobs] = useState<Set<string>>(new Set())
+  const [bookmarkTogglingId, setBookmarkTogglingId] = useState<string | null>(null)
+  const bookmarkHydrationRef = useRef(0)
+  const bookmarkUserTouchedRef = useRef(false)
+
+  useEffect(() => {
+    const generation = ++bookmarkHydrationRef.current
+    listBookmarkedJobIds()
+      .then((ids) => {
+        if (generation !== bookmarkHydrationRef.current || bookmarkUserTouchedRef.current) return
+        setBookmarkedJobs(new Set(ids))
+      })
+      .catch(() => {
+        if (generation !== bookmarkHydrationRef.current || bookmarkUserTouchedRef.current) return
+        setBookmarkedJobs(new Set())
+      })
+  }, [])
   const [previewJob, setPreviewJob] = useState<any>(null)
   const [companyModal, setCompanyModal] = useState<any>(null)
   const [bookmarkNotesJobId, setBookmarkNotesJobId] = useState<string | null>(null)
@@ -151,35 +254,14 @@ const Jobs = () => {
   const [shareEmailError, setShareEmailError] = useState<string | null>(null)
   const [showEmailInput, setShowEmailInput] = useState(false)
   /** Default: newest jobs first (matches postingDate / createdAt). */
-  const [selectedSort, setSelectedSort] = useState<string>('newest-first')
+  const [selectedSort, setSelectedSort] = useState<string>(initialSortOption)
   const [jobsFilterPanelOpen, setJobsFilterPanelOpen] = useState(false)
   const closeJobsFilterPanel = () => setJobsFilterPanelOpen(false)
 
-  const searchParams = useSearchParams()
-  // URL ?status=Draft|Archived|Active|... routes directly into the new status filter.
-  // Default keeps prior behavior: show Active jobs only.
-  const rawStatusParam = searchParams.get('status')?.trim()
-  const initialStatusFilter = rawStatusParam && rawStatusParam.toLowerCase() !== 'all'
-    ? (rawStatusParam.charAt(0).toUpperCase() + rawStatusParam.slice(1).toLowerCase())
-    : (rawStatusParam?.toLowerCase() === 'all' ? 'all' : 'Active')
-
-  const [filters, setFilters] = useState<FilterState>({
-    jobTitle: [],
-    company: [],
-    experience: [experienceRangesConst.min, experienceRangesConst.max],
-    location: [],
-    salary: [salaryRangesConst.min, salaryRangesConst.max],
-    salaryNotSpecified: false,
-    status: initialStatusFilter,
-    postingDate: ''
-  })
-
-  const experienceRanges = useMemo(
-    () => ({
-      min: filterOptions.experience.min ?? experienceRangesConst.min,
-      max: filterOptions.experience.max ?? experienceRangesConst.max,
-    }),
-    [filterOptions.experience.min, filterOptions.experience.max]
+  // Seeded from the URL: ?status=Draft|Archived|all routes straight into the status filter,
+  // and every other facet restores the same way. Default stays Active-only.
+  const [filters, setFilters] = useState<FilterState>(() =>
+    readJobFiltersFromQuery(searchParams, DEFAULT_JOB_FILTERS)
   )
 
   const listQueryInput = useMemo(
@@ -191,9 +273,9 @@ const Jobs = () => {
       listJobOrigin,
       filters,
       salaryBounds: salaryRangesConst,
-      experienceBounds: experienceRanges,
+      experienceBounds: experienceRangesConst,
     }),
-    [currentPage, pageSize, sortBy, debouncedJobNameSearch, listJobOrigin, filters, experienceRanges]
+    [currentPage, pageSize, sortBy, debouncedJobNameSearch, listJobOrigin, filters]
   )
 
   const fetchJobs = useCallback(async (signal?: AbortSignal) => {
@@ -205,7 +287,10 @@ const Jobs = () => {
       if (generation !== fetchGenerationRef.current) return
       setJobsData((res.results ?? []).map(mapJobToDisplay))
       setTotalResults(res.totalResults ?? 0)
-      setTotalPages(res.totalPages ?? 0)
+      const pages = res.totalPages ?? 0
+      setTotalPages(pages)
+      // A bookmarked ?page= can outlive the rows it pointed at; land on the last real page.
+      if (pages > 0 && listQueryInput.page > pages) setCurrentPage(pages)
     } catch (err: unknown) {
       if (generation !== fetchGenerationRef.current) return
       const aborted =
@@ -251,10 +336,52 @@ const Jobs = () => {
     return () => window.clearTimeout(timer)
   }, [jobNameSearch])
 
+  // Changing what is being listed sends you back to page 1 -- but only on a real change.
+  // Compare the scope itself rather than counting effect runs: StrictMode mounts effects
+  // twice in dev, so a "skip the first run" flag fires on the second pass and would throw
+  // away the page seeded from ?page=.
+  const listScopeKey = useMemo(
+    () => JSON.stringify([filters, listJobOrigin, debouncedJobNameSearch, sortBy, pageSize]),
+    [filters, listJobOrigin, debouncedJobNameSearch, sortBy, pageSize]
+  )
+  const lastListScopeRef = useRef(listScopeKey)
   useEffect(() => {
+    if (lastListScopeRef.current === listScopeKey) return
+    lastListScopeRef.current = listScopeKey
     setCurrentPage(1)
     setSelectedRows(new Set())
-  }, [filters, listJobOrigin, debouncedJobNameSearch, sortBy, pageSize])
+  }, [listScopeKey])
+
+  // Mirror the whole list view into the URL so a refresh or a shared link restores it.
+  // Defaults are omitted, so an untouched list keeps a clean /ats/jobs.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams.toString())
+    writeJobFiltersToQuery(next, filters, DEFAULT_JOB_FILTERS)
+
+    const setParam = (key: string, value: string | null) => {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
+    setParam('page', currentPage > 1 ? String(currentPage) : null)
+    setParam('limit', pageSize !== 10 ? String(pageSize) : null)
+    setParam('q', jobNameSearch.trim() || null)
+    setParam('origin', listJobOrigin || null)
+    setParam('sort', selectedSort && selectedSort !== 'newest-first' ? selectedSort : null)
+
+    const qs = next.toString()
+    if (qs === searchParams.toString()) return
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [
+    currentPage,
+    pageSize,
+    jobNameSearch,
+    listJobOrigin,
+    selectedSort,
+    filters,
+    pathname,
+    router,
+    searchParams,
+  ])
 
   useEffect(() => {
     setSelectedRows(new Set())
@@ -269,20 +396,6 @@ const Jobs = () => {
   useEffect(() => {
     void fetchFilterOptions()
   }, [fetchFilterOptions])
-
-  useEffect(() => {
-    setFilters((prev) => {
-      const isStillDefault =
-        prev.experience[0] === experienceRangesConst.min &&
-        prev.experience[1] === experienceRangesConst.max
-      const needsSync =
-        prev.experience[0] !== experienceRanges.min || prev.experience[1] !== experienceRanges.max
-      if (isStillDefault && needsSync) {
-        return { ...prev, experience: [experienceRanges.min, experienceRanges.max] }
-      }
-      return prev
-    })
-  }, [experienceRanges.min, experienceRanges.max])
 
   // Deep-link: ?view=<jobId> opens preview; fetch by id when job is not on the current page.
   const autoOpenedViewIdRef = useRef<string | null>(null)
@@ -524,17 +637,40 @@ const Jobs = () => {
     }
   }
 
-  const handleBookmark = (id: string) => {
-    if (!bookmarkedJobs.has(id)) {
-      const newBookmarked = new Set(bookmarkedJobs)
-      newBookmarked.add(id)
-      setBookmarkedJobs(newBookmarked)
-    }
+  const openBookmarkNotesPanel = (id: string) => {
     setBookmarkNotesJobId(id)
-    fetchBookmarkNotes(id)
+    void fetchBookmarkNotes(id)
     setTimeout(() => {
       ;(window as any).HSOverlay?.open(document.querySelector('#bookmark-notes-panel'))
     }, 100)
+  }
+
+  const handleUnsaveBookmark = async (id: string) => {
+    bookmarkUserTouchedRef.current = true
+    setBookmarkTogglingId(id)
+    try {
+      await unsaveMyJobBookmarks(id)
+      setBookmarkedJobs((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      setBookmarkNotes((prev) => prev.filter((n) => n.jobId !== id))
+      if (bookmarkNotesJobId === id) setBookmarkNotesJobId(null)
+      ;(window as any).HSOverlay?.close(document.querySelector('#bookmark-notes-panel'))
+    } catch (err: any) {
+      alert(err?.response?.data?.message || 'Failed to remove bookmark')
+    } finally {
+      setBookmarkTogglingId(null)
+    }
+  }
+
+  const handleBookmark = (id: string) => {
+    bookmarkUserTouchedRef.current = true
+    if (!bookmarkedJobs.has(id)) {
+      setBookmarkedJobs((prev) => new Set(prev).add(id))
+    }
+    openBookmarkNotesPanel(id)
   }
 
   const getJobNotes = (jobId: string) => {
@@ -543,8 +679,31 @@ const Jobs = () => {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   }
 
+  const handleRemoveBookmarkRequest = async (id: string) => {
+    const noteCount = getJobNotes(id).length
+    const noteLabel = noteCount === 1 ? '1 note' : `${noteCount} notes`
+    const confirmed = await askConfirm({
+      title: 'Remove bookmark?',
+      message: (
+        <>
+          This will remove the job from your saved list
+          {noteCount > 0
+            ? ` and permanently delete ${noteLabel}.`
+            : '.'}
+          {' '}This action cannot be undone.
+        </>
+      ),
+      confirmLabel: 'Remove bookmark',
+      cancelLabel: 'Keep bookmark',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    await handleUnsaveBookmark(id)
+  }
+
   const handleAddNote = async () => {
     if (!bookmarkNotesJobId || !newNote.text.trim()) return
+    bookmarkUserTouchedRef.current = true
     setBookmarkSubmitting(true)
     try {
       const created = await addJobBookmark(bookmarkNotesJobId, {
@@ -552,6 +711,7 @@ const Jobs = () => {
         visibility: newNote.visibility,
       })
       setBookmarkNotes((prev) => [...prev, created])
+      setBookmarkedJobs((prev) => new Set(prev).add(bookmarkNotesJobId))
       setNewNote({ text: '', visibility: 'public' })
     } catch (err: any) {
       alert(err?.response?.data?.message || 'Failed to add note')
@@ -871,6 +1031,25 @@ const Jobs = () => {
         },
       },
       {
+        Header: 'Status',
+        accessor: 'status',
+        disableSortBy: true,
+        Cell: ({ row }: any) => {
+          const status = row.original.status || '—'
+          const cls =
+            status === 'Active'
+              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+              : status === 'Closed' || status === 'Archived'
+                ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30'
+                : 'bg-stone-500/15 text-stone-700 dark:text-stone-300 border-stone-500/30'
+          return (
+            <span className={`badge border !rounded-md !px-2 !py-1 text-xs font-medium ${cls}`}>
+              {status}
+            </span>
+          )
+        },
+      },
+      {
         Header: 'Origin',
         accessor: 'jobOrigin',
         disableSortBy: true,
@@ -947,13 +1126,14 @@ const Jobs = () => {
               <button
                 type="button"
                 onClick={() => handleBookmark(row.original.id)}
+                disabled={bookmarkTogglingId === row.original.id}
                 className={`hs-tooltip-toggle ti-btn ti-btn-icon ti-btn-sm ${bookmarkedJobs.has(row.original.id) ? 'ti-btn-warning' : 'ti-btn-light'}`}
               >
                 <i className={bookmarkedJobs.has(row.original.id) ? 'ri-bookmark-fill' : 'ri-bookmark-line'}></i>
                 <span
                   className="hs-tooltip-content ti-main-tooltip-content py-1 px-2 !bg-black !text-xs !font-medium !text-white shadow-sm dark:bg-slate-700"
                   role="tooltip">
-                  {bookmarkedJobs.has(row.original.id) ? 'View Notes' : 'Bookmark Job'}
+                  {bookmarkedJobs.has(row.original.id) ? 'View notes' : 'Bookmark Job'}
                 </span>
               </button>
             </div>
@@ -999,7 +1179,7 @@ const Jobs = () => {
     ]
       return canDelete && !isSalesAgent ? [checkboxColumn, ...restColumns] : restColumns
     },
-    [selectedRows, bookmarkedJobs, canDelete, canEdit, callingJobId, isSalesAgent]
+    [selectedRows, bookmarkedJobs, bookmarkTogglingId, canDelete, canEdit, callingJobId, isSalesAgent]
   )
 
   const data = useMemo(() => jobsData, [jobsData])
@@ -1015,19 +1195,32 @@ const Jobs = () => {
   const uniqueJobTitles = filterOptions.titles
   const uniqueStatuses = filterOptions.statuses
 
-  const filteredJobTitles = useMemo(
-    () => filterJobFacetOptions(uniqueJobTitles, searchJobTitle),
-    [uniqueJobTitles, searchJobTitle]
+  // Toolbar quick-search typeahead. Same server-side facet lookup the filter panel uses.
+  const { options: jobNameSuggestions, searching: jobNameSearching } = useJobFacetSearch(
+    'title',
+    jobNameSearch,
+    filters.status,
+    listJobOrigin
   )
+  const showJobNameSuggestions = jobNameFocused && jobNameSearch.trim().length > 0
 
-  const filteredCompanies = useMemo(
-    () => filterJobFacetOptions(uniqueCompanies, searchCompany),
-    [uniqueCompanies, searchCompany]
+  const { options: filteredJobTitles, searching: jobTitleSearching } = useJobFacetSearch(
+    'title',
+    searchJobTitle,
+    filters.status,
+    listJobOrigin
   )
-
-  const filteredLocations = useMemo(
-    () => filterJobFacetOptions(uniqueLocations, searchLocation),
-    [uniqueLocations, searchLocation]
+  const { options: filteredCompanies, searching: companySearching } = useJobFacetSearch(
+    'company',
+    searchCompany,
+    filters.status,
+    listJobOrigin
+  )
+  const { options: filteredLocations, searching: locationSearching } = useJobFacetSearch(
+    'location',
+    searchLocation,
+    filters.status,
+    listJobOrigin
   )
 
   const handleMultiSelectChange = (key: 'jobTitle' | 'company' | 'location', value: string) => {
@@ -1060,15 +1253,14 @@ const Jobs = () => {
     setSearchCompany('')
     setSearchLocation('')
     setListJobOrigin('')
+    // Same object the URL codec treats as "default", so a reset always produces a clean URL.
     setFilters({
+      ...DEFAULT_JOB_FILTERS,
       jobTitle: [],
       company: [],
-      experience: [experienceRangesConst.min, experienceRangesConst.max],
       location: [],
-      salary: [salaryRangesConst.min, salaryRangesConst.max],
-      salaryNotSpecified: false,
-      status: 'Active',
-      postingDate: ''
+      experience: [...DEFAULT_JOB_FILTERS.experience],
+      salary: [...DEFAULT_JOB_FILTERS.salary],
     })
   }
 
@@ -1216,13 +1408,51 @@ const Jobs = () => {
                 <div className="relative flex-1 min-w-[10rem] sm:min-w-[12rem] sm:max-w-xs me-2">
                   <i className="ri-search-line absolute left-2.5 top-1/2 -translate-y-1/2 text-defaulttextcolor/50 text-[0.875rem]" aria-hidden />
                   <input
+                    ref={jobNameInputRef}
                     type="search"
                     className="form-control !h-8 !py-1 !ps-8 !pe-3 !text-[0.75rem] !rounded-lg w-full"
                     placeholder="Search by job name…"
                     value={jobNameSearch}
-                    onChange={(e) => setJobNameSearch(e.target.value)}
+                    autoComplete="off"
+                    aria-autocomplete="list"
                     aria-label="Search by job name"
+                    onChange={(e) => setJobNameSearch(e.target.value)}
+                    onFocus={() => setJobNameFocused(true)}
+                    onBlur={() => setJobNameFocused(false)}
                   />
+                  <PortalDropdown open={showJobNameSuggestions} inputRef={jobNameInputRef}>
+                    {jobNameSuggestions.length > 0 ? (
+                      jobNameSuggestions.map((title) => (
+                        <button
+                          key={title}
+                          type="button"
+                          role="option"
+                          aria-selected={jobNameSearch === title}
+                          className={`${DROPDOWN_ITEM} hover:bg-primary/10 dark:hover:bg-primary/15 ${
+                            jobNameSearch === title
+                              ? 'bg-primary/10 text-primary'
+                              : 'text-gray-800 dark:text-gray-200'
+                          }`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setJobNameSearch(title)
+                            setJobNameFocused(false)
+                          }}
+                        >
+                          <i className="ri-search-line text-[0.7rem] opacity-50" aria-hidden />
+                          <span className="min-w-0 flex-1 truncate">{title}</span>
+                        </button>
+                      ))
+                    ) : jobNameSearching ? (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                        Searching&hellip;
+                      </div>
+                    ) : (
+                      <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                        No matches for &ldquo;{jobNameSearch.trim()}&rdquo;
+                      </div>
+                    )}
+                  </PortalDropdown>
                 </div>
                 <button
                   type="button"
@@ -1249,7 +1479,7 @@ const Jobs = () => {
                   onChange={(e) => setPageSize(Number(e.target.value))}
                   aria-label="Jobs per page"
                 >
-                  {[10, 25, 50, 100].map((size) => (
+                  {PAGE_SIZE_OPTIONS.map((size) => (
                     <option key={size} value={size}>
                       Show {size}
                     </option>
@@ -1387,6 +1617,9 @@ const Jobs = () => {
               filteredJobTitles={filteredJobTitles}
               filteredCompanies={filteredCompanies}
               filteredLocations={filteredLocations}
+              jobTitleSearching={jobTitleSearching}
+              companySearching={companySearching}
+              locationSearching={locationSearching}
               uniqueJobTitles={uniqueJobTitles}
               uniqueCompanies={uniqueCompanies}
               uniqueLocations={uniqueLocations}
@@ -1397,7 +1630,7 @@ const Jobs = () => {
               handleExperienceRangeChange={handleExperienceRangeChange}
               handleResetFilters={handleResetFilters}
               salaryRangesConst={salaryRangesConst}
-              experienceRangesConst={experienceRanges}
+              experienceRangesConst={experienceRangesConst}
             />
 
             <div className="box-body !p-0 flex-1 flex flex-col overflow-hidden relative">
@@ -1704,6 +1937,7 @@ const Jobs = () => {
                 onPageChange={setCurrentPage}
                 ariaLabel="Jobs page navigation"
                 gotoInputId="jobs-goto-page"
+                hideWhenSinglePage
               />
             </div>
           </div>
@@ -1749,31 +1983,27 @@ const Jobs = () => {
                       const founded = ci.founded != null ? String(ci.founded) : ''
                       const website = (ci.website as string) || ''
                       return (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                          <div>
+                        <div className="mt-4 grid min-w-0 grid-cols-2 gap-4 md:grid-cols-4">
+                          <div className="min-w-0">
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Industry</div>
-                            <div className="font-semibold text-gray-800 dark:text-white">{industry || '—'}</div>
+                            <div className="font-semibold text-gray-800 dark:text-white break-words">{industry || '—'}</div>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Company Size</div>
-                            <div className="font-semibold text-gray-800 dark:text-white">{size ? `${size} employees` : '—'}</div>
+                            <div className="font-semibold text-gray-800 dark:text-white break-words">{size ? `${size} employees` : '—'}</div>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Founded</div>
                             <div className="font-semibold text-gray-800 dark:text-white">{founded || '—'}</div>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Website</div>
                             {website ? (
-                              <a
-                                href={/^https?:\/\//i.test(website) ? website : `https://${website}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-semibold text-primary hover:underline flex items-center gap-1"
-                              >
-                                {website}
-                                <i className="ri-external-link-line text-sm"></i>
-                              </a>
+                              <CompanyWebsiteLink
+                                website={website}
+                                className="font-semibold"
+                                showExternalIcon
+                              />
                             ) : (
                               <div className="font-semibold text-gray-800 dark:text-white">—</div>
                             )}
@@ -1940,7 +2170,9 @@ const Jobs = () => {
                 const jobDetails = getBookmarkJobDetails()
                 return jobDetails ? (
                   <div className="p-4 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 dark:border-primary/30 rounded-lg">
-                    <h6 className="font-bold text-gray-800 dark:text-white text-lg mb-2">{jobDetails.jobTitle}</h6>
+                    <h6 className="mb-2 min-w-0 break-words font-bold text-gray-800 dark:text-white text-lg">
+                      {jobDetails.jobTitle}
+                    </h6>
                     <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                       <span className="flex items-center gap-1">
                         <i className="ri-building-line"></i>
@@ -2066,12 +2298,32 @@ const Jobs = () => {
                   )}
                 </div>
               </div>
+
+              {bookmarkedJobs.has(bookmarkNotesJobId) && (
+                <div className="border-t border-gray-200 pt-4 dark:border-defaultborder/10">
+                  <button
+                    type="button"
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-danger transition-colors hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 disabled:opacity-60"
+                    onClick={() => void handleRemoveBookmarkRequest(bookmarkNotesJobId)}
+                    disabled={bookmarkTogglingId === bookmarkNotesJobId}
+                    aria-label="Remove bookmark and delete all notes"
+                  >
+                    <i className="ri-bookmark-off-line text-base" aria-hidden />
+                    {bookmarkTogglingId === bookmarkNotesJobId ? 'Removing bookmark…' : 'Remove bookmark'}
+                  </button>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Removes this job from your saved list and deletes all notes.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-8 text-gray-500">No job selected</div>
           )}
         </div>
       </div>
+
+      {confirmDialog}
 
       <JobShareModal
         shareJob={shareJob}

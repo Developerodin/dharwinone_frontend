@@ -26,10 +26,35 @@ import { buildReplyAllRecipients } from "@/shared/lib/email-recipient-utils";
 import { hasEmailManageAccess, hasEmailReadAccess } from "@/shared/lib/permissions";
 import { buildMailQuery } from "@/shared/lib/mailQuery";
 import { escapeHtmlForTextNode, sanitizeRichHtml } from "@/shared/lib/sanitize-html";
+import { buildForwardQuote, buildReplyQuote, cleanHtmlForSend } from "./_utils/composeHtml";
+import { parseQuickRecipients } from "./_utils/quickRecipients";
+import { buildPrintDocument } from "./_utils/printEmail";
+import { resolveBulkTargets } from "./_utils/bulkSelection";
+import { htmlHasRemoteImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody";
+import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
+import MailConfirmDialog from "./MailConfirmDialog";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward";
+
+/**
+ * Feedback for an action the user just took. Replaces alert(), which stole focus,
+ * was announced as a system dialog rather than as page content, and left the user
+ * with no way to retry the thing that failed.
+ */
+type MailNotice = {
+  tone: "error" | "success";
+  message: string;
+  action?: { label: string; onClick: () => void };
+};
+type MailConfirmRequest = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+};
 type ComposeAttachment = {
   id: string;
   filename: string;
@@ -107,6 +132,10 @@ const MAILS_ORDER = [
   "ARCHIVE",
   "OUTBOX",
   "CATEGORY_PERSONAL",
+  "CATEGORY_SOCIAL",
+  "CATEGORY_PROMOTIONS",
+  "CATEGORY_UPDATES",
+  "CATEGORY_FORUMS",
   "STARRED",
   "conversationhistory",
   "notes",
@@ -114,6 +143,46 @@ const MAILS_ORDER = [
 
 function getLabelIcon(labelId: string): string {
   return LABEL_ICONS[labelId] || "ri-price-tag-line";
+}
+
+/** Gmail folder-counts keys → normalized label ids used in the nav. */
+const GMAIL_FOLDER_COUNT_KEY_BY_LABEL: Record<string, string> = {
+  INBOX: "inbox",
+  SENT: "sent",
+  DRAFT: "draft",
+  SPAM: "spam",
+  TRASH: "trash",
+  IMPORTANT: "important",
+  STARRED: "starred",
+};
+
+function mergeGmailLabelCounts(
+  labels: EmailLabel[],
+  counts: emailApi.EmailFolderCounts
+): EmailLabel[] {
+  return labels.map((label) => {
+    const key = GMAIL_FOLDER_COUNT_KEY_BY_LABEL[label.id];
+    const bucket = key ? counts[key] : undefined;
+    if (!bucket) return label;
+    return { ...label, unread: bucket.unread, total: bucket.total };
+  });
+}
+
+function formatMailNavBadgeCount(count: number): string {
+  if (count > 999) return `${(count / 1000).toFixed(1)}k`;
+  return String(count);
+}
+
+function MailNavUnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0"
+      title="Unread conversations"
+    >
+      {formatMailNavBadgeCount(count)}
+    </span>
+  );
 }
 
 /** Human-readable dates in list + reading pane (avoids raw ISO like 2024-03-18T09:25:58Z). */
@@ -135,25 +204,6 @@ function formatMailListDate(iso: string | null | undefined): string {
     day: "numeric",
     ...(sameYear ? {} : { year: "numeric" }),
   });
-}
-
-/** Clean Tiptap HTML before send: unescape entities, remove empty paragraphs, trim. */
-function cleanHtmlForSend(html: string): string {
-  if (!html?.trim()) return "<p></p>";
-  let cleaned = html;
-  // Unescape HTML entities so we send raw HTML, not &lt;p&gt;text&lt;/p&gt;
-  cleaned = cleaned
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&");
-  cleaned = cleaned
-    .replace(/<p>\s*<br\s*\/?>\s*<\/p>/gi, "")
-    .replace(/<p>\s*<\/p>/g, "")
-    .replace(/\s*$/, "")
-    .trim();
-  return cleaned || "<p></p>";
 }
 
 function emailToDisplayName(email: string): string {
@@ -244,6 +294,13 @@ const Mailapp = () => {
   const agentSignatureRef = useRef<{ html: string; enabled: boolean } | null>(null);
   const [showComposeTemplatesMenu, setShowComposeTemplatesMenu] = useState(false);
   const composeTemplatesMenuRef = useRef<HTMLDivElement | null>(null);
+  /** The portalled list itself, so outside-click and the focus lock can see it. */
+  const composeTemplatesListRef = useRef<HTMLDivElement | null>(null);
+  const composeTemplatesBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [templatesMenuPosition, setTemplatesMenuPosition] = useState<{
+    bottom: number;
+    left: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!agentSignature) {
@@ -281,18 +338,38 @@ const Mailapp = () => {
 
   useEffect(() => {
     if (!showComposeTemplatesMenu) return;
+    const close = () => {
+      setShowComposeTemplatesMenu(false);
+      setTemplatesMenuPosition(null);
+    };
     const onDown = (e: MouseEvent) => {
-      const el = composeTemplatesMenuRef.current;
-      if (el && !el.contains(e.target as Node)) {
-        setShowComposeTemplatesMenu(false);
+      const target = e.target as Node;
+      // The list is portalled out of the trigger's subtree, so it has to be
+      // checked separately or clicking a template would dismiss the menu.
+      if (composeTemplatesMenuRef.current?.contains(target)) return;
+      if (composeTemplatesListRef.current?.contains(target)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+        composeTemplatesBtnRef.current?.focus();
       }
     };
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    // Capture phase so Escape closes this menu before the compose window's own
+    // Escape handler sees it and tries to close the whole draft.
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
   }, [showComposeTemplatesMenu]);
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [labels, setLabels] = useState<EmailLabel[]>([]);
+  const [gmailFolderCounts, setGmailFolderCounts] = useState<emailApi.EmailFolderCounts | null>(null);
   const [selectedLabelId, setSelectedLabelId] = useState<string>("ALL");
   const [threads, setThreads] = useState<EmailThreadListItem[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
@@ -303,9 +380,24 @@ const Mailapp = () => {
   const [searchInput, setSearchInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<MailNotice | null>(null);
+  const [mailConfirm, setMailConfirm] = useState<MailConfirmRequest | null>(null);
+  const mailConfirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
+  /**
+   * Set when the thread list could not be loaded. Without it a failed fetch and a
+   * genuinely empty folder both rendered "Nothing here yet", so an outage or an
+   * expired mailbox looked exactly like an empty inbox.
+   */
+  const [listError, setListError] = useState<string | null>(null);
+  /** Provider outage during account load — kept separate from folder listError. */
+  const [providerWarning, setProviderWarning] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [oauthSuccess, setOauthSuccess] = useState(false);
+  /** Per-thread: remote images stay blocked until the user opts in. */
+  const [loadRemoteImages, setLoadRemoteImages] = useState(false);
   const [mailboxPolicy, setMailboxPolicy] = useState<EmailConnectionPolicy | null>(null);
   const [policyTick, setPolicyTick] = useState(0);
 
@@ -317,9 +409,15 @@ const Mailapp = () => {
   const expectedWorkEmail = workLock
     ? String((mailboxPolicy as Extract<EmailConnectionPolicy, { hardLockActive: true }>).expectedEmail).toLowerCase().trim()
     : "";
-  const lockAllowedProviders: ("gmail" | "outlook")[] = workLock
-    ? (mailboxPolicy as Extract<EmailConnectionPolicy, { hardLockActive: true }>).allowedProviders
-    : [];
+  // Memoised because the [] literal was a fresh array on every render, which made
+  // the two connect handlers that depend on it new functions on every render too.
+  const lockAllowedProviders: ("gmail" | "outlook")[] = useMemo(
+    () =>
+      workLock
+        ? (mailboxPolicy as Extract<EmailConnectionPolicy, { hardLockActive: true }>).allowedProviders
+        : [],
+    [workLock, mailboxPolicy]
+  );
 
   const navMailboxAccounts = useMemo(() => {
     if (!workLock) return accounts;
@@ -363,6 +461,8 @@ const Mailapp = () => {
   const [composeSubject, setComposeSubject] = useState("");
   const [composeHtml, setComposeHtml] = useState("");
   const [inlineReplyHtml, setInlineReplyHtml] = useState("");
+  /** Which thread the reply draft belongs to, so navigating back to it keeps it. */
+  const inlineReplyThreadIdRef = useRef<string | null>(null);
   const [inlineReplyAttachments, setInlineReplyAttachments] = useState<
     { filename: string; content: string; mimeType: string }[]
   >([]);
@@ -379,7 +479,12 @@ const Mailapp = () => {
   const [composeAttachmentError, setComposeAttachmentError] = useState<string | null>(null);
   const [attachmentsBusy, setAttachmentsBusy] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendingReply, setSendingReply] = useState(false);
+  /** Reply and reply-all derive their recipients server-side; only these two modes. */
+  const isReplyMode = composeMode === "reply" || composeMode === "replyAll";
   const composeMessageRef = useRef<EmailMessage | null>(null);
+  /** Bumped whenever compose opens or closes so in-flight forward attachment loads cannot land on a new draft. */
+  const forwardAttachGenerationRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inlineReplyFileInputRef = useRef<HTMLInputElement>(null);
   const [showMailMenu, setShowMailMenu] = useState(false);
@@ -393,6 +498,8 @@ const Mailapp = () => {
   const [newLabelName, setNewLabelName] = useState("");
   const [creatingLabel, setCreatingLabel] = useState(false);
   const [createLabelExpanded, setCreateLabelExpanded] = useState(false);
+  const [navCreateLabelOpen, setNavCreateLabelOpen] = useState(false);
+  const [navLabelName, setNavLabelName] = useState("");
   const [selectedThreadIds, setSelectedThreadIds] = useState<Set<string>>(new Set());
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [quickAddEmail, setQuickAddEmail] = useState("");
@@ -400,12 +507,53 @@ const Mailapp = () => {
   const [quickRecipients, setQuickRecipients] = useState<{ email: string }[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const stored = localStorage.getItem("email-quick-recipients");
-      return stored ? JSON.parse(stored) : [];
+      return parseQuickRecipients(localStorage.getItem("email-quick-recipients"));
     } catch {
+      // localStorage itself can throw (private mode, blocked site data).
       return [];
     }
   });
+
+  const showError = useCallback((message: string, action?: MailNotice["action"]) => {
+    setNotice({ tone: "error", message, action });
+  }, []);
+  const showSuccess = useCallback((message: string) => {
+    setNotice({ tone: "success", message });
+  }, []);
+
+  const requestMailConfirm = useCallback((options: MailConfirmRequest): Promise<boolean> => {
+    return new Promise((resolve) => {
+      mailConfirmResolverRef.current = resolve;
+      setMailConfirm(options);
+    });
+  }, []);
+
+  const settleMailConfirm = useCallback((confirmed: boolean) => {
+    const resolve = mailConfirmResolverRef.current;
+    mailConfirmResolverRef.current = null;
+    setMailConfirm(null);
+    resolve?.(confirmed);
+  }, []);
+
+  // OAuth failures on return only rendered on the connect stage; with mailboxes
+  // already linked the main shell hid them entirely.
+  useEffect(() => {
+    if (!oauthError || showMailEmptyStage) return;
+    showError(oauthError);
+    setOauthError(null);
+  }, [oauthError, showMailEmptyStage, showError]);
+
+  useEffect(() => {
+    setLoadRemoteImages(false);
+  }, [selectedThreadId]);
+
+  // Success is transient; an error stays until the user dismisses it or acts on
+  // it, so a failed send is never scrolled past unnoticed.
+  useEffect(() => {
+    if (notice?.tone !== "success") return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const Toggle1 = useCallback(() => {
     if (typeof window !== "undefined" && window.innerWidth <= 992) {
@@ -415,14 +563,7 @@ const Mailapp = () => {
     }
   }, []);
 
-  const Toggle2 = useCallback(() => {
-    if (typeof window !== "undefined" && window.innerWidth <= 992) {
-      setTotalMailsVisible(true);
-      setMailNavigationVisible(false);
-      setTotalMailsHidden(false);
-    }
-  }, []);
-
+  /** Opening a thread on a narrow screen: hand the width to the reading pane. */
   const Medium = useCallback(() => {
     if (typeof window !== "undefined" && window.innerWidth <= 1399) {
       setMailsInformationVisible(true);
@@ -431,6 +572,7 @@ const Mailapp = () => {
     }
   }, []);
 
+  /** The exact inverse of Medium(): give the width back to the thread list. */
   const restoreMobileListLayout = useCallback(() => {
     if (typeof window !== "undefined" && window.innerWidth <= 1399) {
       setMailsInformationVisible(false);
@@ -439,13 +581,45 @@ const Mailapp = () => {
     }
   }, []);
 
+  /**
+   * Chose a folder: show its thread list.
+   *
+   * This used to act only at 992px and under, while Medium() hides the list all
+   * the way up to 1399px. Between those two widths - every tablet - opening a
+   * thread hid the list and nothing brought it back, so picking another folder
+   * left the reading pane on screen showing the previous thread.
+   */
+  const Toggle2 = useCallback(() => {
+    if (typeof window === "undefined") return;
+    restoreMobileListLayout();
+    if (window.innerWidth <= 992) setMailNavigationVisible(false);
+  }, [restoreMobileListLayout]);
+
+  /**
+   * Single entry point for choosing a folder.
+   *
+   * The four call sites had drifted: All Mails and Inbox cleared searchQuery but
+   * not searchInput, so the box still showed a term that was no longer applied,
+   * and the label rows cleared neither, so a search silently carried over into
+   * the folder you had just opened.
+   */
+  const selectFolder = useCallback(
+    (labelId: string) => {
+      setSelectedLabelId(labelId);
+      setSearchInput("");
+      setSearchQuery("");
+      Toggle2();
+    },
+    [Toggle2]
+  );
+
   const backToThreadList = useCallback(() => {
-    setSelectedThreadId(null);
-    setThreadMessages([]);
     const params = new URLSearchParams(searchParams.toString());
     params.delete("thread");
     const q = params.toString();
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    setSelectedThreadId(null);
+    setThreadMessages([]);
     restoreMobileListLayout();
   }, [router, pathname, searchParams, restoreMobileListLayout]);
 
@@ -500,7 +674,21 @@ const Mailapp = () => {
       setOauthError(friendly[dec] ?? dec);
     }
     if (connected === "gmail" || connected === "outlook") setOauthSuccess(true);
-  }, [searchParams]);
+    // Strip the callback params once handled. They used to survive every later
+    // router.replace on this page, so the URL stayed advertising ?connected= or a
+    // raw ?error= code, and reloading re-ran the callback handling.
+    //
+    // Only after the account load has finished: that load reads ?connected= from
+    // window.location to pick out the mailbox just linked, so clearing it any
+    // earlier would leave the new mailbox unselected.
+    if (!loading && (connected || error)) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("connected");
+      params.delete("error");
+      const q = params.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    }
+  }, [searchParams, router, pathname, loading]);
 
   useEffect(() => {
     if (!canSeeEmailPolicy) return;
@@ -567,13 +755,28 @@ const Mailapp = () => {
           (new URLSearchParams(window.location.search).get("connected") === "gmail" ||
             new URLSearchParams(window.location.search).get("connected") === "outlook");
 
-        const [pol, list] = await Promise.all([
+        const [pol, accountsResult] = await Promise.all([
           canSeeEmailPolicy
             ? emailApi.getEmailConnectionPolicy().catch(() => ({ hardLockActive: false } as EmailConnectionPolicy))
             : Promise.resolve({ hardLockActive: false } as EmailConnectionPolicy),
           emailApi.getEmailAccounts(),
         ]);
         if (cancelled) return;
+        const list = accountsResult.accounts;
+        // A provider we could not reach is not the same as a provider with no
+        // accounts. Say so, otherwise a connected mailbox just disappears - and
+        // when it is the only one, the page offers to connect what is already
+        // connected.
+        if (accountsResult.unreachable.length > 0) {
+          const names = accountsResult.unreachable
+            .map((p) => (p === "outlook" ? "Outlook" : "Gmail"))
+            .join(" and ");
+          setProviderWarning(
+            `We couldn't reach ${names} just now. Connected mailboxes may be missing until the provider responds again.`
+          );
+        } else {
+          setProviderWarning(null);
+        }
 
         setMailboxPolicy(pol);
         const polLock =
@@ -634,31 +837,106 @@ const Mailapp = () => {
     const accountId = selectedAccountId;
     if (!accountId) {
       setLabels([]);
+      setGmailFolderCounts(null);
       return;
     }
     const id: string = accountId;
     let cancelled = false;
     async function load() {
       try {
-        const p =
-          accounts.find((a) => a.id === id)?.provider === "outlook" ? "outlook" : "gmail";
-        const list = await emailApi.getLabels(id, p);
-        if (!cancelled) setLabels(list);
+        const list = await emailApi.getLabels(id, mailProvider);
+        if (cancelled) return;
+        if (mailProvider === "gmail") {
+          try {
+            const counts = await emailApi.getFolderCounts(id, mailProvider);
+            if (cancelled) return;
+            setGmailFolderCounts(counts);
+            setLabels(mergeGmailLabelCounts(list, counts));
+          } catch {
+            setGmailFolderCounts(null);
+            setLabels(list);
+          }
+        } else {
+          setGmailFolderCounts(null);
+          setLabels(list);
+        }
       } catch {
-        if (!cancelled) setLabels([]);
+        if (!cancelled) {
+          setLabels([]);
+          setGmailFolderCounts(null);
+        }
       }
     }
     load();
     return () => {
       cancelled = true;
     };
-  }, [selectedAccountId, accounts]);
+    // Depends on the selected account's provider, not on the accounts array: that
+    // array is rebuilt on every window focus, and depending on it re-ran this and
+    // every sibling effect - reloading labels, resetting the thread list to page
+    // one and refetching the open thread each time the user came back to the tab.
+  }, [selectedAccountId, mailProvider]);
+
+  const refreshMailboxLabels = useCallback(async () => {
+    const accountId = selectedAccountId;
+    if (!accountId) {
+      setLabels([]);
+      setGmailFolderCounts(null);
+      return;
+    }
+    try {
+      const list = await emailApi.getLabels(accountId, mailProvider);
+      if (mailProvider === "gmail") {
+        try {
+          const counts = await emailApi.getFolderCounts(accountId, mailProvider);
+          setGmailFolderCounts(counts);
+          setLabels(mergeGmailLabelCounts(list, counts));
+        } catch {
+          setGmailFolderCounts(null);
+          setLabels(list);
+        }
+      } else {
+        setGmailFolderCounts(null);
+        setLabels(list);
+      }
+    } catch {
+      setLabels([]);
+      setGmailFolderCounts(null);
+    }
+  }, [selectedAccountId, mailProvider]);
+
+  const bumpNavUnreadCounts = useCallback(
+    (delta: number, labelIds: string[] = ["INBOX"]) => {
+      if (delta === 0) return;
+      setLabels((prev) =>
+        prev.map((l) =>
+          labelIds.includes(l.id) && typeof l.unread === "number"
+            ? { ...l, unread: Math.max(0, l.unread + delta) }
+            : l
+        )
+      );
+      if (mailProvider !== "gmail" || !gmailFolderCounts) return;
+      setGmailFolderCounts((prev) => {
+        if (!prev) return prev;
+        const next: emailApi.EmailFolderCounts = { ...prev };
+        for (const labelId of labelIds) {
+          const key = GMAIL_FOLDER_COUNT_KEY_BY_LABEL[labelId];
+          if (key && next[key]) {
+            next[key] = { ...next[key], unread: Math.max(0, next[key].unread + delta) };
+          }
+        }
+        if (labelIds.includes("INBOX") && next.all) {
+          next.all = { ...next.all, unread: Math.max(0, next.all.unread + delta) };
+        }
+        return next;
+      });
+    },
+    [mailProvider, gmailFolderCounts]
+  );
 
   // Outlook cannot use Gmail label ids as folder paths — reset when switching to Outlook
   useEffect(() => {
-    if (!selectedAccountId || accounts.length === 0) return;
-    const acc = accounts.find((a) => a.id === selectedAccountId);
-    if (acc?.provider !== "outlook") return;
+    if (!selectedAccountId || mailProvider !== "outlook") return;
     setSelectedLabelId((prev) => {
       if (
         prev.startsWith("CATEGORY_") ||
@@ -669,7 +947,7 @@ const Mailapp = () => {
       }
       return prev;
     });
-  }, [selectedAccountId, accounts]);
+  }, [selectedAccountId, mailProvider]);
 
   useEffect(() => {
     const accountId = selectedAccountId;
@@ -683,10 +961,9 @@ const Mailapp = () => {
     setLoadingMessages(true);
     setThreads([]);
     setNextPageToken(null);
+    setListError(null);
     async function load() {
       try {
-        const p =
-          accounts.find((a) => a.id === id)?.provider === "outlook" ? "outlook" : "gmail";
         const res = await emailApi.getThreads(
           {
             accountId: id,
@@ -694,7 +971,7 @@ const Mailapp = () => {
             pageSize: 20,
             q: searchQuery || undefined,
           },
-          p
+          mailProvider
         );
         if (!cancelled) {
           setThreads(res.threads);
@@ -702,7 +979,11 @@ const Mailapp = () => {
           setResultSizeEstimate(res.resultSizeEstimate ?? 0);
         }
       } catch {
-        if (!cancelled) setThreads([]);
+        if (!cancelled) {
+          setThreads([]);
+          // Distinguish "this folder is empty" from "we could not read it".
+          setListError("We couldn't load this folder.");
+        }
       } finally {
         if (!cancelled) setLoadingMessages(false);
       }
@@ -711,11 +992,57 @@ const Mailapp = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedAccountId, selectedLabelId, searchQuery, accounts]);
+  }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
+
+  // Lets the retry action call the current loader without the callback depending
+  // on itself.
+  const loadMoreThreadsRef = useRef<(() => Promise<void>) | null>(null);
+
+  /**
+   * Close the open thread when the list it came from is replaced.
+   *
+   * Changing folder or search reset `threads` but left `selectedThreadId`, so
+   * `threads.find(...)` returned undefined and the reading pane rendered a blank
+   * sender, recipient and date over the previous thread's body, with ?thread=
+   * still in the URL. On a tablet the thread list stayed hidden too, leaving the
+   * user stranded on that header-less pane.
+   *
+   * The first run is skipped so a ?thread= deep link, which resolves once the
+   * list arrives, is not cleared out from under itself.
+   */
+  const listScopeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const scope = `${selectedAccountId ?? ""}|${selectedLabelId}|${searchQuery}`;
+    if (listScopeRef.current === null || listScopeRef.current === scope) {
+      listScopeRef.current = scope;
+      return;
+    }
+    listScopeRef.current = scope;
+    setSelectedThreadId(null);
+    setThreadMessages([]);
+    restoreMobileListLayout();
+    if (searchParams.get("thread")) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("thread");
+      const q = params.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    }
+  }, [
+    selectedAccountId,
+    selectedLabelId,
+    searchQuery,
+    restoreMobileListLayout,
+    router,
+    pathname,
+    searchParams,
+  ]);
 
   const loadMoreThreads = useCallback(async () => {
     if (!selectedAccountId || !nextPageToken) return;
-    setLoadingMessages(true);
+    // Its own flag: sharing loadingMessages swapped the whole list for skeletons
+    // on every "Load more", so the rows the user was reading vanished and the
+    // scroll position was lost before the next page was appended.
+    setLoadingMore(true);
     try {
       const res = await emailApi.getThreads(
         {
@@ -727,12 +1054,43 @@ const Mailapp = () => {
         },
         mailProvider
       );
-      setThreads((prev) => [...prev, ...res.threads]);
+      setThreads((prev) => {
+        // Outlook groups a page of messages into conversations, so a conversation
+        // whose messages straddle a page boundary comes back on both pages. Left
+        // unchecked that produced duplicate React keys, and a star or read toggle
+        // updated both copies.
+        const seen = new Set(prev.map((t) => t.id));
+        return [...prev, ...res.threads.filter((t) => !seen.has(t.id))];
+      });
       setNextPageToken(res.nextPageToken);
+    } catch {
+      showError("Could not load more conversations.", {
+        label: "Try again",
+        onClick: () => void loadMoreThreadsRef.current?.(),
+      });
     } finally {
-      setLoadingMessages(false);
+      setLoadingMore(false);
     }
-  }, [selectedAccountId, selectedLabelId, searchQuery, nextPageToken, mailProvider]);
+  }, [selectedAccountId, selectedLabelId, searchQuery, nextPageToken, mailProvider, showError]);
+
+  loadMoreThreadsRef.current = loadMoreThreads;
+
+  const retryLoadThreadDetail = useCallback(() => {
+    if (!selectedAccountId || !selectedThreadId) return;
+    setDetailError(null);
+    setLoadingDetail(true);
+    emailApi
+      .getThread(selectedAccountId, selectedThreadId, mailProvider)
+      .then((data) => {
+        setThreadMessages(data.messages);
+        setDetailError(null);
+      })
+      .catch(() => {
+        setThreadMessages([]);
+        setDetailError("We couldn't load this conversation.");
+      })
+      .finally(() => setLoadingDetail(false));
+  }, [selectedAccountId, selectedThreadId, mailProvider]);
 
   useEffect(() => {
     if (!selectedAccountId || !selectedThreadId) {
@@ -742,15 +1100,20 @@ const Mailapp = () => {
     const tid = selectedThreadId;
     let cancelled = false;
     setLoadingDetail(true);
-    const p =
-      accounts.find((a) => a.id === selectedAccountId)?.provider === "outlook" ? "outlook" : "gmail";
+    setDetailError(null);
     emailApi
-      .getThread(selectedAccountId, tid, p)
+      .getThread(selectedAccountId, tid, mailProvider)
       .then((data) => {
-        if (!cancelled && selectedThreadId === tid) setThreadMessages(data.messages);
+        if (!cancelled && selectedThreadId === tid) {
+          setThreadMessages(data.messages);
+          setDetailError(null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setThreadMessages([]);
+        if (!cancelled) {
+          setThreadMessages([]);
+          setDetailError("We couldn't load this conversation.");
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingDetail(false);
@@ -758,7 +1121,7 @@ const Mailapp = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedAccountId, selectedThreadId, accounts]);
+  }, [selectedAccountId, selectedThreadId, mailProvider]);
 
   const handleConnectGmail = useCallback(async () => {
     const bypassGmailCap =
@@ -839,9 +1202,29 @@ const Mailapp = () => {
 
   const handleSelectThread = useCallback(
     async (thread: EmailThreadListItem) => {
+      if (thread.id === selectedThreadId) return;
+      // Returning to the thread the draft belongs to keeps it; only moving to a
+      // different one discards it, and then only after asking. This used to wipe
+      // the composer silently, so a half-written reply vanished on a stray click.
+      const draftBelongsHere = inlineReplyThreadIdRef.current === thread.id;
+      if (
+        !draftBelongsHere &&
+        hasMeaningfulComposeBody(inlineReplyHtml) &&
+        !(await requestMailConfirm({
+          title: "Discard reply?",
+          message: "Discard the reply you started on the other thread?",
+          confirmLabel: "Discard",
+          destructive: true,
+        }))
+      ) {
+        return;
+      }
       setSelectedThreadId(thread.id);
-      setInlineReplyHtml("");
-      setInlineReplyAttachments([]);
+      if (!draftBelongsHere) {
+        setInlineReplyHtml("");
+        setInlineReplyAttachments([]);
+        inlineReplyThreadIdRef.current = null;
+      }
       Medium();
       const params = new URLSearchParams(searchParams.toString());
       params.set("thread", thread.id);
@@ -862,45 +1245,72 @@ const Mailapp = () => {
               t.id === thread.id ? { ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") } : t
             )
           );
-          if (selectedLabelId === "INBOX") {
-            setResultSizeEstimate((prev) => Math.max(0, prev - 1));
-          }
+
         } catch {
           // ignore
         }
       }
     },
-    [Medium, selectedAccountId, selectedLabelId, mailProvider, router, pathname, searchParams]
+    [
+      Medium,
+      selectedAccountId,
+      selectedThreadId,
+      inlineReplyHtml,
+      mailProvider,
+      router,
+      pathname,
+      searchParams,
+      requestMailConfirm,
+    ]
   );
 
   useEffect(() => {
+    if (!selectedAccountId) return;
     const tid = searchParams.get("thread");
-    if (!tid || threads.length === 0) return;
-    if (!threads.some((t) => t.id === tid)) return;
-    if (selectedThreadId === tid) return;
-    setSelectedThreadId(tid);
+    if (!tid) {
+      setSelectedThreadId((current) => (current === null ? current : null));
+      restoreMobileListLayout();
+      return;
+    }
+    // Open it whether or not it is in the loaded page. The link used to resolve
+    // only against threads already fetched, so a shared link to anything beyond
+    // the first 20 rows silently did nothing. The detail fetch works from the id
+    // alone, and the reading-pane header falls back to the fetched messages.
+    //
+    // Do not depend on selectedThreadId here: backToThreadList clears selection
+    // before router.replace updates searchParams, which used to re-run this effect
+    // with a stale ?thread= and immediately reopen the pane (two-click back).
+    setSelectedThreadId((current) => (current === tid ? current : tid));
     Medium();
-  }, [threads, searchParams, selectedThreadId, Medium]);
+  }, [searchParams, selectedAccountId, Medium, restoreMobileListLayout]);
 
   const lastMessageInThread = threadMessages.length > 0 ? threadMessages[threadMessages.length - 1] : null;
 
   const handleSendInlineReply = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
+    if (!hasMeaningfulComposeBody(inlineReplyHtml)) {
+      showError("Write something before sending the reply.");
+      return;
+    }
     let targetMsg: EmailMessage | null = lastMessageInThread;
     const thread = threads.find((t) => t.id === selectedThreadId);
     if (!targetMsg && thread?.lastMessageId) {
       try {
         targetMsg = await emailApi.getMessage(selectedAccountId, thread.lastMessageId, mailProvider);
       } catch {
-        alert("Could not load the message to reply to.");
+        showError("Could not load the message you are replying to. Reopen the thread and try again.");
         return;
       }
     }
     if (!targetMsg) {
-      alert("No message loaded yet. Try the toolbar Reply or refresh.");
+      showError("This thread has not finished loading yet. Give it a moment, then try again.");
       return;
     }
-    setSending(true);
+
+    // Its own flag, not the compose modal's: sharing one made the footer button
+    // read "Sending..." for a send it was not performing.
+    setSendingReply(true);
+    let sent = false;
     try {
       await emailApi.replyMessage(
         targetMsg.id,
@@ -918,16 +1328,25 @@ const Mailapp = () => {
         },
         mailProvider
       );
-      setInlineReplyHtml("");
-      setInlineReplyAttachments([]);
-      if (selectedThreadId) {
-        const data = await emailApi.getThread(selectedAccountId, selectedThreadId, mailProvider);
-        setThreadMessages(data.messages);
-      }
+      sent = true;
     } catch {
-      alert("Failed to send reply.");
+      showError("Could not send the reply. Your text is still here - try again.");
     } finally {
-      setSending(false);
+      setSendingReply(false);
+    }
+
+    if (!sent) return;
+    // Only clear the draft once the send has actually resolved, and refresh the
+    // thread as a separate failable step so a refresh hiccup cannot read as a
+    // failed reply.
+    setInlineReplyHtml("");
+    setInlineReplyAttachments([]);
+    showSuccess("Reply sent.");
+    try {
+      const data = await emailApi.getThread(selectedAccountId, selectedThreadId, mailProvider);
+      setThreadMessages(data.messages);
+    } catch {
+      showError("Reply sent, but this thread could not be refreshed.");
     }
   }, [
     selectedAccountId,
@@ -937,6 +1356,8 @@ const Mailapp = () => {
     selectedThreadId,
     threads,
     mailProvider,
+    showError,
+    showSuccess,
   ]);
 
   const insertComposeTemplate = useCallback((t: AgentEmailTemplate | AgentEmailTemplateShared) => {
@@ -960,9 +1381,108 @@ const Mailapp = () => {
     setShowComposeTemplatesMenu(false);
   }, []);
 
+  /**
+   * Carry the original's attachments into a forward.
+   *
+   * Forward was built on sendMessage with a quoted body, so it sent only files
+   * the user added by hand - forwarding a contract silently delivered the note
+   * without the contract. The backend forward endpoint does not carry them
+   * either, so the bytes are pulled here and re-attached through the normal
+   * compose path, which needs no API change.
+   */
+  // Declared near the top so every handler below can list it as a dependency;
+  // a const referenced in a deps array must already be initialised at render time.
+  const refetchMessages = useCallback(async () => {
+    if (!selectedAccountId) return;
+    setLoadingMessages(true);
+    setThreads([]);
+    setNextPageToken(null);
+    setListError(null);
+    try {
+      const res = await emailApi.getThreads(
+        {
+          accountId: selectedAccountId,
+          labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
+          pageSize: 20,
+          q: searchQuery || undefined,
+        },
+        mailProvider
+      );
+      setThreads(res.threads);
+      setNextPageToken(res.nextPageToken);
+      setResultSizeEstimate(res.resultSizeEstimate ?? 0);
+    } catch {
+      setThreads([]);
+      setListError("We couldn't load this folder.");
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
+
+  const attachOriginalAttachments = useCallback(
+    async (msg: EmailMessage, generation: number) => {
+      const source = (msg.attachments || []).filter((a) => a.attachmentId);
+      if (!selectedAccountId || source.length === 0) return;
+      setAttachmentsBusy(true);
+      const loaded: ComposeAttachment[] = [];
+      const failed: string[] = [];
+      let budget = composeAttachmentLimitBytes;
+      for (const att of source) {
+        if (generation !== forwardAttachGenerationRef.current) {
+          setAttachmentsBusy(false);
+          return;
+        }
+        if (att.size > budget) {
+          failed.push(`${att.filename} (too large to include)`);
+          continue;
+        }
+        try {
+          const content = await emailApi.fetchAttachmentContent(
+            selectedAccountId,
+            att.messageId || msg.id,
+            att.attachmentId as string,
+            mailProvider
+          );
+          loaded.push({
+            id: `fwd-${att.attachmentId}`,
+            filename: att.filename,
+            content,
+            mimeType: att.mimeType || "application/octet-stream",
+            size: att.size,
+          });
+          budget -= att.size;
+        } catch {
+          failed.push(att.filename);
+        }
+      }
+      const stillForwardForThisMessage =
+        generation === forwardAttachGenerationRef.current &&
+        composeMessageRef.current?.id === msg.id;
+      if (!stillForwardForThisMessage) {
+        setAttachmentsBusy(false);
+        return;
+      }
+      setComposeAttachments((prev) => {
+        const have = new Set(prev.map((a) => a.id));
+        return [...prev, ...loaded.filter((a) => !have.has(a.id))];
+      });
+      setAttachmentsBusy(false);
+      if (failed.length) {
+        setComposeAttachmentError(
+          `Could not attach ${failed.join(", ")}. Send anyway, or download and attach by hand.`
+        );
+      }
+    },
+    [selectedAccountId, mailProvider, composeAttachmentLimitBytes]
+  );
+
   const openCompose = useCallback(
     (mode: ComposeMode, msg?: EmailMessage) => {
-      console.log("[Email] openCompose:", { mode, msgId: msg?.id });
+      if (!canManageEmail) {
+        showError("You do not have permission to send email.");
+        return;
+      }
+      forwardAttachGenerationRef.current += 1;
       composeMessageRef.current = msg ?? null;
       setComposeMode(mode);
       setShowComposeTemplatesMenu(false);
@@ -989,7 +1509,7 @@ const Mailapp = () => {
         }
       } else if (msg) {
         const subject = msg.subject || "(No subject)";
-        const quoteReply = `\n\n<div class="mail-quoted"><p>On ${msg.date || ""} ${msg.from} wrote:</p><blockquote>${msg.htmlBody || msg.textBody || ""}</blockquote></div>`;
+        const quoteReply = buildReplyQuote(msg);
         if (mode === "reply") {
           setComposeTo(msg.from ?? "");
           setComposeSubject(subject.startsWith("Re:") ? subject : `Re: ${subject}`);
@@ -1005,8 +1525,7 @@ const Mailapp = () => {
         } else {
           setComposeTo("");
           setComposeSubject(subject.startsWith("Fwd:") ? subject : `Fwd: ${subject}`);
-          const quoted = `\n\n<div class="mail-forwarded"><p>---------- Forwarded message ---------</p><p>From: ${msg.from}<br/>To: ${msg.to}${msg.cc ? `<br/>Cc: ${msg.cc}` : ""}<br/>Date: ${msg.date || ""}<br/>Subject: ${subject}</p><blockquote>${msg.htmlBody || msg.textBody || ""}</blockquote></div>`;
-          setComposeHtml(quoted);
+          setComposeHtml(buildForwardQuote(msg, subject));
           setComposeCc("");
         }
         setComposeBcc("");
@@ -1014,7 +1533,7 @@ const Mailapp = () => {
       setComposeAttachments([]);
       setShowComposeModal(true);
     },
-    [accounts, selectedAccountId]
+    [accounts, selectedAccountId, canManageEmail, showError]
   );
 
   /** Reply / reply-all / forward when thread body fetch failed but list row has message ids */
@@ -1033,17 +1552,24 @@ const Mailapp = () => {
       if (!msg && fallbackId) {
         try {
           msg = await emailApi.getMessage(selectedAccountId, fallbackId, mailProvider);
-        } catch (err) {
-          console.error("[Email] getMessage for compose:", err);
-          alert("Could not load this message. Refresh the page or re-open the thread.");
+        } catch {
+          showError("Could not load this message.", {
+            label: "Reload inbox",
+            onClick: () => void refetchMessages(),
+          });
           return;
         }
       }
       if (!msg) {
-        alert("No message is available yet. Wait a moment, or refresh the inbox.");
+        showError("This thread has not finished loading yet. Give it a moment, then try again.");
         return;
       }
       openCompose(mode, msg);
+      if (mode === "forward") {
+        // Fire and forget: the modal is already open and shows a busy state on the
+        // attach control while the original's files are pulled in.
+        void attachOriginalAttachments(msg, forwardAttachGenerationRef.current);
+      }
     },
     [
       selectedAccountId,
@@ -1053,10 +1579,50 @@ const Mailapp = () => {
       threadMessages,
       mailProvider,
       openCompose,
+      attachOriginalAttachments,
+      refetchMessages,
+      showError,
     ]
   );
 
+  /**
+   * Snapshot of the compose fields as opened, so "has the user actually written
+   * anything" can be answered. A reply or forward starts with the quoted original
+   * already in the body, so a plain "is the body non-empty" check would prompt
+   * about unsaved work the moment the window opened.
+   */
+  const composeOpenedWithRef = useRef({ html: "", subject: "", to: "", cc: "", bcc: "" });
+
+  useEffect(() => {
+    if (!showComposeModal) return;
+    // Captures the fields as of the render that opened the window - openCompose
+    // batches its setters, so they have all landed by here. Intentionally keyed
+    // on the open flag alone: listing the fields would re-snapshot on every
+    // keystroke and nothing would ever look dirty.
+    composeOpenedWithRef.current = {
+      html: composeHtml,
+      subject: composeSubject,
+      to: composeTo,
+      cc: composeCc,
+      bcc: composeBcc,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showComposeModal]);
+
+  const isComposeDirty = useCallback(() => {
+    const start = composeOpenedWithRef.current;
+    return (
+      composeHtml !== start.html ||
+      composeSubject !== start.subject ||
+      composeTo !== start.to ||
+      composeCc !== start.cc ||
+      composeBcc !== start.bcc ||
+      composeAttachments.length > 0
+    );
+  }, [composeHtml, composeSubject, composeTo, composeCc, composeBcc, composeAttachments]);
+
   const closeCompose = useCallback(() => {
+    forwardAttachGenerationRef.current += 1;
     setShowComposeModal(false);
     composeMessageRef.current = null;
     setShowComposeAiPanel(false);
@@ -1070,6 +1636,49 @@ const Mailapp = () => {
     setComposeAttachmentError(null);
     setAttachmentsBusy(false);
   }, []);
+
+  /**
+   * Every dismissal route goes through here: the X, Discard, the backdrop and
+   * Escape. Closing used to throw away the body, the subject, any AI draft and
+   * every base64-encoded attachment without a word, and a stray backdrop click
+   * was enough to do it.
+   */
+  const requestCloseCompose = useCallback(async () => {
+    if (
+      isComposeDirty() &&
+      !(await requestMailConfirm({
+        title: "Discard message?",
+        message: "Discard this message? Your draft will be lost.",
+        confirmLabel: "Discard",
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
+    closeCompose();
+  }, [isComposeDirty, closeCompose, requestMailConfirm]);
+
+  // Escape closes the topmost surface: confirm dialog, then quick-add, then
+  // compose (which asks first if there is anything to lose).
+  useEffect(() => {
+    if (!mailConfirm && !showComposeModal && !showQuickAddModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (mailConfirm) {
+        settleMailConfirm(false);
+        return;
+      }
+      if (showQuickAddModal) {
+        setShowQuickAddModal(false);
+        setQuickAddEmail("");
+        setQuickAddError(null);
+        return;
+      }
+      void requestCloseCompose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mailConfirm, showComposeModal, showQuickAddModal, requestCloseCompose, settleMailConfirm]);
 
   const handleAddAttachment = useCallback(() => {
     fileInputRef.current?.click();
@@ -1162,11 +1771,14 @@ const Mailapp = () => {
   }, [canManageEmail, composeAiContext, composeAiLength, composeAiPrompt, composeAiTone, composeSubject, composeTo]);
 
   const applyComposeDraft = useCallback(
-    (option: EmailDraftOption, mode: "replace" | "append" = "replace") => {
+    async (option: EmailDraftOption, mode: "replace" | "append" = "replace") => {
       if (mode === "replace" && hasMeaningfulComposeBody(composeHtml)) {
-        const shouldReplace = window.confirm(
-          "Replace the current draft body with this AI version? Your existing text will be removed, but your signature will stay."
-        );
+        const shouldReplace = await requestMailConfirm({
+          title: "Replace draft?",
+          message:
+            "Replace the current draft body with this AI version? Your existing text will be removed, but your signature will stay.",
+          confirmLabel: "Replace",
+        });
         if (!shouldReplace) return;
       }
       setComposeHtml((prev) =>
@@ -1179,7 +1791,7 @@ const Mailapp = () => {
       setComposeAiError(null);
       setShowComposeAiPanel(false);
     },
-    [composeAiSubject, composeHtml]
+    [composeAiSubject, composeHtml, requestMailConfirm]
   );
 
   const handleAddInlineReplyAttachment = useCallback(() => {
@@ -1190,8 +1802,15 @@ const Mailapp = () => {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files?.length) return;
+      const skipped: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        // The compose modal enforced this and the inline reply did not, so an
+        // oversized file was accepted here and only rejected by the provider.
+        if (file.size > composeAttachmentLimitBytes) {
+          skipped.push(`${file.name} is too large. Keep files under ${composeAttachmentLimitLabel}.`);
+          continue;
+        }
         try {
           const content = await fileToBase64(file);
           setInlineReplyAttachments((prev) => [
@@ -1199,12 +1818,13 @@ const Mailapp = () => {
             { filename: file.name, content, mimeType: file.type || "application/octet-stream" },
           ]);
         } catch {
-          // skip
+          skipped.push(`Could not read ${file.name}.`);
         }
       }
+      if (skipped.length) showError(skipped.join(" "));
       e.target.value = "";
     },
-    []
+    [composeAttachmentLimitBytes, composeAttachmentLimitLabel, showError]
   );
 
   const removeInlineReplyAttachment = useCallback((idx: number) => {
@@ -1213,15 +1833,28 @@ const Mailapp = () => {
 
   const handleSendCompose = useCallback(async () => {
     if (!selectedAccountId) return;
+    if (!canManageEmail) {
+      showError("You do not have permission to send email.");
+      return;
+    }
+
+    // Validate before entering the sending state, so a missing recipient never
+    // looks like a failed send.
+    const explicitTo = composeTo.split(/[,;]/).map((e) => e.trim()).filter(Boolean);
+    if ((composeMode === "new" || composeMode === "forward") && explicitTo.length === 0) {
+      showError("Enter at least one recipient before sending.");
+      return;
+    }
+    if (composeMode !== "new" && composeMode !== "forward" && !composeMessageRef.current) {
+      showError("The message being replied to is no longer loaded. Close and reopen the thread.");
+      return;
+    }
+
     setSending(true);
+    let sent = false;
     try {
       if (composeMode === "new" || composeMode === "forward") {
-        const to = composeTo.split(/[,;]/).map((e) => e.trim()).filter(Boolean);
-        if (!to.length) {
-          alert("Please enter at least one recipient.");
-          setSending(false);
-          return;
-        }
+        const to = explicitTo;
         await emailApi.sendMessage(
           {
             accountId: selectedAccountId,
@@ -1280,26 +1913,24 @@ const Mailapp = () => {
           mailProvider
         );
       }
-      closeCompose();
-      setThreads([]);
-      if (selectedAccountId) {
-        const res = await emailApi.getThreads(
-          {
-            accountId: selectedAccountId,
-            labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
-            pageSize: 20,
-            q: searchQuery || undefined,
-          },
-          mailProvider
-        );
-        setThreads(res.threads);
-        setNextPageToken(res.nextPageToken);
-      }
-    } catch (err) {
-      alert("Failed to send message. Please try again.");
+      sent = true;
+    } catch {
+      showError("Could not send the message. Your draft is still open - try again.");
     } finally {
       setSending(false);
     }
+
+    if (!sent) return;
+
+    // The message is gone the moment the send resolves. Refreshing the list is a
+    // separate, failable step: it used to sit inside the same try, so a hiccup on
+    // the refresh reported "Failed to send" for a message that had already been
+    // delivered - and users resent it. It also cleared the list first, so that
+    // failure left the inbox looking empty as well.
+    closeCompose();
+    showSuccess("Message sent.");
+    await refetchMessages();
+    void refreshMailboxLabels();
   }, [
     selectedAccountId,
     composeTo,
@@ -1309,14 +1940,18 @@ const Mailapp = () => {
     composeHtml,
     composeAttachments,
     composeMode,
-    selectedLabelId,
-    searchQuery,
     closeCompose,
     mailProvider,
+    refetchMessages,
+    refreshMailboxLabels,
+    showError,
+    showSuccess,
+    canManageEmail,
   ]);
 
   const handleTrash = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
+    const wasUnread = threads.find((t) => t.id === selectedThreadId)?.isUnread ?? false;
     try {
       await emailApi.trashThreads(selectedAccountId, [selectedThreadId], mailProvider);
       setThreads((prev) => prev.filter((t) => t.id !== selectedThreadId));
@@ -1328,36 +1963,22 @@ const Mailapp = () => {
         return next;
       });
       restoreMobileListLayout();
+      if (wasUnread) bumpNavUnreadCounts(-1, ["INBOX"]);
+      void refreshMailboxLabels();
     } catch (err) {
       console.error("[Email] Trash failed:", err);
-      alert("Could not delete this thread. Check your connection and try again.");
+      showError("Could not move this conversation to trash. Nothing was deleted.");
     }
-  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider]);
-
-  const refetchMessages = useCallback(async () => {
-    if (!selectedAccountId) return;
-    setLoadingMessages(true);
-    setThreads([]);
-    setNextPageToken(null);
-    try {
-      const res = await emailApi.getThreads(
-        {
-          accountId: selectedAccountId,
-          labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
-          pageSize: 20,
-          q: searchQuery || undefined,
-        },
-        mailProvider
-      );
-      setThreads(res.threads);
-      setNextPageToken(res.nextPageToken);
-      setResultSizeEstimate(res.resultSizeEstimate ?? 0);
-    } catch {
-      setThreads([]);
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
+  }, [
+    selectedAccountId,
+    selectedThreadId,
+    threads,
+    restoreMobileListLayout,
+    mailProvider,
+    showError,
+    bumpNavUnreadCounts,
+    refreshMailboxLabels,
+  ]);
 
   const handleToggleStar = useCallback(
     async (thread: EmailThreadListItem, e?: React.MouseEvent) => {
@@ -1388,10 +2009,10 @@ const Mailapp = () => {
         );
       } catch (err) {
         console.error("[Email] Star toggle failed:", err);
-        alert("Could not update the star. Check your connection and try again.");
+        showError("Could not update the star.");
       }
     },
-    [selectedAccountId, mailProvider]
+    [selectedAccountId, mailProvider, showError]
   );
 
   const handleArchive = useCallback(async () => {
@@ -1417,14 +2038,70 @@ const Mailapp = () => {
       restoreMobileListLayout();
     } catch (err) {
       console.error("[Email] Archive failed:", err);
-      alert("Could not archive this thread. Check your connection and try again.");
+      showError("Could not archive this conversation. Nothing was moved.");
     }
-  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider]);
+  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider, showError]);
+
+  /**
+   * Where "Mailbox settings" points.
+   *
+   * Both links were hardcoded to the consumer hosts, so a Workspace user landed
+   * in whichever Google account their browser happened to have first, and a
+   * Microsoft 365 work account was sent to outlook.live.com, which does not host
+   * it. Gmail's /u/<address>/ form selects the right account for personal and
+   * Workspace alike; for Microsoft the consumer hosts are a known short list, so
+   * anything else is treated as a work or school tenant.
+   */
+  const mailboxSettingsUrl = useMemo(() => {
+    const email = (accounts.find((a) => a.id === selectedAccountId)?.email || "").trim();
+    if (mailProvider === "outlook") {
+      const domain = email.split("@")[1]?.toLowerCase() ?? "";
+      const consumer = ["outlook.com", "hotmail.com", "live.com", "msn.com"].includes(domain);
+      return consumer
+        ? "https://outlook.live.com/mail/0/options/general"
+        : "https://outlook.office.com/mail/options/general";
+    }
+    return email
+      ? `https://mail.google.com/mail/u/${encodeURIComponent(email)}/#settings/general`
+      : "https://mail.google.com/mail/#settings";
+  }, [accounts, selectedAccountId, mailProvider]);
+
+  const unreadForLabel = useCallback(
+    (labelId: string): number => labels.find((l) => l.id === labelId)?.unread ?? 0,
+    [labels]
+  );
+
+  const allMailsUnread = useMemo(() => {
+    if (mailProvider === "gmail") {
+      return gmailFolderCounts?.all?.unread ?? unreadForLabel("INBOX");
+    }
+    return labels.reduce((sum, l) => sum + (l.unread ?? 0), 0);
+  }, [mailProvider, gmailFolderCounts, labels, unreadForLabel]);
 
   const selectedThread = threads.find((t) => t.id === selectedThreadId);
 
+  /**
+   * What the reading-pane header shows.
+   *
+   * The list row is the best source when there is one, but there is not always a
+   * row: a shared ?thread= link can point at a thread beyond the loaded page.
+   * Falling back to the fetched messages stops the pane rendering a blank sender,
+   * recipient and date above a perfectly good conversation.
+   */
+  const headerFrom = selectedThread?.from ?? lastMessageInThread?.from ?? "";
+  const headerTo = selectedThread?.to ?? lastMessageInThread?.to ?? "";
+  const headerDate = selectedThread?.date ?? lastMessageInThread?.date ?? null;
+  const headerSubject = selectedThread?.subject ?? threadMessages[0]?.subject ?? "";
+  const headerMessageCount = selectedThread?.messageCount ?? threadMessages.length;
+
   const handleCreateLabel = useCallback(
-    async (name: string) => {
+    /**
+     * `applyToOpenThread` defaults to the reading-pane behaviour, where creating a
+     * label from the thread's own menu is meant to tag that thread. Creating one
+     * from the sidebar is just housekeeping and must not silently label whatever
+     * happens to be open.
+     */
+    async (name: string, { applyToOpenThread = true }: { applyToOpenThread?: boolean } = {}) => {
       if (!selectedAccountId || !name?.trim()) return;
       setCreatingLabel(true);
       try {
@@ -1436,7 +2113,7 @@ const Mailapp = () => {
         setLabels((prev) => [...prev, { ...created, type: "user" }]);
         setNewLabelName("");
         setCreateLabelExpanded(false);
-        if (selectedThreadId) {
+        if (applyToOpenThread && selectedThreadId) {
           await emailApi.batchModifyThreads(
             {
               accountId: selectedAccountId,
@@ -1456,12 +2133,12 @@ const Mailapp = () => {
         }
       } catch (err) {
         console.error("Failed to create label:", err);
-        alert("Failed to create label. Please try again.");
+        showError("Could not create that label.");
       } finally {
         setCreatingLabel(false);
       }
     },
-    [selectedAccountId, selectedThreadId, mailProvider]
+    [selectedAccountId, selectedThreadId, mailProvider, showError]
   );
 
   const handleApplyLabel = useCallback(
@@ -1485,15 +2162,15 @@ const Mailapp = () => {
         );
       } catch (err) {
         console.error("Failed to apply label:", err);
-        alert("Failed to apply label. Please try again.");
+        showError("Could not update the labels on this conversation.");
       }
     },
-    [selectedAccountId, selectedThreadId, selectedThread, mailProvider]
+    [selectedAccountId, selectedThreadId, selectedThread, mailProvider, showError]
   );
 
   const handleMarkRead = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
-    const wasUnread = selectedThread?.isUnread;
+    const wasUnread = selectedThread?.isUnread ?? false;
     try {
       await emailApi.batchModifyThreads(
         {
@@ -1509,13 +2186,11 @@ const Mailapp = () => {
           t.id === selectedThreadId ? { ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") } : t
         )
       );
-      if (wasUnread && selectedLabelId === "INBOX") {
-        setResultSizeEstimate((prev) => Math.max(0, prev - 1));
-      }
+      if (wasUnread) bumpNavUnreadCounts(-1, ["INBOX"]);
     } catch {
-      // ignore
+      showError("Could not mark this conversation as read.");
     }
-  }, [selectedAccountId, selectedThreadId, selectedThread?.isUnread, selectedLabelId, mailProvider]);
+  }, [selectedAccountId, selectedThreadId, selectedThread, mailProvider, showError, bumpNavUnreadCounts]);
 
   const handleMarkUnread = useCallback(
     async (thread: EmailThreadListItem, e?: React.MouseEvent) => {
@@ -1542,81 +2217,198 @@ const Mailapp = () => {
               : t
           )
         );
-        if (selectedLabelId === "INBOX") {
-          setResultSizeEstimate((prev) => prev + 1);
-        }
+        bumpNavUnreadCounts(1, ["INBOX"]);
       } catch {
-        // ignore
+        showError("Could not mark this conversation as unread.");
       }
     },
-    [selectedAccountId, selectedLabelId, mailProvider]
+    [selectedAccountId, mailProvider, showError, bumpNavUnreadCounts]
   );
 
-  const idsToUse = selectedThreadIds.size > 0 ? Array.from(selectedThreadIds) : threads.map((t) => t.id);
+  const visibleThreadIds = useMemo(() => threads.map((t) => t.id), [threads]);
+  /**
+   * Which threads a bulk action hits. Ticked rows win; with none ticked it falls
+   * back to everything currently loaded. Ticks left over from another folder are
+   * discarded rather than silently targeted - see resolveBulkTargets.
+   */
+  const bulkTargets = useMemo(
+    () => resolveBulkTargets(selectedThreadIds, visibleThreadIds),
+    [selectedThreadIds, visibleThreadIds]
+  );
+  /** Ticks that still refer to a visible row, for the header checkbox and labels. */
+  const liveSelectedCount = bulkTargets.scope === "selected" ? bulkTargets.ids.length : 0;
+
+  const closeMailMenu = useCallback(() => {
+    setShowMailMenu(false);
+    setMailMenuPosition(null);
+  }, []);
+
+  const confirmTrash = useCallback(
+    async (count: number, scope: "selected" | "visible") => {
+      const noun = count === 1 ? "conversation" : "conversations";
+      const recover = count === 1 ? "it" : "them";
+      const message =
+        scope === "selected"
+          ? `${count} selected ${noun} will be moved to trash. You can recover ${recover} from Trash.`
+          : `All ${count} ${noun} loaded in this view will be moved to trash. You can recover ${recover} from Trash.`;
+      return requestMailConfirm({
+        title: "Move to trash?",
+        message,
+        confirmLabel: "Move to trash",
+        destructive: true,
+      });
+    },
+    [requestMailConfirm]
+  );
+
+  const confirmSpam = useCallback(
+    async (count: number, scope: "selected" | "visible") => {
+      const noun = count === 1 ? "conversation" : "conversations";
+      const message =
+        scope === "selected"
+          ? `Report ${count} selected ${noun} as spam and move them out of the inbox?`
+          : `Report all ${count} ${noun} loaded in this view as spam?`;
+      return requestMailConfirm({
+        title: "Report as spam?",
+        message,
+        confirmLabel: "Report as spam",
+        destructive: true,
+      });
+    },
+    [requestMailConfirm]
+  );
 
   const handleMarkAllRead = useCallback(async () => {
-    if (!selectedAccountId || threads.length === 0) return;
-    setShowMailMenu(false);
-    const unreadCount = idsToUse.filter((id) => threads.find((t) => t.id === id)?.isUnread).length;
+    const ids = bulkTargets.ids;
+    if (!selectedAccountId || ids.length === 0) return;
+    closeMailMenu();
+    const target = new Set(ids);
+    const unreadMarked = threads.filter((t) => target.has(t.id) && t.isUnread).length;
     try {
       await emailApi.batchModifyThreads(
-        {
-          accountId: selectedAccountId,
-          threadIds: idsToUse,
-          addLabelIds: [],
-          removeLabelIds: ["UNREAD"],
-        },
+        { accountId: selectedAccountId, threadIds: ids, addLabelIds: [], removeLabelIds: ["UNREAD"] },
         mailProvider
       );
-      setThreads((prev) => prev.map((t) => ({ ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") })));
+      // Only the rows we actually asked the server to change. This used to mark
+      // every loaded row read locally even when the call targeted two of them.
+      setThreads((prev) =>
+        prev.map((t) =>
+          target.has(t.id)
+            ? { ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") }
+            : t
+        )
+      );
       setSelectedThreadIds(new Set());
-      if (unreadCount > 0 && selectedLabelId === "INBOX") {
-        setResultSizeEstimate((prev) => Math.max(0, prev - unreadCount));
-      }
+      if (unreadMarked > 0) bumpNavUnreadCounts(-unreadMarked, ["INBOX"]);
+      void refreshMailboxLabels();
     } catch {
-      // ignore
+      showError("Could not mark those conversations as read. Check your connection and try again.");
     }
-  }, [selectedAccountId, threads, idsToUse, selectedLabelId, mailProvider]);
+  }, [selectedAccountId, bulkTargets, threads, mailProvider, showError, bumpNavUnreadCounts, refreshMailboxLabels, closeMailMenu]);
 
-  const handleMoveToSpam = useCallback(async () => {
-    if (!selectedAccountId || idsToUse.length === 0) return;
-    setShowMailMenu(false);
+  const trashThreadIds = useCallback(
+    async (ids: string[]) => {
+      if (!selectedAccountId || ids.length === 0) return;
+      const target = new Set(ids);
+      const unreadTrashed = threads.filter((t) => target.has(t.id) && t.isUnread).length;
+      try {
+        await emailApi.trashThreads(selectedAccountId, ids, mailProvider);
+        setThreads((prev) => prev.filter((t) => !target.has(t.id)));
+        if (selectedThreadId && target.has(selectedThreadId)) {
+          setSelectedThreadId(null);
+          setThreadMessages([]);
+        }
+        setSelectedThreadIds(new Set());
+        if (unreadTrashed > 0) bumpNavUnreadCounts(-unreadTrashed, ["INBOX"]);
+        void refreshMailboxLabels();
+        showSuccess(`Moved ${ids.length} to trash. Recover them from the Trash folder.`);
+      } catch {
+        showError("Could not move those conversations to trash. Nothing was deleted.");
+      }
+    },
+    [
+      selectedAccountId,
+      threads,
+      selectedThreadId,
+      mailProvider,
+      showError,
+      showSuccess,
+      bumpNavUnreadCounts,
+      refreshMailboxLabels,
+    ]
+  );
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (bulkTargets.scope !== "selected" || bulkTargets.ids.length === 0) return;
+    const ids = bulkTargets.ids;
+    if (!(await confirmTrash(ids.length, "selected"))) return;
+    closeMailMenu();
+    await trashThreadIds(ids);
+  }, [bulkTargets, confirmTrash, closeMailMenu, trashThreadIds]);
+
+  const handleDeleteAllLoaded = useCallback(async () => {
+    const ids = visibleThreadIds;
+    if (!selectedAccountId || ids.length === 0) return;
+    if (!(await confirmTrash(ids.length, "visible"))) return;
+    closeMailMenu();
+    await trashThreadIds(ids);
+  }, [visibleThreadIds, selectedAccountId, confirmTrash, closeMailMenu, trashThreadIds]);
+
+  const handleMoveSelectedToSpam = useCallback(async () => {
+    if (bulkTargets.scope !== "selected" || bulkTargets.ids.length === 0) return;
+    const ids = bulkTargets.ids;
+    if (!selectedAccountId) return;
+    if (!(await confirmSpam(ids.length, "selected"))) return;
+    closeMailMenu();
+    const target = new Set(ids);
     try {
       await emailApi.batchModifyThreads(
-        {
-          accountId: selectedAccountId,
-          threadIds: idsToUse,
-          addLabelIds: ["SPAM"],
-          removeLabelIds: ["INBOX"],
-        },
+        { accountId: selectedAccountId, threadIds: ids, addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] },
         mailProvider
       );
-      setThreads((prev) => prev.filter((t) => !idsToUse.includes(t.id)));
-      if (selectedThreadId && idsToUse.includes(selectedThreadId)) {
+      setThreads((prev) => prev.filter((t) => !target.has(t.id)));
+      if (selectedThreadId && target.has(selectedThreadId)) {
         setSelectedThreadId(null);
         setThreadMessages([]);
       }
       setSelectedThreadIds(new Set());
+      showSuccess(`Moved ${ids.length} to spam.`);
     } catch {
-      // ignore
+      showError("Could not move those conversations to spam. Nothing was changed.");
     }
-  }, [selectedAccountId, idsToUse, selectedThreadId, mailProvider]);
+  }, [bulkTargets, selectedAccountId, selectedThreadId, mailProvider, confirmSpam, closeMailMenu, showError, showSuccess]);
 
-  const handleDeleteAll = useCallback(async () => {
-    if (!selectedAccountId || idsToUse.length === 0) return;
-    setShowMailMenu(false);
+  const handleMoveAllLoadedToSpam = useCallback(async () => {
+    const ids = visibleThreadIds;
+    if (!selectedAccountId || ids.length === 0) return;
+    if (!(await confirmSpam(ids.length, "visible"))) return;
+    closeMailMenu();
+    const target = new Set(ids);
     try {
-      await emailApi.trashThreads(selectedAccountId, idsToUse, mailProvider);
-      setThreads((prev) => prev.filter((t) => !idsToUse.includes(t.id)));
-      if (selectedThreadId && idsToUse.includes(selectedThreadId)) {
+      await emailApi.batchModifyThreads(
+        { accountId: selectedAccountId, threadIds: ids, addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] },
+        mailProvider
+      );
+      setThreads((prev) => prev.filter((t) => !target.has(t.id)));
+      if (selectedThreadId && target.has(selectedThreadId)) {
         setSelectedThreadId(null);
         setThreadMessages([]);
       }
       setSelectedThreadIds(new Set());
+      showSuccess(`Moved ${ids.length} to spam.`);
     } catch {
-      // ignore
+      showError("Could not move those conversations to spam. Nothing was changed.");
     }
-  }, [selectedAccountId, idsToUse, selectedThreadId, mailProvider]);
+  }, [
+    visibleThreadIds,
+    selectedAccountId,
+    selectedThreadId,
+    mailProvider,
+    confirmSpam,
+    closeMailMenu,
+    showError,
+    showSuccess,
+  ]);
 
   const handleMailMenuRecent = useCallback(() => {
     setShowMailMenu(false);
@@ -1648,56 +2440,49 @@ const Mailapp = () => {
     });
   }, []);
 
+  const handleClearSelection = useCallback(() => {
+    setSelectedThreadIds(new Set());
+  }, []);
+
   const handlePrint = useCallback(() => {
     if (threadMessages.length === 0) return;
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      alert("Please allow popups to print the email.");
-      return;
-    }
-    const firstMsg = threadMessages[0];
-    const blocks = threadMessages.map(
-      (msg) => `
-      <div class="msg-block" style="margin-bottom:2rem;padding-bottom:1.5rem;border-bottom:1px solid #eee;">
-        <div class="meta">
-          <p><strong>From:</strong> ${(msg.from || "").replace(/</g, "&lt;")}</p>
-          <p><strong>To:</strong> ${(msg.to || "").replace(/</g, "&lt;")}</p>
-          <p><strong>Date:</strong> ${(msg.date || "").replace(/</g, "&lt;")}</p>
-        </div>
-        <div class="body" style="margin-top:0.5rem;">${msg.htmlBody || (msg.textBody ? `<pre style="white-space:pre-wrap;font-family:inherit;">${msg.textBody}</pre>` : "<p>No content</p>")}</div>
-      </div>
-    `
-    );
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${(firstMsg.subject || "Email").replace(/</g, "&lt;")}</title>
-          <style>
-            body { font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5; color: #333; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-            .subject { font-size: 18px; font-weight: 600; margin-bottom: 1.5rem; }
-            .body img { max-width: 100%; }
-            @media print { body { margin: 0; padding: 1rem; } }
-          </style>
-        </head>
-        <body>
-          <div class="subject">${(firstMsg.subject || "(No subject)").replace(/</g, "&lt;")}</div>
-          ${blocks.join("")}
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.onload = () => {
-      printWindow.print();
-      printWindow.onafterprint = () => printWindow.close();
+    // Render into a sandboxed iframe rather than window.open(""), which hands back
+    // an about:blank window that inherits this app's origin - a crafted email could
+    // run script as the signed-in user there. Omitting allow-scripts means markup
+    // that ever slipped past the sanitizer still cannot execute; allow-modals is
+    // what permits print(), allow-same-origin is what lets us reach contentWindow.
+    // The iframe also removes the popup-blocker dead end, where printing was simply
+    // unavailable behind an alert().
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-same-origin allow-modals");
+    frame.setAttribute("aria-hidden", "true");
+    frame.setAttribute("title", "Print preview");
+    // Zero-sized and off-screen, but never display:none/visibility:hidden - those
+    // stop the frame from being painted, and an unpainted frame does not print.
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    frame.srcdoc = buildPrintDocument(threadMessages);
+
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      frame.remove();
     };
-    setTimeout(() => {
-      if (!printWindow.closed) {
-        printWindow.print();
-        printWindow.onafterprint = () => printWindow.close();
+
+    frame.onload = () => {
+      const win = frame.contentWindow;
+      if (!win) {
+        cleanup();
+        return;
       }
-    }, 250);
+      win.addEventListener("afterprint", cleanup, { once: true });
+      win.focus();
+      win.print();
+      // Not every browser fires afterprint (Safari historically does not), so
+      // reclaim the node on a long timer rather than leaking one frame per print.
+      window.setTimeout(cleanup, 60000);
+    };
+    document.body.appendChild(frame);
   }, [threadMessages]);
 
   const handleAddQuickRecipient = useCallback(() => {
@@ -1735,17 +2520,13 @@ const Mailapp = () => {
 
   const handleQuickCompose = useCallback(
     (email: string) => {
+      // Goes through openCompose rather than setting the fields by hand, which
+      // skipped the signature that a new message from the sidebar gets - the same
+      // action produced two different drafts depending on where it was started.
+      openCompose("new");
       setComposeTo(email);
-      setComposeCc("");
-      setComposeBcc("");
-      setComposeSubject("");
-      setComposeHtml("");
-      setComposeAttachments([]);
-      setComposeMode("new");
-      composeMessageRef.current = null;
-      setShowComposeModal(true);
     },
-    []
+    [openCompose]
   );
 
   const handleRemoveQuickRecipient = useCallback((email: string) => {
@@ -1761,6 +2542,10 @@ const Mailapp = () => {
       setThreadMessages([]);
       setSelectedThreadIds(new Set());
       setNextPageToken(null);
+      // A search typed against the previous mailbox otherwise stayed applied,
+      // and its operators may not even be valid for the new provider.
+      setSearchInput("");
+      setSearchQuery("");
       const params = new URLSearchParams(searchParams.toString());
       params.delete("thread");
       const q = params.toString();
@@ -1809,13 +2594,7 @@ const Mailapp = () => {
     return (a.type === "user" ? 1 : 0) - (b.type === "user" ? 1 : 0);
   });
 
-  const mailLabelsForNav = mailLabelsOrdered.filter((l) => {
-    if (currentProvider === "outlook") {
-      // All Outlook folders shown in nav (INBOX excluded via filteredLabels)
-      return true;
-    }
-    return !["CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"].includes(l.id || "");
-  });
+  const mailLabelsForNav = mailLabelsOrdered;
 
   // For Outlook, user folders are already included in mailLabelsForNav; no separate "Labels" section
   const userLabelsForNav = currentProvider === "outlook"
@@ -1963,20 +2742,36 @@ const Mailapp = () => {
             </div>
           </div>
         ) : (
-          <div className={`main-mail-container !p-2 gap-x-2 flex min-h-0 ${mailStyles.shell} ${mailStyles.fadeIn}`}>
-            <div
-              className={`mail-navigation ${isMailNavigationVisible ? "!block" : ""} border dark:border-defaultborder/10`}
-            >
-              <div className="!p-4 border-b border-stone-200/80 dark:border-white/10">
-                <button
-                  type="button"
-                  onClick={() => openCompose("new")}
-                  className={`ti-btn w-full py-3 flex items-center justify-center gap-2 ${mailStyles.composeCta}`}
-                >
-                  <i className="ri-quill-pen-line text-lg"></i>
-                  New message
-                </button>
+          <div className={`main-mail-container !p-2 gap-y-2 flex flex-col min-h-0 ${mailStyles.shell} ${mailStyles.fadeIn}`}>
+            {providerWarning ? (
+              <div
+                className="w-full shrink-0 rounded-lg border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-[0.8125rem] text-amber-950 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-100"
+                role="alert"
+              >
+                <div className="flex items-start gap-2">
+                  <i className="ri-cloud-off-line mt-0.5 shrink-0" aria-hidden />
+                  <p className="mb-0">{providerWarning}</p>
+                </div>
               </div>
+            ) : null}
+            <div className="flex gap-x-2 min-h-0 flex-1 min-w-0">
+            <div
+              // !flex, not !block: the SCSS lays this column out with flex, and
+              // display:block !important silently disabled that.
+              className={`mail-navigation ${isMailNavigationVisible ? "!flex" : ""} border dark:border-defaultborder/10`}
+            >
+              {canManageEmail ? (
+                <div className="!p-4 border-b border-stone-200/80 dark:border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => openCompose("new")}
+                    className={`ti-btn w-full py-3 flex items-center justify-center gap-2 ${mailStyles.composeCta}`}
+                  >
+                    <i className="ri-quill-pen-line text-lg"></i>
+                    New message
+                  </button>
+                </div>
+              ) : null}
               {selectedAccountId && accounts.length > 0 && (
                 <>
                   <div className={`flex items-start gap-3 ${mailStyles.navProfile}`}>
@@ -2005,9 +2800,17 @@ const Mailapp = () => {
                       )}
                     </div>
                   </div>
-                  <div>
+                  {/* Fills whatever height is left instead of relying on the list's
+                      own calc(100vh - 19rem), which clamps to zero on a short
+                      window or at high browser zoom and made the folders
+                      unreachable. */}
+                  <div className="flex-1 min-h-0">
                     <PerfectScrollbar>
-                      <ul className="list-none mail-main-nav !text-[0.813rem]">
+                      {/* !max-h-none overrides the stylesheet's
+                          max-height: calc(100vh - 19rem) on this list, which clamps
+                          to zero on a short window or at high browser zoom and hid
+                          every folder. Height now comes from the flex parent above. */}
+                      <ul className="list-none mail-main-nav !max-h-none !text-[0.813rem]">
                         {navMailboxAccounts.length > 1 && (
                           <>
                             <li className="!px-4 !pt-3 !pb-1">
@@ -2051,62 +2854,65 @@ const Mailapp = () => {
                           </span>
                         </li>
                         <li
-                          className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === "ALL" ? mailStyles.navItemActive : ""}`}
-                          onClick={() => {
-                            setSelectedLabelId("ALL");
-                            setSearchQuery("");
-                            Toggle2();
-                          }}
+                          className={`mail-type ${mailStyles.navItem} ${selectedLabelId === "ALL" ? mailStyles.navItemActive : ""}`}
                         >
+                          <button
+                            type="button"
+                            onClick={() => selectFolder("ALL")}
+                            aria-current={selectedLabelId === "ALL" ? "true" : undefined}
+                            className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
+                          >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center min-w-0">
                               <i className="ri-mail-line align-middle text-[.875rem] me-2"></i>
                               <span className="whitespace-nowrap">All Mails</span>
                             </div>
-                            {selectedLabelId === "ALL" && resultSizeEstimate > 0 && (
-                              <span className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0">
-                                {resultSizeEstimate > 999 ? `${(resultSizeEstimate / 1000).toFixed(1)}k` : resultSizeEstimate}
-                              </span>
-                            )}
+                            <MailNavUnreadBadge count={allMailsUnread} />
                           </div>
+                          </button>
                         </li>
                         <li
-                          className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === "INBOX" ? mailStyles.navItemActive : ""}`}
-                          onClick={() => {
-                            setSelectedLabelId("INBOX");
-                            setSearchQuery("");
-                            Toggle2();
-                          }}
+                          className={`mail-type ${mailStyles.navItem} ${selectedLabelId === "INBOX" ? mailStyles.navItemActive : ""}`}
                         >
+                          <button
+                            type="button"
+                            onClick={() => selectFolder("INBOX")}
+                            aria-current={selectedLabelId === "INBOX" ? "true" : undefined}
+                            className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
+                          >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center min-w-0">
                               <i className="ri-inbox-line align-middle text-[.875rem] me-2"></i>
                               <span className="whitespace-nowrap">Inbox</span>
                             </div>
-                            {selectedLabelId === "INBOX" && resultSizeEstimate > 0 && (
-                              <span className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0">
-                                {resultSizeEstimate > 999 ? `${(resultSizeEstimate / 1000).toFixed(1)}k` : resultSizeEstimate}
-                              </span>
-                            )}
+                            <MailNavUnreadBadge count={unreadForLabel("INBOX")} />
                           </div>
+                          </button>
                         </li>
                         {mailLabelsForNav.map((label) => (
                             <li
                               key={label.id}
-                              className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
-                              onClick={() => {
-                                setSelectedLabelId(label.id);
-                                Toggle2();
-                              }}
+                              className={`mail-type ${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
                             >
-                              <div className="flex items-center">
-                                <i
-                                  className={`${getLabelIcon(label.id)} align-middle text-[.875rem] me-2`}
-                                ></i>
-                                <span className="flex-grow whitespace-nowrap">
-                                  {label.id === "CATEGORY_PERSONAL" ? "Archive" : label.id === "conversationhistory" ? "Conversation History" : label.name}
-                                </span>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => selectFolder(label.id)}
+                                aria-current={selectedLabelId === label.id ? "true" : undefined}
+                                className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center min-w-0">
+                                    <i
+                                      className={`${getLabelIcon(label.id)} align-middle text-[.875rem] me-2`}
+                                      aria-hidden
+                                    ></i>
+                                    <span className="whitespace-nowrap">
+                                      {label.id === "CATEGORY_PERSONAL" ? "Archive" : label.id === "conversationhistory" ? "Conversation History" : label.name}
+                                    </span>
+                                  </div>
+                                  <MailNavUnreadBadge count={unreadForLabel(label.id)} />
+                                </div>
+                              </button>
                             </li>
                           ))}
                         <li className="!px-4 !pt-4 !pb-1">
@@ -2115,37 +2921,19 @@ const Mailapp = () => {
                           </span>
                         </li>
                         <li>
-                          {(() => {
-                            const provider = accounts.find((a) => a.id === selectedAccountId)?.provider;
-                            if (provider === "outlook") {
-                              return (
-                                <a
-                                  href="https://outlook.live.com/mail/options/general"
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block !px-4 !py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
-                                >
-                                  <div className="flex items-center">
-                                    <i className="ri-settings-3-line align-middle text-[.875rem] me-2"></i>
-                                    <span className="whitespace-nowrap">Outlook Settings</span>
-                                  </div>
-                                </a>
-                              );
-                            }
-                            return (
-                              <a
-                                href="https://mail.google.com/mail/#settings"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block !px-4 !py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
-                              >
-                                <div className="flex items-center">
-                                  <i className="ri-settings-3-line align-middle text-[.875rem] me-2"></i>
-                                  <span className="whitespace-nowrap">Gmail Settings</span>
-                                </div>
-                              </a>
-                            );
-                          })()}
+                          <a
+                            href={mailboxSettingsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block !px-4 !py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
+                          >
+                            <div className="flex items-center">
+                              <i className="ri-settings-3-line align-middle text-[.875rem] me-2" aria-hidden></i>
+                              <span className="whitespace-nowrap">
+                                {mailProvider === "outlook" ? "Outlook Settings" : "Gmail Settings"}
+                              </span>
+                            </div>
+                          </a>
                         </li>
                         {!workLock &&
                           (canAddMoreGmail ||
@@ -2203,29 +2991,82 @@ const Mailapp = () => {
                                 LABELS
                               </span>
                             </li>
-                            <li
-                              className="cursor-pointer !px-4 !py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-2"
-                              onClick={() => {
-                                const name = window.prompt("New label name:");
-                                if (name?.trim()) handleCreateLabel(name);
-                              }}
-                            >
-                              <i className="ri-add-line align-middle text-[.875rem] text-primary"></i>
-                              <span className="text-[0.75rem] text-primary">Create label</span>
+                            {/* window.prompt() before: unstyled, outside the page for
+                                a screen reader, and with nowhere to report a failure.
+                                This is the same inline form the reading-pane label
+                                menu already used - one create-label UI, not two. */}
+                            <li className="!px-4 !py-2">
+                              {navCreateLabelOpen ? (
+                                <form
+                                  className="flex gap-1.5"
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    void handleCreateLabel(navLabelName, {
+                                      applyToOpenThread: false,
+                                    }).then(() => {
+                                      setNavLabelName("");
+                                      setNavCreateLabelOpen(false);
+                                    });
+                                  }}
+                                >
+                                  <label htmlFor="nav-new-label" className="sr-only">
+                                    New label name
+                                  </label>
+                                  <input
+                                    id="nav-new-label"
+                                    autoFocus
+                                    value={navLabelName}
+                                    onChange={(e) => setNavLabelName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Escape") setNavCreateLabelOpen(false);
+                                    }}
+                                    placeholder="Label name"
+                                    className="form-control form-control-sm flex-1 min-w-0 !py-1.5 !px-2 !text-[0.75rem]"
+                                  />
+                                  <button
+                                    type="submit"
+                                    disabled={!navLabelName.trim() || creatingLabel}
+                                    className="ti-btn ti-btn-sm ti-btn-primary !py-1.5 !px-2.5 !mb-0 shrink-0"
+                                  >
+                                    {creatingLabel ? "..." : "Add"}
+                                  </button>
+                                </form>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setNavLabelName("");
+                                    setNavCreateLabelOpen(true);
+                                  }}
+                                  className="flex items-center gap-2 w-full text-left rounded-md"
+                                >
+                                  <i className="ri-add-line align-middle text-[.875rem] text-primary" aria-hidden />
+                                  <span className="text-[0.75rem] text-primary">Create label</span>
+                                </button>
+                              )}
                             </li>
                             {userLabelsForNav.map((label) => (
                               <li
                                 key={label.id}
-                                className={`cursor-pointer ${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
-                                onClick={() => {
-                                  setSelectedLabelId(label.id);
-                                  Toggle2();
-                                }}
+                                className={`${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
                               >
-                                <div className="flex items-center">
-                                  <i className="ri-price-tag-line align-middle text-[.875rem] me-2 text-secondary"></i>
-                                  <span className="whitespace-nowrap">{label.name}</span>
-                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => selectFolder(label.id)}
+                                  aria-current={selectedLabelId === label.id ? "true" : undefined}
+                                  className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center min-w-0">
+                                      <i
+                                        className="ri-price-tag-line align-middle text-[.875rem] me-2 text-secondary"
+                                        aria-hidden
+                                      ></i>
+                                      <span className="whitespace-nowrap">{label.name}</span>
+                                    </div>
+                                    <MailNavUnreadBadge count={unreadForLabel(label.id)} />
+                                  </div>
+                                </button>
                               </li>
                             ))}
                           </>
@@ -2245,8 +3086,17 @@ const Mailapp = () => {
                   type="checkbox"
                   className="form-check-input"
                   id="checkAllMails"
-                  aria-label="Select all"
-                  checked={threads.length > 0 && selectedThreadIds.size === threads.length}
+                  aria-label={
+                    liveSelectedCount > 0
+                      ? `${liveSelectedCount} of ${threads.length} selected. Clear selection`
+                      : "Select all conversations in this view"
+                  }
+                  // Counts only ticks that still match a visible row, so leftovers
+                  // from a previous folder cannot leave this stuck on "all selected".
+                  checked={threads.length > 0 && liveSelectedCount === threads.length}
+                  ref={(el) => {
+                    if (el) el.indeterminate = liveSelectedCount > 0 && liveSelectedCount < threads.length;
+                  }}
                   onChange={(e) => handleSelectAll(e.target.checked)}
                 />
                 <div className="flex-grow min-w-0">
@@ -2329,49 +3179,126 @@ const Mailapp = () => {
                               }}
                               className="ti-dropdown-item !py-2 !px-4 w-full text-left"
                             >
-                              Mark All Read
+                              {liveSelectedCount > 0
+                                ? `Mark ${liveSelectedCount} read`
+                                : "Mark all read"}
                             </button>
                           </li>
-                          <li>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleMoveToSpam();
-                                setShowMailMenu(false);
-                                setMailMenuPosition(null);
-                              }}
-                              className="ti-dropdown-item !py-2 !px-4 w-full text-left"
-                            >
-                              Spam
-                            </button>
+                          {/* Destructive pair, separated and coloured so they are not
+                              one careless click away from "Mark all read". */}
+                          <li className="border-t dark:border-defaultborder/10 mt-1 pt-1">
+                            {liveSelectedCount > 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleMoveSelectedToSpam()}
+                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                >
+                                  Report {liveSelectedCount} selected as spam
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleMoveAllLoadedToSpam()}
+                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                >
+                                  Report all {threads.length} loaded as spam
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void handleMoveAllLoadedToSpam()}
+                                className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                              >
+                                Report all as spam
+                              </button>
+                            )}
                           </li>
                           <li>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleDeleteAll();
-                                setShowMailMenu(false);
-                                setMailMenuPosition(null);
-                              }}
-                              className="ti-dropdown-item !py-2 !px-4 w-full text-left"
-                            >
-                              Delete All
-                            </button>
+                            {liveSelectedCount > 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteSelected()}
+                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                >
+                                  Delete selected ({liveSelectedCount})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteAllLoaded()}
+                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                >
+                                  Delete all loaded ({threads.length})
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteAllLoaded()}
+                                className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                              >
+                                Delete all loaded
+                              </button>
+                            )}
                           </li>
                         </ul>
                       </>,
                       document.body
                     )}
                 </div>
+                {/* Closes the list and reveals the folder nav behind it. Labelled
+                    just "Close" before, which said nothing about where it lands. */}
                 <button
                   onClick={Toggle1}
-                  aria-label="Close"
+                  aria-label="Close the list and show folders"
+                  title="Show folders"
                   type="button"
                   className="ti-btn ti-btn-icon ti-btn-light lg:hidden total-mails-close !mb-0"
                 >
-                  <i className="ri-close-line"></i>
+                  <i className="ri-close-line" aria-hidden></i>
                 </button>
               </div>
+              {liveSelectedCount > 0 && (
+                <div
+                  className={mailStyles.threadListSelectionBar}
+                  role="region"
+                  aria-label="Selected conversations"
+                >
+                  <span className={mailStyles.threadListSelectionCount}>
+                    {liveSelectedCount} selected
+                  </span>
+                  <div className={mailStyles.threadListSelectionActions}>
+                    <button
+                      type="button"
+                      className={`${mailStyles.selectionActionBtn} ${mailStyles.selectionActionBtnDanger}`}
+                      onClick={() => void handleDeleteSelected()}
+                      aria-label={`Delete ${liveSelectedCount} selected conversations`}
+                    >
+                      <i className="ri-delete-bin-line" aria-hidden />
+                      <span className={mailStyles.selectionActionBtnLabel}>Delete selected</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`${mailStyles.selectionActionBtn} ${mailStyles.selectionActionBtnNeutral}`}
+                      onClick={() => void handleMarkAllRead()}
+                      aria-label={`Mark ${liveSelectedCount} conversations as read`}
+                    >
+                      <i className="ri-mail-open-line" aria-hidden />
+                      <span className={mailStyles.selectionActionBtnLabel}>Mark read</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`${mailStyles.selectionActionBtn} ${mailStyles.selectionActionBtnNeutral}`}
+                      onClick={handleClearSelection}
+                      aria-label="Clear selection"
+                    >
+                      <i className="ri-close-circle-line" aria-hidden />
+                      <span className={mailStyles.selectionActionBtnLabel}>Clear</span>
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="px-4 pb-3 pt-1">
                 <div className={`flex items-stretch ${mailStyles.searchWrap}`}>
                   <input
@@ -2392,6 +3319,14 @@ const Mailapp = () => {
                     <i className="ri-search-line text-lg"></i>
                   </button>
                 </div>
+                {/* Graph rejects $orderby alongside $search, so Outlook hands back
+                    relevance order. Saying so beats letting the date column look
+                    shuffled. */}
+                {mailProvider === "outlook" && searchQuery ? (
+                  <p className="mt-1.5 text-[0.7rem] text-stone-500 dark:text-stone-400">
+                    Outlook returns search results by relevance, not by date.
+                  </p>
+                ) : null}
               </div>
               <div className={mailStyles.threadListScroll}>
                 <div className={`mail-messages ${mailStyles.threadListMessages}`}>
@@ -2402,6 +3337,22 @@ const Mailapp = () => {
                           <div key={i} className={`h-16 ${mailStyles.skeleton}`} />
                         ))}
                       </li>
+                    ) : listError ? (
+                      <li className="!p-10 text-center text-sm" role="alert">
+                        <i className="ri-wifi-off-line text-3xl mb-2 block text-danger/60" aria-hidden></i>
+                        <p className="text-stone-700 dark:text-stone-200 mb-1">{listError}</p>
+                        <p className="text-stone-500 dark:text-stone-400 text-[0.75rem] mb-3">
+                          This is a loading problem, not an empty folder.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={refetchMessages}
+                          className="ti-btn ti-btn-sm ti-btn-light !mb-0"
+                        >
+                          <i className="ri-refresh-line me-1 align-middle" aria-hidden></i>
+                          Try again
+                        </button>
+                      </li>
                     ) : threads.length === 0 ? (
                       <li className="!p-10 text-center text-stone-500 dark:text-stone-400 text-sm">
                         <i className="ri-inbox-unarchive-line text-3xl mb-2 block opacity-40"></i>
@@ -2409,10 +3360,28 @@ const Mailapp = () => {
                       </li>
                     ) : (
                       threads.map((thread) => (
+                        /* role=button rather than a real <button>: the row already
+                           contains a checkbox and two icon buttons, and nesting
+                           interactive elements inside a button is invalid. This
+                           makes the row focusable and operable by keyboard, which
+                           it was not - it was a plain <li> with an onClick. */
                         <li
                           key={thread.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-current={selectedThreadId === thread.id ? "true" : undefined}
+                          aria-label={`${thread.isUnread ? "Unread. " : ""}${thread.from || "Unknown sender"}: ${
+                            thread.subject || "(No subject)"
+                          }`}
                           className={`cursor-pointer ${mailStyles.threadRow} ${selectedThreadId === thread.id ? mailStyles.threadRowActive : ""} ${thread.isUnread ? mailStyles.threadUnread : ""}`}
                           onClick={() => handleSelectThread(thread)}
+                          onKeyDown={(e) => {
+                            if (e.target !== e.currentTarget) return; // let the inner controls handle their own keys
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              void handleSelectThread(thread);
+                            }
+                          }}
                         >
                           <div className="flex items-start !p-3.5">
                             <div className="me-2 mt-0.5" onClick={(e) => e.stopPropagation()}>
@@ -2459,7 +3428,7 @@ const Mailapp = () => {
                               <button
                                 type="button"
                                 onClick={(e) => void handleMarkUnread(thread, e)}
-                                className="ti-btn ti-btn-icon ti-btn-ghost !p-1 ms-1 self-center opacity-50 hover:opacity-100"
+                                className={`ti-btn ti-btn-icon ti-btn-ghost !p-1 ms-1 self-center opacity-50 hover:opacity-100 ${mailStyles.rowIconBtn}`}
                                 title="Mark as unread"
                                 aria-label="Mark thread as unread"
                               >
@@ -2469,7 +3438,7 @@ const Mailapp = () => {
                             <button
                               type="button"
                               onClick={(e) => handleToggleStar(thread, e)}
-                              className="ti-btn ti-btn-icon ti-btn-ghost !p-1 ms-1 self-center opacity-50 hover:opacity-100"
+                              className={`ti-btn ti-btn-icon ti-btn-ghost !p-1 ms-1 self-center opacity-50 hover:opacity-100 ${mailStyles.rowIconBtn}`}
                               title="Star"
                               aria-label={
                                 thread.labelIds?.includes("STARRED") ? "Remove star" : "Star thread"
@@ -2488,10 +3457,10 @@ const Mailapp = () => {
                         <button
                           type="button"
                           onClick={loadMoreThreads}
-                          disabled={loadingMessages}
+                          disabled={loadingMore}
                           className="ti-btn ti-btn-sm ti-btn-light whitespace-nowrap shrink-0 min-w-[5.5rem]"
                         >
-                          {loadingMessages ? "Loading..." : "Load more"}
+                          {loadingMore ? "Loading..." : "Load more"}
                         </button>
                       </li>
                     )}
@@ -2501,7 +3470,12 @@ const Mailapp = () => {
             </div>
 
             <div
-              className={`mails-information ${isMailsInformationVisible ? "!block" : ""} border dark:border-defaultborder/10 text-defaulttextcolor text-defaultsize ${mailStyles.readingPane}`}
+              // !flex, not !block. This pane is a flex column with a fixed height
+              // and overflow:hidden; its body scrolls via flex:1 + min-height:0.
+              // display:block !important made those inert, so on every screen
+              // under 1400px the message body was clipped with no scrollbar and
+              // the reply composer and footer actions could not be reached.
+              className={`mails-information ${isMailsInformationVisible ? "!flex" : ""} border dark:border-defaultborder/10 text-defaulttextcolor text-defaultsize ${mailStyles.readingPane}`}
             >
               {!selectedThreadId ? (
                 <div
@@ -2522,6 +3496,22 @@ const Mailapp = () => {
                   <div className={`w-48 h-3 ${mailStyles.skeleton}`} />
                   <div className={`w-full max-w-md h-32 ${mailStyles.skeleton}`} />
                 </div>
+              ) : detailError ? (
+                <div className="flex flex-col items-center justify-center py-24 px-6 text-center" role="alert">
+                  <i className="ri-wifi-off-line text-3xl mb-3 text-danger/60" aria-hidden />
+                  <p className="text-stone-700 dark:text-stone-200 mb-1">{detailError}</p>
+                  <p className="text-stone-500 dark:text-stone-400 text-[0.75rem] mb-4 max-w-sm">
+                    This is a loading problem, not an empty thread.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={retryLoadThreadDetail}
+                    className="ti-btn ti-btn-sm ti-btn-light !mb-0"
+                  >
+                    <i className="ri-refresh-line me-1 align-middle" aria-hidden />
+                    Try again
+                  </button>
+                </div>
               ) : (
                 <>
                   <div
@@ -2529,22 +3519,22 @@ const Mailapp = () => {
                   >
                     <div className="me-2">
                       <span className="avatar avatar-md online avatar-rounded flex items-center justify-center !bg-amber-100 !text-amber-900 dark:!bg-amber-900/40 dark:!text-amber-200 ring-2 ring-amber-200/50 dark:ring-amber-700/40">
-                        {selectedThread?.from?.[0]?.toUpperCase() || "?"}
+                        {headerFrom?.[0]?.toUpperCase() || "?"}
                       </span>
                     </div>
                     <div className="flex-grow min-w-0">
                       <h6 className="mb-0 font-semibold text-[1.05rem] text-stone-900 dark:text-stone-100 truncate">
-                        {selectedThread?.from}
+                        {headerFrom}
                       </h6>
                       <span className="text-stone-500 dark:text-stone-400 text-[0.75rem] block truncate">
-                        {selectedThread?.to}
+                        {headerTo}
                       </span>
                     </div>
                     <span
                       className={`text-[0.75rem] text-stone-500 dark:text-stone-400 shrink-0 ${mailStyles.threadListDate}`}
                     >
-                      <time dateTime={selectedThread?.date || undefined}>
-                        {formatMailListDate(selectedThread?.date)}
+                      <time dateTime={headerDate || undefined}>
+                        {formatMailListDate(headerDate)}
                       </time>
                     </span>
                     <div
@@ -2552,18 +3542,6 @@ const Mailapp = () => {
                       role="toolbar"
                       aria-label="Mail actions"
                     >
-                      <div className={mailStyles.mailToolbarGroup}>
-                        <button
-                          type="button"
-                          onClick={backToThreadList}
-                          className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Back to list"
-                          aria-label="Back to inbox list"
-                        >
-                          <i className="ri-arrow-left-line" aria-hidden></i>
-                        </button>
-                      </div>
-                      <span className={mailStyles.toolbarDivider} aria-hidden />
                       <div className={mailStyles.mailToolbarGroup}>
                         <button
                           type="button"
@@ -2719,34 +3697,50 @@ const Mailapp = () => {
                           <i className="ri-delete-bin-line" aria-hidden></i>
                         </button>
                       </div>
+                      {canManageEmail ? (
+                        <>
+                          <span className={mailStyles.toolbarDivider} aria-hidden />
+                          <div className={mailStyles.mailToolbarGroup}>
+                            <button
+                              type="button"
+                              onClick={() => void openComposeForReadingPane("reply")}
+                              className="ti-btn ti-btn-icon ti-btn-light"
+                              title="Reply"
+                              aria-label="Reply to sender"
+                            >
+                              <i className="ri-reply-line" aria-hidden></i>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void openComposeForReadingPane("replyAll")}
+                              className="ti-btn ti-btn-icon ti-btn-light"
+                              title="Reply all"
+                              aria-label="Reply all"
+                            >
+                              <i className="ri-reply-all-line" aria-hidden></i>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void openComposeForReadingPane("forward")}
+                              className="ti-btn ti-btn-icon ti-btn-light"
+                              title="Forward"
+                              aria-label="Forward message"
+                            >
+                              <i className="ri-share-forward-line" aria-hidden></i>
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
                       <span className={mailStyles.toolbarDivider} aria-hidden />
                       <div className={mailStyles.mailToolbarGroup}>
                         <button
                           type="button"
-                          onClick={() => void openComposeForReadingPane("reply")}
+                          onClick={backToThreadList}
                           className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Reply"
-                          aria-label="Reply to sender"
+                          title="Back to mail list"
+                          aria-label="Close message"
                         >
-                          <i className="ri-reply-line" aria-hidden></i>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void openComposeForReadingPane("replyAll")}
-                          className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Reply all"
-                          aria-label="Reply all"
-                        >
-                          <i className="ri-reply-all-line" aria-hidden></i>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void openComposeForReadingPane("forward")}
-                          className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Forward"
-                          aria-label="Forward message"
-                        >
-                          <i className="ri-share-forward-line" aria-hidden></i>
+                          <i className="ri-close-line" aria-hidden />
                         </button>
                       </div>
                     </div>
@@ -2759,11 +3753,11 @@ const Mailapp = () => {
                         <p
                           className={`${mailDisplay.className} ${mailStyles.subjectDisplay} font-semibold mb-0 flex-1 min-w-0`}
                         >
-                          {selectedThread?.subject || "(No subject)"}
+                          {headerSubject || "(No subject)"}
                         </p>
-                        {selectedThread && selectedThread.messageCount > 1 ? (
+                        {headerMessageCount > 1 ? (
                           <span className={mailStyles.threadCountBadge}>
-                            {selectedThread.messageCount} messages
+                            {headerMessageCount} messages
                           </span>
                         ) : null}
                       </div>
@@ -2824,12 +3818,31 @@ const Mailapp = () => {
                               </div>
                             </div>
                           </div>
+                          {msg.htmlBody?.trim() &&
+                          !loadRemoteImages &&
+                          htmlHasRemoteImages(sanitizeRichHtml(msg.htmlBody)) ? (
+                            <div
+                              className={`mb-3 flex flex-wrap items-center justify-between gap-2 ${mailStyles.remoteImagesBanner}`}
+                              role="status"
+                            >
+                              <span className="text-[0.8125rem] text-stone-600 dark:text-stone-300">
+                                Remote images are hidden to protect your privacy.
+                              </span>
+                              <button
+                                type="button"
+                                className="ti-btn ti-btn-sm ti-btn-light !mb-0"
+                                onClick={() => setLoadRemoteImages(true)}
+                              >
+                                Show images
+                              </button>
+                            </div>
+                          ) : null}
                           <div
-                            className="main-mail-content prose dark:prose-invert max-w-none mail-html-body text-sm text-stone-800 dark:text-stone-100"
+                            className={`main-mail-content prose max-w-none mail-html-body text-sm text-stone-800 ${mailStyles.mailHtmlCanvas}`}
                             dangerouslySetInnerHTML={{
                               __html:
                                 (msg.htmlBody && msg.htmlBody.trim()
-                                  ? sanitizeRichHtml(msg.htmlBody)
+                                  ? prepareMailBodyHtml(msg.htmlBody, { loadRemoteImages })
                                   : null) ||
                                 (msg.textBody
                                   ? `<pre class="whitespace-pre-wrap">${escapeHtmlForTextNode(msg.textBody)}</pre>`
@@ -2862,6 +3875,7 @@ const Mailapp = () => {
                         </article>
                       ))}
                     </div>
+                    {canManageEmail ? (
                     <div className="mt-8 pt-8 border-t border-stone-200/80 dark:border-white/10">
                       <span className="text-xs font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400 block mb-1">
                         <i className="ri-reply-line me-1.5 align-middle text-amber-700 dark:text-amber-500"></i>
@@ -2877,7 +3891,10 @@ const Mailapp = () => {
                         <TiptapEditor
                           content={inlineReplyHtml}
                           placeholder="Type your reply..."
-                          onChange={setInlineReplyHtml}
+                          onChange={(html) => {
+                            inlineReplyThreadIdRef.current = selectedThreadId;
+                            setInlineReplyHtml(html);
+                          }}
                         />
                       </div>
                       {inlineReplyAttachments.length > 0 && (
@@ -2891,15 +3908,50 @@ const Mailapp = () => {
                               <button
                                 type="button"
                                 onClick={() => removeInlineReplyAttachment(idx)}
-                                className="ti-btn ti-btn-icon ti-btn-ghost !p-0 !w-5 !h-5"
+                                className="ti-btn ti-btn-icon ti-btn-ghost !p-0 !w-6 !h-6"
+                                aria-label={`Remove attachment ${att.filename}`}
                               >
-                                <i className="ri-close-line text-xs"></i>
+                                <i className="ri-close-line text-xs" aria-hidden></i>
                               </button>
                             </span>
                           ))}
                         </div>
                       )}
+                      {/* The composer above had no send path at all: its handler was
+                          never wired to anything, so a typed reply was discarded on
+                          the next thread click. Attaching lives here too, beside the
+                          chips it produces, rather than in the footer. */}
+                      <div className="mt-3 flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => void handleSendInlineReply()}
+                          disabled={sendingReply || !hasMeaningfulComposeBody(inlineReplyHtml)}
+                          className={`ti-btn !mb-0 px-5 py-2.5 rounded-xl text-white font-semibold shadow-lg disabled:opacity-50 ${mailStyles.composeCta}`}
+                        >
+                          <i
+                            className={`${sendingReply ? "ri-loader-4-line animate-spin" : "ri-send-plane-line"} me-1 align-middle`}
+                            aria-hidden
+                          />
+                          {sendingReply ? "Sending…" : "Send reply"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleAddInlineReplyAttachment}
+                          className="ti-btn ti-btn-light border border-stone-200 dark:border-white/10 !mb-0"
+                        >
+                          <i className="ri-attachment-2 me-1 align-middle" aria-hidden />
+                          Attach
+                        </button>
+                        <input
+                          ref={inlineReplyFileInputRef}
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={handleInlineReplyFileChange}
+                        />
+                      </div>
                     </div>
+                    ) : null}
                   </div>
                   <div className={`mail-info-footer border-t dark:border-defaultborder/10 !p-4 flex flex-wrap gap-2 items-center justify-between bg-light/30 dark:bg-white/5 ${mailStyles.readingPaneFooter}`}>
                     <div
@@ -2916,22 +3968,6 @@ const Mailapp = () => {
                       >
                         <i className="ri-printer-line" aria-hidden></i>
                       </button>
-                      <button
-                        type="button"
-                        onClick={handleAddInlineReplyAttachment}
-                        className="ti-btn ti-btn-icon ti-btn-light"
-                        title="Add attachment"
-                        aria-label="Add attachment to reply"
-                      >
-                        <i className="ri-attachment-2" aria-hidden></i>
-                      </button>
-                      <input
-                        ref={inlineReplyFileInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={handleInlineReplyFileChange}
-                      />
                       {selectedThread?.isUnread ? (
                         <button
                           type="button"
@@ -2963,38 +3999,35 @@ const Mailapp = () => {
                         <i className="ri-refresh-line" aria-hidden></i>
                       </button>
                     </div>
-                    <div
-                      className={`flex gap-2 flex-wrap relative z-20 pointer-events-auto ${mailStyles.readingToolbar}`}
-                      role="group"
-                      aria-label="Compose actions"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => void openComposeForReadingPane("forward")}
-                        className="ti-btn ti-btn-primary-full"
+                    {canManageEmail ? (
+                      <div
+                        className={`flex gap-2 flex-wrap relative z-20 pointer-events-auto ${mailStyles.readingToolbar}`}
+                        role="group"
+                        aria-label="Compose actions"
                       >
-                        <i className="ri-share-forward-line me-1 align-middle"></i>
-                        Forward
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void openComposeForReadingPane("replyAll")}
-                        disabled={sending}
-                        className="ti-btn ti-btn-light border border-stone-200 dark:border-white/10"
-                      >
-                        <i className="ri-reply-all-line me-1 align-middle"></i>
-                        Reply all
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void openComposeForReadingPane("reply")}
-                        disabled={sending}
-                        className="ti-btn ti-btn-danger-full"
-                      >
-                        <i className="ri-reply-line me-1 align-middle"></i>
-                        {sending ? "Sending..." : "Reply"}
-                      </button>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => void openComposeForReadingPane("forward")}
+                          className="ti-btn ti-btn-primary-full"
+                        >
+                          <i className="ri-share-forward-line me-1 align-middle"></i>
+                          Forward
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void openComposeForReadingPane("replyAll")}
+                          className="ti-btn ti-btn-light border border-stone-200 dark:border-white/10"
+                        >
+                          <i className="ri-reply-all-line me-1 align-middle"></i>
+                          Reply all
+                        </button>
+                        {/* Replying to the sender is the "Send reply" button under the
+                            composer above. The button that used to sit here opened the
+                            compose window instead, while labelling itself "Sending..."
+                            off a flag it never set - two Reply affordances, neither of
+                            which sent what the user had just typed. */}
+                      </div>
+                    ) : null}
                   </div>
                 </>
               )}
@@ -3065,7 +4098,7 @@ const Mailapp = () => {
               </div>
               {quickRecipientList.length > 0 && (
                 <div className="px-1 py-1.5 border-b border-stone-200/60 dark:border-white/5 text-center">
-                  <span className="text-[0.55rem] uppercase tracking-widest text-stone-400 dark:text-stone-500 font-semibold">
+                  <span className="text-[0.75rem] uppercase tracking-widest text-stone-400 dark:text-stone-500 font-semibold">
                     Quick
                   </span>
                 </div>
@@ -3078,9 +4111,10 @@ const Mailapp = () => {
                   >
                     <button
                       type="button"
-                      onClick={() => handleQuickCompose(r.email)}
-                      className="cursor-pointer block"
-                      title={r.email}
+                      onClick={() => canManageEmail && handleQuickCompose(r.email)}
+                      className={canManageEmail ? "cursor-pointer block" : "cursor-default block opacity-80"}
+                      title={canManageEmail ? r.email : `${r.email} (view only)`}
+                      disabled={!canManageEmail}
                     >
                       <span className="avatar avatar-sm online avatar-rounded flex items-center justify-center !bg-primary/20 !text-primary font-semibold hover:!bg-primary/30 transition-colors">
                         {(() => {
@@ -3099,15 +4133,75 @@ const Mailapp = () => {
                           e.stopPropagation();
                           handleRemoveQuickRecipient(r.email);
                         }}
-                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-danger text-white flex items-center justify-center !p-0 opacity-0 group-hover:opacity-100 transition-opacity text-[10px]"
+                        className={`absolute -top-1 -right-1 w-4 h-4 rounded-full bg-danger text-white flex items-center justify-center !p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-[10px] ${mailStyles.quickRemoveBtn}`}
                         title="Remove"
+                        aria-label={`Remove ${r.email} from quick contacts`}
                       >
-                        <i className="ri-close-line"></i>
+                        <i className="ri-close-line" aria-hidden></i>
                       </button>
                   </div>
                 ))}
               </div>
             </div>
+            </div>
+          </div>
+        )}
+
+        {mailConfirm && (
+          <MailConfirmDialog
+            title={mailConfirm.title}
+            message={mailConfirm.message}
+            confirmLabel={mailConfirm.confirmLabel}
+            cancelLabel={mailConfirm.cancelLabel}
+            destructive={mailConfirm.destructive}
+            onConfirm={() => settleMailConfirm(true)}
+            onCancel={() => settleMailConfirm(false)}
+          />
+        )}
+
+        {notice && (
+          <div
+            className={`${mailStyles.mailNotice} ${
+              notice.tone === "error" ? mailStyles.mailNoticeError : mailStyles.mailNoticeSuccess
+            }`}
+            // role=alert for failures so it is announced immediately; polite status
+            // for success so it never interrupts what the user is reading. Neither
+            // moves focus - the user stays wherever they were.
+            role={notice.tone === "error" ? "alert" : "status"}
+            aria-live={notice.tone === "error" ? "assertive" : "polite"}
+          >
+            <i
+              className={`${
+                notice.tone === "error" ? "ri-error-warning-line" : "ri-check-line"
+              } ${mailStyles.mailNoticeIcon}`}
+              aria-hidden
+            />
+            <div className={mailStyles.mailNoticeBody}>
+              {notice.message}
+              {notice.action && (
+                <div>
+                  <button
+                    type="button"
+                    className={mailStyles.mailNoticeAction}
+                    onClick={() => {
+                      const run = notice.action?.onClick;
+                      setNotice(null);
+                      run?.();
+                    }}
+                  >
+                    {notice.action.label}
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className={mailStyles.mailNoticeDismiss}
+              onClick={() => setNotice(null)}
+              aria-label="Dismiss message"
+            >
+              <i className="ri-close-line" aria-hidden />
+            </button>
           </div>
         )}
 
@@ -3115,14 +4209,22 @@ const Mailapp = () => {
           <div
             className={`fixed inset-0 z-[9999] flex items-center justify-center overflow-auto p-4 ${mailStyles.modalBackdrop}`}
             onClick={(e) => e.target === e.currentTarget && closeQuickAddModal()}
+            role="presentation"
           >
+            <FocusLock returnFocus>
             <div
               className={`ti-modal-box bg-white dark:bg-stone-950 w-full max-w-sm overflow-hidden flex flex-col ${mailStyles.modalPanel}`}
               onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal
+              aria-labelledby="quick-add-modal-title"
             >
               <form onSubmit={handleQuickAddSubmit} className="ti-modal-content flex flex-col">
                 <div className="ti-modal-header flex-shrink-0 !p-5 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between bg-gradient-to-r from-stone-50 to-white dark:from-stone-900 dark:to-stone-950">
-                  <h6 className={`modal-title text-base font-semibold text-stone-900 dark:text-stone-100 ${mailDisplay.className}`}>
+                  <h6
+                    id="quick-add-modal-title"
+                    className={`modal-title text-base font-semibold text-stone-900 dark:text-stone-100 ${mailDisplay.className}`}
+                  >
                     Add quick contact
                   </h6>
                   <button
@@ -3134,7 +4236,7 @@ const Mailapp = () => {
                     <i className="ri-close-line text-lg"></i>
                   </button>
                 </div>
-                <div className="ti-modal-body !p-5 bg-white dark:bg-bodydark">
+                <div className={`ti-modal-body !p-5 ${mailStyles.composeModalBody}`}>
                   <label htmlFor="quick-add-email" className="form-label block mb-1">
                     Email address<sup className="text-danger">*</sup>
                   </label>
@@ -3177,21 +4279,33 @@ const Mailapp = () => {
                 </div>
               </form>
             </div>
+            </FocusLock>
           </div>
         )}
 
         {showComposeModal && (
           <div
             className={`fixed inset-0 z-[9999] flex items-center justify-center overflow-auto p-4 ${mailStyles.modalBackdrop}`}
-            onClick={(e) => e.target === e.currentTarget && closeCompose()}
+            onClick={(e) => e.target === e.currentTarget && requestCloseCompose()}
+            role="presentation"
           >
+            {/* Focus stays inside while this is open and returns to whatever
+                opened it on close. Before, Tab walked straight out into the mail
+                list behind the overlay. The templates list is portalled to body,
+                so it is declared as a shard or the lock would bounce focus away
+                from it. */}
+            <FocusLock returnFocus shards={[composeTemplatesListRef]}>
             <div
               className={`ti-modal-box bg-white dark:bg-stone-950 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col ${mailStyles.modalPanel}`}
               onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal
+              aria-labelledby="compose-modal-title"
             >
               <div className="ti-modal-content flex flex-col flex-1 min-h-0">
                 <div className="ti-modal-header flex-shrink-0 !p-5 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between bg-gradient-to-r from-stone-50 to-white dark:from-stone-900 dark:to-stone-950">
                   <h6
+                    id="compose-modal-title"
                     className={`modal-title text-xl font-semibold text-stone-900 dark:text-stone-100 ${mailDisplay.className}`}
                   >
                     {composeMode === "new"
@@ -3204,32 +4318,56 @@ const Mailapp = () => {
                   </h6>
                   <button
                     type="button"
-                    onClick={closeCompose}
+                    onClick={requestCloseCompose}
                     className="ti-btn ti-btn-icon ti-btn-ghost hover:bg-black/5 dark:hover:bg-white/5"
-                    aria-label="Close"
+                    aria-label="Close compose window"
                   >
                     <i className="ri-close-line text-lg"></i>
                   </button>
                 </div>
-                <div className="ti-modal-body flex-1 overflow-y-auto px-4 py-4 bg-white dark:bg-bodydark">
+                <div className={`ti-modal-body flex-1 overflow-y-auto px-4 py-4 ${mailStyles.composeModalBody}`}>
                   <div className="grid grid-cols-1 gap-4">
-                    {(composeMode === "new" ||
-                      composeMode === "forward" ||
-                      composeMode === "reply" ||
-                      composeMode === "replyAll") && (
-                      <>
-                        {composeMode === "replyAll" && mailProvider === "outlook" && (
-                          <p className="text-xs text-stone-500 dark:text-stone-400 -mt-1 mb-1">
-                            Recipients are taken from the original message when you send (Outlook). To/Cc below are
-                            for reference.
+                    {isReplyMode ? (
+                      /* The reply and reply-all endpoints accept only accountId, html
+                         and attachments - they derive recipients from the original
+                         message server-side. These fields used to be editable here and
+                         whatever the user typed, a Cc or a Bcc included, was dropped on
+                         send with no indication. Show who it is going to instead of
+                         pretending it can be changed. Upgrade path: add cc/bcc to
+                         replyMessage in email.validation.js, and the backend must ship
+                         before this UI does, because validate() rejects unknown keys
+                         outright rather than ignoring them. */
+                      <div className="rounded-lg border border-stone-200 dark:border-white/10 bg-stone-50/70 dark:bg-white/5 px-3 py-2.5">
+                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-[0.8125rem]">
+                          <p className="mb-0 min-w-0">
+                            <span className="text-stone-500 dark:text-stone-400">To:</span>{" "}
+                            <span className="text-stone-800 dark:text-stone-100 break-words">
+                              {composeTo || "the original sender"}
+                            </span>
                           </p>
-                        )}
+                          {composeCc ? (
+                            <p className="mb-0 min-w-0">
+                              <span className="text-stone-500 dark:text-stone-400">Cc:</span>{" "}
+                              <span className="text-stone-800 dark:text-stone-100 break-words">{composeCc}</span>
+                            </p>
+                          ) : null}
+                        </div>
+                        <p className="mb-0 mt-1.5 text-[0.7rem] text-stone-500 dark:text-stone-400">
+                          Taken from the original message. To choose different recipients, use Forward or start a
+                          new message.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
                         <div>
-                          <label className="form-label block mb-1">
+                          <label className="form-label block mb-1" htmlFor="compose-to">
                             To<sup className="text-danger">*</sup>
                           </label>
                           <input
-                            type="text"
+                            id="compose-to"
+                            type="email"
+                            multiple
+                            autoComplete="email"
                             className="form-control w-full"
                             placeholder="recipient@example.com"
                             value={composeTo}
@@ -3238,9 +4376,14 @@ const Mailapp = () => {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="form-label block mb-1">Cc</label>
+                            <label className="form-label block mb-1" htmlFor="compose-cc">
+                              Cc
+                            </label>
                             <input
-                              type="text"
+                              id="compose-cc"
+                              type="email"
+                              multiple
+                              autoComplete="email"
                               className="form-control w-full"
                               placeholder="cc@example.com"
                               value={composeCc}
@@ -3248,9 +4391,14 @@ const Mailapp = () => {
                             />
                           </div>
                           <div>
-                            <label className="form-label block mb-1">Bcc</label>
+                            <label className="form-label block mb-1" htmlFor="compose-bcc">
+                              Bcc
+                            </label>
                             <input
-                              type="text"
+                              id="compose-bcc"
+                              type="email"
+                              multiple
+                              autoComplete="email"
                               className="form-control w-full"
                               placeholder="bcc@example.com"
                               value={composeBcc}
@@ -3272,7 +4420,7 @@ const Mailapp = () => {
                     </div>
                     <div>
                       <label className="form-label block mb-1">Message</label>
-                      <div className="mail-compose border dark:border-defaultborder/10 rounded-lg overflow-hidden bg-white dark:bg-bodydark shadow-sm [&_.tiptap-toolbar]:!bg-white [&_.tiptap-toolbar]:dark:!bg-bodydark [&_.tiptap-content]:!bg-white [&_.tiptap-content]:dark:!bg-bodydark [&_.ProseMirror]:!bg-white [&_.ProseMirror]:dark:!bg-bodydark">
+                      <div className={`mail-compose border dark:border-defaultborder/10 rounded-lg overflow-hidden shadow-sm ${mailStyles.composeEditor}`}>
                         <TiptapEditor
                           content={composeHtml}
                           placeholder="Compose your email..."
@@ -3300,15 +4448,41 @@ const Mailapp = () => {
                           <div className="relative" ref={composeTemplatesMenuRef}>
                             <button
                               type="button"
-                              onClick={() => setShowComposeTemplatesMenu((v) => !v)}
+                              ref={composeTemplatesBtnRef}
+                              aria-haspopup="true"
+                              aria-expanded={showComposeTemplatesMenu}
+                              onClick={() => {
+                                const next = !showComposeTemplatesMenu;
+                                const rect = composeTemplatesBtnRef.current?.getBoundingClientRect();
+                                setTemplatesMenuPosition(
+                                  next && rect
+                                    ? { bottom: window.innerHeight - rect.top + 4, left: rect.left }
+                                    : null
+                                );
+                                setShowComposeTemplatesMenu(next);
+                              }}
                               className={`ti-btn ti-btn-light !mb-0 text-[0.8125rem] ${mailStyles.composeUtilityBtn}`}
                               title="Insert a saved template"
                             >
-                              <i className="ri-layout-line me-1" />
+                              <i className="ri-layout-line me-1" aria-hidden />
                               Templates
                             </button>
-                            {showComposeTemplatesMenu ? (
-                              <div className="absolute left-0 bottom-full mb-1 z-[200] min-w-[240px] max-w-[min(100vw-2rem,360px)] max-h-72 overflow-y-auto rounded-md border border-defaultborder bg-bodybg shadow-lg py-1">
+                            {/* Portalled and fixed, like the other two menus on this
+                                page. As a plain absolutely-positioned child it was
+                                clipped by the modal body's own scroll container, so
+                                on a short window the template list was cut off or
+                                entirely invisible. */}
+                            {showComposeTemplatesMenu && templatesMenuPosition && typeof document !== "undefined" ? (
+                              createPortal(
+                              <div
+                                ref={composeTemplatesListRef}
+                                role="menu"
+                                aria-label="Insert a saved template"
+                                style={{
+                                  bottom: templatesMenuPosition.bottom,
+                                  left: templatesMenuPosition.left,
+                                }}
+                                className="fixed z-[10001] min-w-[240px] max-w-[min(100vw-2rem,360px)] max-h-72 overflow-y-auto rounded-md border border-defaultborder bg-bodybg shadow-lg py-1">
                                 {agentTemplatesOwn.length === 0 && agentTemplatesShared.length === 0 ? (
                                   <div className="px-3 py-2 text-[0.8125rem] text-[#8c9097]">
                                     No templates yet. Add them under{" "}
@@ -3357,7 +4531,9 @@ const Mailapp = () => {
                                     ))}
                                   </>
                                 ) : null}
-                              </div>
+                              </div>,
+                              document.body
+                              )
                             ) : null}
                           </div>
                         ) : null}
@@ -3524,7 +4700,7 @@ const Mailapp = () => {
                 <div className="ti-modal-footer flex-shrink-0 !p-5 border-t border-stone-200 dark:border-stone-800 flex justify-end gap-3 bg-stone-50/80 dark:bg-stone-900/80">
                   <button
                     type="button"
-                    onClick={closeCompose}
+                    onClick={requestCloseCompose}
                     className="ti-btn px-5 py-2.5 rounded-xl border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800"
                   >
                     Discard
@@ -3540,6 +4716,7 @@ const Mailapp = () => {
                 </div>
               </div>
             </div>
+            </FocusLock>
           </div>
         )}
       </div>

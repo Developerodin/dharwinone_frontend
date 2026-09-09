@@ -2,7 +2,17 @@
 
 import React, { useMemo, useCallback, useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { DM_Sans } from 'next/font/google'
-import { enhanceOfferLetterRoles, type OfferLetterJobType } from '@/shared/lib/api/offers'
+import {
+  enhanceOfferLetterRoles,
+  EMPLOYMENT_CATEGORIES,
+  employmentCategoryFromOfferJobType,
+  freelancePayFromOfferJobType,
+  isInternOfferJobType,
+  isUnpaidOfferJobType,
+  offerJobTypeFromEmployment,
+  type EmploymentCategory,
+  type OfferLetterJobType,
+} from '@/shared/lib/api/offers'
 import TiptapEditor from '@/shared/data/forms/form-editors/tiptapeditor'
 import {
   formatJobDescriptionForDisplay,
@@ -25,12 +35,11 @@ import {
   fmtCurrencyParts,
   fmtDateLong,
   fmtStartDateOrdinal,
-  apiJobTypeToUi,
-  uiJobTypeToApi,
+  getDefaultWeeklyHours,
+  getJobHoursLabel,
+  getJobTypeLabel,
   autoFillRolesFromPosition,
   compensationPreviewFromAnnualGross,
-  getJobHoursLabel,
-  getJobTypeLabelUi,
   employmentLinesFromPreset,
   effectiveEligibilityLines,
   internEligibilityOptRegularPreviewHtml,
@@ -139,6 +148,8 @@ type Props = {
   jobPostingDoc?: string | null
   /** New-offer flow: pick candidate + application instead of free-text name/title. */
   applicationPicker?: OfferLetterApplicationPicker | null
+  /** Letter version history dropdown (Save letter creates vN). */
+  versionPicker?: OfferLetterVersionPicker | null
 }
 
 export type OfferLetterApplicationPicker = {
@@ -150,6 +161,14 @@ export type OfferLetterApplicationPicker = {
   onCandidateChange: (candidateId: string) => void
   onApplicationChange: (applicationId: string) => void
   emptyHint?: string
+}
+
+export type OfferLetterVersionPicker = {
+  versions: { version: number; label: string }[]
+  selectedVersion: number
+  onSelectVersion: (version: number) => void
+  /** True when there are no saved versions yet (placeholder option). */
+  emptyHint?: boolean
 }
 
 function TopbarLogoIcon() {
@@ -212,11 +231,14 @@ export function OfferLetterGeneratorWorkspace({
   formPanelFooter,
   jobPostingDoc = null,
   applicationPicker = null,
+  versionPicker = null,
 }: Props) {
-  const jobUi = apiJobTypeToUi(letterForm.jobType)
-  const isInternship = letterForm.jobType === 'INTERN_UNPAID'
-  const isPaid = !isInternship
-  const compensationTagLabel = isPaid ? 'Paid' : 'Unpaid Internship'
+  const employmentCategory = employmentCategoryFromOfferJobType(letterForm.jobType)
+  const freelancePay = freelancePayFromOfferJobType(letterForm.jobType)
+  const isInternship = isInternOfferJobType(letterForm.jobType)
+  const isUnpaid = isUnpaidOfferJobType(letterForm.jobType)
+  const showSupervisor = !isInternship
+  const compensationTagLabel = isUnpaid ? 'Unpaid' : 'Paid'
   const [weeklyHoursOther, setWeeklyHoursOther] = useState(false)
   const [rolesAiLoading, setRolesAiLoading] = useState(false)
   const [trainingAiLoading, setTrainingAiLoading] = useState(false)
@@ -300,12 +322,14 @@ export function OfferLetterGeneratorWorkspace({
     }))
   }, [letterForm.positionTitle, setLetterForm])
 
-  const setJobUi = (ui: 'fulltime' | 'parttime' | 'internship') => {
-    const api = uiJobTypeToApi(ui)
+  const setEmploymentCategory = (category: EmploymentCategory, payChoice?: 'paid' | 'unpaid') => {
+    const pay = category === 'Freelance' ? (payChoice ?? freelancePay) : 'paid'
+    const api = offerJobTypeFromEmployment(category, pay)
     setLetterForm((f) => ({
       ...f,
       jobType: api,
-      weeklyHours: ui === 'parttime' ? 20 : 40,
+      weeklyHours:
+        api === 'PT_25' ? 20 : api === 'FT_40' ? 40 : f.weeklyHours > 0 ? f.weeklyHours : getDefaultWeeklyHours(api),
       ...(api === 'INTERN_UNPAID' && f.eligibilityPreset === 'none'
         ? { eligibilityPreset: 'opt_stem' as EligibilityPresetKey }
         : {}),
@@ -324,8 +348,8 @@ export function OfferLetterGeneratorWorkspace({
       ? fmtDateLong(letterForm.letterDate)
       : fmtDateLong(letterDateStampYmd())
 
-    const hoursLabel = getJobHoursLabel(jobUi, letterForm.weeklyHours)
-    const jobTypeLabel = getJobTypeLabelUi(jobUi, letterForm.weeklyHours)
+    const hoursLabel = getJobHoursLabel(letterForm.jobType, letterForm.weeklyHours)
+    const jobTypeLabel = getJobTypeLabel(letterForm.jobType, letterForm.weeklyHours)
 
     /** Branded logo: `offer-letter-images/logo.png` + CEO signature in the same folder. */
     const letterheadLogoHtml = `<img class="${styles.letterLogoImg}" src="${offerLetterLogoSrcAbsolute()}" alt="Dharwin Business Solutions" />`
@@ -359,7 +383,7 @@ export function OfferLetterGeneratorWorkspace({
     `
 
     let compSection = ''
-    if (isPaid && letterForm.annualGrossCtc) {
+    if (!isUnpaid && letterForm.annualGrossCtc) {
       const g = Number(String(letterForm.annualGrossCtc).replace(/,/g, ''))
       const para =
         Number.isFinite(g) && g > 0
@@ -527,7 +551,7 @@ export function OfferLetterGeneratorWorkspace({
       { id: 'intro', html: introHtml },
       { id: 'position', html: positionHtml },
     ]
-    if (isPaid) sections.push({ id: 'supervisor', html: supBlock })
+    if (showSupervisor) sections.push({ id: 'supervisor', html: supBlock })
     if (compSection) sections.push({ id: 'compensation', html: compSection })
     sections.push({ id: 'roles', html: rolesHtml })
     if (learningSection) sections.push({ id: 'learning', html: learningSection })
@@ -543,7 +567,7 @@ export function OfferLetterGeneratorWorkspace({
       letterFooter3Col,
       sectionsKey: `${sections.map((s) => s.id).join('|')}::${letterDateStr}::${name}`,
     }
-  }, [letterForm, isPaid, isInternship, jobUi])
+  }, [letterForm, isUnpaid, isInternship, showSupervisor])
 
   const [sheetStarts, setSheetStarts] = useState<number[]>([0])
   const measureGhostRef = useRef<HTMLDivElement | null>(null)
@@ -583,9 +607,9 @@ export function OfferLetterGeneratorWorkspace({
   useOfferLetterPrintMargins(letterModel.sectionsKey)
 
   const compPreview = useMemo(() => {
-    if (isInternship || !letterForm.annualGrossCtc) return null
+    if (isUnpaid || !letterForm.annualGrossCtc) return null
     return fmtCurrencyParts(letterForm.annualGrossCtc, letterForm.ctcCurrency)
-  }, [isInternship, letterForm.annualGrossCtc, letterForm.ctcCurrency])
+  }, [isUnpaid, letterForm.annualGrossCtc, letterForm.ctcCurrency])
 
   /** Print only the letter in a same-origin iframe (no app shell). Styles: offer-letter-print-shell + module CSS cloned into the iframe document. */
   const handleSaveAsPdf = useCallback(() => {
@@ -616,12 +640,41 @@ export function OfferLetterGeneratorWorkspace({
           </div>
         </div>
         <div className={styles.topbarActions}>
+          {versionPicker && versionPicker.versions.length > 0 ? (
+            <label
+              className={styles.versionPicker}
+              title={
+                versionPicker.emptyHint
+                  ? 'Save letter to create the first version'
+                  : 'Load a previous saved letter version into the editor'
+              }
+            >
+              <span className={styles.versionPickerLabel}>Version</span>
+              <select
+                className={styles.select}
+                value={versionPicker.selectedVersion}
+                disabled={letterBusy || !!versionPicker.emptyHint}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isFinite(n) || n <= 0) return
+                  versionPicker.onSelectVersion(n)
+                }}
+                aria-label="Offer letter version"
+              >
+                {versionPicker.versions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button
             type="button"
             className={`${styles.btn} ${styles.btnPrimary}`}
             onClick={onSaveLetter}
             disabled={letterBusy}
-            title="Save letter fields to the server (required fields must be valid)."
+            title="Save letter fields to the server (required fields must be valid). Creates a new version."
           >
             {letterBusy ? '…' : 'Save letter'}
           </button>
@@ -796,7 +849,7 @@ export function OfferLetterGeneratorWorkspace({
                   <label htmlFor="olg-jobType">Job Type *</label>
                   <span
                     className={`${styles.compensationTag} ${
-                      isPaid ? styles.compensationTagPaid : styles.compensationTagUnpaid
+                      isUnpaid ? styles.compensationTagUnpaid : styles.compensationTagPaid
                     }`}
                   >
                     {compensationTagLabel}
@@ -805,13 +858,37 @@ export function OfferLetterGeneratorWorkspace({
                 <select
                   id="olg-jobType"
                   className={styles.select}
-                  value={jobUi}
-                  onChange={(e) => setJobUi(e.target.value as 'fulltime' | 'parttime' | 'internship')}
+                  value={employmentCategory}
+                  onChange={(e) => setEmploymentCategory(e.target.value as EmploymentCategory)}
                 >
-                  <option value="fulltime">Full Time</option>
-                  <option value="parttime">Part Time</option>
-                  <option value="internship">Training / Unpaid Internship</option>
+                  {EMPLOYMENT_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
                 </select>
+                {employmentCategory === 'Freelance' ? (
+                  <div className={styles.freelancePayGroup} role="group" aria-label="Freelance compensation">
+                    <label className={styles.freelancePayOption}>
+                      <input
+                        type="radio"
+                        name="olg-freelance-pay"
+                        checked={freelancePay === 'paid'}
+                        onChange={() => setEmploymentCategory('Freelance', 'paid')}
+                      />
+                      Paid
+                    </label>
+                    <label className={styles.freelancePayOption}>
+                      <input
+                        type="radio"
+                        name="olg-freelance-pay"
+                        checked={freelancePay === 'unpaid'}
+                        onChange={() => setEmploymentCategory('Freelance', 'unpaid')}
+                      />
+                      Unpaid
+                    </label>
+                  </div>
+                ) : null}
               </div>
               <div className={styles.field}>
                 <label htmlFor="olg-weekly">Working hours / week *</label>
@@ -870,7 +947,7 @@ export function OfferLetterGeneratorWorkspace({
             </div>
           </div>
 
-          {!isInternship ? (
+          {!isUnpaid ? (
             <div className={styles.sectionCard}>
               <div className={styles.sectionHeader}>
                 <span className={styles.dot} />

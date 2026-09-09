@@ -1,5 +1,15 @@
 /** Shared mobile rules so every LiveKit + host control stays reachable on phones. */
 export const MEETING_CONTROL_BAR_RESPONSIVE_CSS = `
+#recording-button-slot .lk-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+}
+.lk-recording-timer-compact {
+  display: none;
+}
 @media (max-width: 760px) {
   .lk-control-bar {
     max-height: none !important;
@@ -38,9 +48,17 @@ export const MEETING_CONTROL_BAR_RESPONSIVE_CSS = `
     min-height: 44px;
     padding: 0.5rem 0.65rem !important;
   }
-  .lk-host-action-btn__label,
+  .lk-host-action-btn__label {
+    display: none;
+  }
   .lk-recording-timer-label {
     display: none;
+  }
+  .lk-recording-timer-compact {
+    display: inline;
+  }
+  .lk-recording-action-label {
+    display: inline;
   }
 }
 `;

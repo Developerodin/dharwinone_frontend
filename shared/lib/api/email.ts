@@ -64,7 +64,20 @@ export interface EmailLabel {
   type?: string;
   messageListVisibility?: string;
   labelListVisibility?: string;
+  /** Unread conversation count from provider folder/label metadata. */
+  unread?: number;
+  /** Total conversations in folder (Outlook Graph; Gmail folder-counts). */
+  total?: number;
 }
+
+export interface EmailFolderCount {
+  unread: number;
+  total: number;
+  messagesUnread?: number;
+  messagesTotal?: number;
+}
+
+export type EmailFolderCounts = Record<string, EmailFolderCount>;
 
 export type EmailDraftTone = "professional" | "friendly" | "formal" | "persuasive" | "empathetic";
 export type EmailDraftLength = "short" | "medium" | "long";
@@ -95,15 +108,30 @@ function mailBase(provider?: string): string {
   return provider === "outlook" ? OUTLOOK_BASE : EMAIL_BASE;
 }
 
-/** Gmail + Outlook accounts (merged). */
-export async function getEmailAccounts(): Promise<EmailAccount[]> {
+/**
+ * Gmail + Outlook accounts (merged).
+ *
+ * Reports which providers could not be reached rather than folding a failure
+ * into an empty list. A provider outage used to be indistinguishable from
+ * "no accounts of that type": the mailbox simply vanished from the nav, and if
+ * it was the only one, the page offered to connect a mailbox that was already
+ * connected. Note a user with no Outlook account gets 200 with [], not a
+ * rejection, so an entry here is a genuine failure.
+ */
+export async function getEmailAccounts(): Promise<{
+  accounts: EmailAccount[];
+  unreachable: MailProvider[];
+}> {
   const [gmailRes, outlookRes] = await Promise.allSettled([
     apiClient.get<EmailAccount[]>(`${EMAIL_BASE}/accounts`),
     apiClient.get<EmailAccount[]>(`${OUTLOOK_BASE}/accounts`),
   ]);
   const gmail = gmailRes.status === "fulfilled" ? gmailRes.value.data : [];
   const outlook = outlookRes.status === "fulfilled" ? outlookRes.value.data : [];
-  return [...(gmail || []), ...(outlook || [])];
+  const unreachable: MailProvider[] = [];
+  if (gmailRes.status === "rejected") unreachable.push("gmail");
+  if (outlookRes.status === "rejected") unreachable.push("outlook");
+  return { accounts: [...(gmail || []), ...(outlook || [])], unreachable };
 }
 
 /** Company-assigned mailbox policy for Communication → Email (requires emails.read or emails.manage). */
@@ -198,6 +226,35 @@ export function getAttachmentUrl(
   const base = process.env.NEXT_PUBLIC_API_URL || (typeof window !== "undefined" ? "/api/v1" : "");
   const b = mailBase(provider);
   return `${base}${b}/messages/${messageId}/attachments/${attachmentId}?accountId=${accountId}`;
+}
+
+/** Chunked so a large attachment cannot blow the argument limit of String.fromCharCode. */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Attachment bytes as base64, for re-attaching an original when forwarding.
+ * The endpoint streams application/octet-stream; getAttachmentUrl is the same
+ * route expressed as a plain href for download links.
+ */
+export async function fetchAttachmentContent(
+  accountId: string,
+  messageId: string,
+  attachmentId: string,
+  provider: MailProvider = "gmail"
+): Promise<string> {
+  const { data } = await apiClient.get<ArrayBuffer>(
+    `${mailBase(provider)}/messages/${messageId}/attachments/${attachmentId}`,
+    { params: { accountId }, responseType: "arraybuffer" }
+  );
+  return arrayBufferToBase64(data);
 }
 
 export async function sendMessage(
@@ -331,6 +388,17 @@ export async function getLabels(
   provider: MailProvider = "gmail"
 ): Promise<EmailLabel[]> {
   const { data } = await apiClient.get(`${mailBase(provider)}/labels`, {
+    params: { accountId },
+  });
+  return data;
+}
+
+/** Authoritative per-folder unread/total counts (Gmail labels.get; Outlook mailFolders). */
+export async function getFolderCounts(
+  accountId: string,
+  provider: MailProvider = "gmail"
+): Promise<EmailFolderCounts> {
+  const { data } = await apiClient.get(`${mailBase(provider)}/folder-counts`, {
     params: { accountId },
   });
   return data;

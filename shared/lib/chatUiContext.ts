@@ -3,6 +3,7 @@
 import type {
   EmployeeCompensationType,
   EmployeeEmploymentStatus,
+  EmployeeEmploymentType,
 } from "@/shared/schemas/employeeFilter.generated";
 
 export type ChatUiContext = {
@@ -15,6 +16,8 @@ export type ChatUiContext = {
     /** Employees (Advanced Search) */
     employmentStatus?: EmployeeEmploymentStatus;
     compensationType?: EmployeeCompensationType | "";
+    /** Orthogonal to compensationType — the assistant must not infer one from the other. */
+    employmentType?: EmployeeEmploymentType | "";
     search?: string | null;
   };
   visibleCounts?: {

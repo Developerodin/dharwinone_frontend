@@ -31,6 +31,37 @@
   .ymd-filter-date-input .react-datepicker__input-container input {
     @apply rounded-xl #{!important};
   }
+
+  /* Form grids: undo global datepicker input sizing so `form-control` matches siblings. */
+  .ymd-form-date-input {
+    @apply min-w-0 w-full max-w-full;
+
+    .react-datepicker-wrapper,
+    .react-datepicker__input-container {
+      @apply w-full max-w-full #{!important};
+    }
+
+    .react-datepicker__input-container input {
+      height: auto !important;
+      min-height: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      border-radius: 0.35rem !important;
+      border-top-left-radius: 0.35rem !important;
+      border-top-right-radius: 0.35rem !important;
+      border-bottom-left-radius: 0.35rem !important;
+      border-bottom-right-radius: 0.35rem !important;
+      @apply py-2 px-[0.85rem] text-[0.875rem] font-normal leading-[1.6] #{!important};
+    }
+
+    .react-datepicker__input-container input.\!rounded-md {
+      border-radius: 0.375rem !important;
+      border-top-left-radius: 0.375rem !important;
+      border-top-right-radius: 0.375rem !important;
+      border-bottom-left-radius: 0.375rem !important;
+      border-bottom-right-radius: 0.375rem !important;
+    }
+  }
   
   [dir="rtl"] {
     .react-datepicker__input-container {

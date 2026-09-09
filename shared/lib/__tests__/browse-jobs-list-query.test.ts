@@ -5,6 +5,7 @@ import {
   buildBrowseJobsListQueryString,
   parseBrowseJobsListPage,
   parseBrowseJobsListState,
+  parseJobTypesParam,
 } from "../ats/browseJobsListQuery";
 
 describe("parseBrowseJobsListPage", () => {
@@ -20,20 +21,31 @@ describe("parseBrowseJobsListPage", () => {
   });
 });
 
+describe("parseJobTypesParam", () => {
+  it("parses comma-separated types", () => {
+    expect(parseJobTypesParam("Internship,Part-time")).toEqual(["Internship", "Part-time"]);
+  });
+});
+
 describe("parseBrowseJobsListState", () => {
   it("reads all supported query params", () => {
     const params = new URLSearchParams(
-      "page=2&search=engineer&jobType=Full-time&location=Boston&experienceLevel=Mid%20Level&sortBy=title:asc&jobOrigin=external"
+      "page=2&search=engineer&jobTypes=Internship,Part-time&location=Boston&experienceLevel=Mid%20Level&sortBy=title:asc&jobOrigin=external"
     );
     expect(parseBrowseJobsListState(params)).toEqual({
       page: 2,
       search: "engineer",
-      jobType: "Full-time",
+      jobTypes: ["Internship", "Part-time"],
       location: "Boston",
       experienceLevel: "Mid Level",
       sortBy: "title:asc",
       jobOrigin: "external",
     });
+  });
+
+  it("maps legacy jobType to jobTypes array", () => {
+    const params = new URLSearchParams("jobType=Contract");
+    expect(parseBrowseJobsListState(params).jobTypes).toEqual(["Contract"]);
   });
 });
 
@@ -42,7 +54,7 @@ describe("buildBrowseJobsListQueryString", () => {
     const qs = buildBrowseJobsListQueryString({
       page: 1,
       search: "",
-      jobType: "",
+      jobTypes: [],
       location: "",
       experienceLevel: "",
       sortBy: "createdAt:desc",
@@ -55,7 +67,7 @@ describe("buildBrowseJobsListQueryString", () => {
     const qs = buildBrowseJobsListQueryString({
       page: 3,
       search: " react ",
-      jobType: "Contract",
+      jobTypes: ["Contract", "Internship"],
       location: " NYC ",
       experienceLevel: "Senior Level",
       sortBy: "title:desc",
@@ -65,7 +77,7 @@ describe("buildBrowseJobsListQueryString", () => {
     expect(Object.fromEntries(params.entries())).toEqual({
       page: "3",
       search: "react",
-      jobType: "Contract",
+      jobTypes: "Contract,Internship",
       location: "NYC",
       experienceLevel: "Senior Level",
       sortBy: "title:desc",

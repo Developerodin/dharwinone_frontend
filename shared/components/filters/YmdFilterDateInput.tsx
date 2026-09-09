@@ -24,8 +24,14 @@ const INVALID_DATE_POPUP_TEXT = "Please input date in dd/mm/yyyy format.";
 export const FILTER_BAR_PLACEHOLDER_CLASS =
   "placeholder:!opacity-100 placeholder:text-defaulttextcolor/60 dark:placeholder:text-white/70";
 
+/** @deprecated Use `variant="form"` — SCSS `.ymd-form-date-input` resets global datepicker overrides. */
+export const FORM_CONTROL_DATE_WRAPPER = "min-w-0 w-full max-w-full";
+
 /** Matches adjacent filter-bar `form-control` inputs (search/selects), not global react-datepicker `bodybg2`. */
 const DEFAULT_FILTER_INPUT_CLASS = "form-control form-control-sm w-[150px] dark:!bg-bodybg";
+const DEFAULT_FORM_INPUT_CLASS = "form-control w-full";
+
+export type YmdFilterDateInputVariant = "filter" | "form";
 
 interface YmdFilterDateInputProps {
   label: string;
@@ -44,6 +50,9 @@ interface YmdFilterDateInputProps {
   wrapperClassName?: string;
   /** Override the label styling for a bar whose other labels do not use `form-label`. */
   labelClassName?: string;
+  /** `filter` = compact pill inputs for filter bars; `form` = full-height `form-control` in form grids. */
+  variant?: YmdFilterDateInputVariant;
+  disabled?: boolean;
 }
 
 function toPickerDate(ymd: string | undefined): Date | undefined {
@@ -66,6 +75,8 @@ export function YmdFilterDateInput({
   inputClassName,
   wrapperClassName,
   labelClassName,
+  variant = "filter",
+  disabled = false,
 }: YmdFilterDateInputProps) {
   const generatedId = useId();
   const inputId = inputIdProp ?? generatedId;
@@ -171,8 +182,23 @@ export function YmdFilterDateInput({
     if (sanitized !== value) onCommit(sanitized);
   };
 
+  const isFilterVariant = variant === "filter";
+  const resolvedInputClassName =
+    inputClassName ?? (isFilterVariant ? DEFAULT_FILTER_INPUT_CLASS : DEFAULT_FORM_INPUT_CLASS);
+  const isFilterBarInput =
+    isFilterVariant &&
+    (!inputClassName || /\bform-control-sm\b/.test(resolvedInputClassName));
+
   return (
-    <div className={["ymd-filter-date-input", "[&_.react-datepicker__input-container_input]:!rounded-xl", wrapperClassName].filter(Boolean).join(" ")}>
+    <div
+      className={[
+        isFilterVariant ? "ymd-filter-date-input" : "ymd-form-date-input",
+        isFilterBarInput ? "[&_.react-datepicker__input-container_input]:!rounded-xl" : "",
+        wrapperClassName,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <label htmlFor={inputId} className={hideLabel ? "sr-only" : labelClassName ?? "form-label text-xs"}>
         {label}
       </label>
@@ -209,7 +235,8 @@ export function YmdFilterDateInput({
         popperClassName={popperClassName}
         calendarClassName="filter-dp-cal"
         wrapperClassName={wrapperClassName}
-        className={`${inputClassName ?? DEFAULT_FILTER_INPUT_CLASS} ${FILTER_BAR_PLACEHOLDER_CLASS} text-defaulttextcolor dark:text-white ${error ? "is-invalid" : ""}`}
+        className={`${resolvedInputClassName} ${FILTER_BAR_PLACEHOLDER_CLASS} text-defaulttextcolor dark:text-white ${error ? "is-invalid" : ""}`}
+        disabled={disabled}
         aria-invalid={error ? true : undefined}
         aria-describedby={rangeError ? errorId : undefined}
       />

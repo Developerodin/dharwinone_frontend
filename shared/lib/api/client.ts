@@ -7,6 +7,7 @@ import {
   getStoredRealIp,
   X_CLIENT_IP_HEADER,
 } from "@/shared/lib/activity-log-client-geo";
+import { getAuditSourceHeader, isMutationMethod } from "@/shared/lib/audit-source";
 
 /** Strip trailing slashes so paths join cleanly with axios `baseURL`. */
 export function normalizeApiBase(): string {
@@ -80,6 +81,12 @@ apiClient.interceptors.request.use((cfg: InternalAxiosRequestConfig) => {
   if (clientIp) {
     cfg.headers = cfg.headers ?? {};
     (cfg.headers as Record<string, string>)[X_CLIENT_IP_HEADER] = clientIp;
+  }
+
+  if (typeof window !== "undefined" && isMutationMethod(cfg.method)) {
+    const auditSource = getAuditSourceHeader(window.location.pathname);
+    cfg.headers = cfg.headers ?? {};
+    (cfg.headers as Record<string, string>)["x-audit-source"] = auditSource;
   }
 
   return cfg;

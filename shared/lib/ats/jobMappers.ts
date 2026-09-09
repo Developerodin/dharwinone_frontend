@@ -54,6 +54,58 @@ export function formatSalaryRange(range?: { min?: number | null; max?: number | 
   return `${currency}${fmt(min)} - ${currency}${fmt(max)}`;
 }
 
+export function formatPostingDateMeta(raw?: string | null): { formatted: string; relative: string } {
+  if (!raw) return { formatted: "", relative: "" };
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return { formatted: raw, relative: "" };
+  const formatted = d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  const dayMs = 24 * 60 * 60 * 1000;
+  const diffDays = Math.floor((Date.now() - d.getTime()) / dayMs);
+  let relative = "";
+  if (diffDays === 0) relative = "Today";
+  else if (diffDays === 1) relative = "Yesterday";
+  else if (diffDays > 1 && diffDays < 30) relative = `${diffDays}d ago`;
+  else if (diffDays >= 30 && diffDays < 365) relative = `${Math.floor(diffDays / 30)}mo ago`;
+  else if (diffDays >= 365) relative = `${Math.floor(diffDays / 365)}y ago`;
+  return { formatted, relative };
+}
+
+export type ApplicationDeadlineUrgency = "past" | "near" | "normal" | null;
+
+/** Inclusive through end of deadline calendar day (UTC), aligned with apply rejection on backend. */
+export function isApplicationDeadlinePast(raw?: string | null): boolean {
+  if (!raw) return false;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return false;
+  const endOfDeadlineDayUtc = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999)
+  );
+  return Date.now() > endOfDeadlineDayUtc.getTime();
+}
+
+export function formatApplicationDeadlineMeta(raw?: string | null): {
+  formatted: string;
+  urgency: ApplicationDeadlineUrgency;
+  label: string;
+} {
+  if (!raw) return { formatted: "", urgency: null, label: "" };
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return { formatted: raw, urgency: null, label: raw };
+  const formatted = d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  const dayMs = 24 * 60 * 60 * 1000;
+  const diffDays = Math.ceil((d.getTime() - Date.now()) / dayMs);
+  let urgency: ApplicationDeadlineUrgency = "normal";
+  if (isApplicationDeadlinePast(raw)) urgency = "past";
+  else if (diffDays <= 7) urgency = "near";
+  const label =
+    urgency === "past"
+      ? `Closed ${formatted}`
+      : urgency === "near"
+        ? `Apply by ${formatted} (${diffDays}d left)`
+        : `Apply by ${formatted}`;
+  return { formatted, urgency, label };
+}
+
 /** True when the job has a meaningful numeric or formatted salary (not ATS "Not specified"). */
 export function isJobSalarySpecified(job: {
   salary?: string | null;

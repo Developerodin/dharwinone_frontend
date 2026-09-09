@@ -76,6 +76,28 @@ export interface CreateMeetingPayload {
   notes?: string;
 }
 
+/** Rubric criterion ids — must stay in sync with backend src/constants/interviewRubric.js. */
+export type RubricCriterionId =
+  | 'technical'
+  | 'communication'
+  | 'problemSolving'
+  | 'cultureFit'
+  | 'experience';
+
+export interface RubricRating {
+  criterion: RubricCriterionId;
+  /** 1-5. A criterion the scorer skipped is absent from the array, never stored as 0. */
+  rating: number;
+}
+
+export interface InterviewScorecard {
+  ratings?: RubricRating[];
+  comment?: string;
+  /** Stamped server-side on every write; never sent by the client. */
+  scoredBy?: { _id: string; name?: string; email?: string } | string | null;
+  scoredAt?: string | null;
+}
+
 export interface Meeting {
   id?: string;
   _id?: string;
@@ -99,6 +121,8 @@ export interface Meeting {
   status: string;
   /** Interview result: pending, selected, rejected */
   interviewResult?: 'pending' | 'selected' | 'rejected';
+  /** Rubric scores (PRD 5.4). Informational — never derives interviewResult. */
+  interviewScorecard?: InterviewScorecard;
   createdBy?: { _id: string; name?: string; email?: string };
   createdAt?: string;
   updatedAt?: string;
@@ -163,6 +187,8 @@ export async function getMeeting(id: string): Promise<Meeting> {
 export type UpdateMeetingPayload = Partial<CreateMeetingPayload> & {
   status?: string;
   interviewResult?: 'pending' | 'selected' | 'rejected';
+  /** Ratings + comment only — scoredBy/scoredAt are server-owned and rejected by Joi. */
+  interviewScorecard?: Pick<InterviewScorecard, 'ratings' | 'comment'>;
 };
 
 export async function updateMeeting(id: string, payload: UpdateMeetingPayload): Promise<Meeting> {

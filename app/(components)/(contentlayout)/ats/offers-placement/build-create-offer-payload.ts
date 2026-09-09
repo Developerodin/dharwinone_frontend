@@ -1,4 +1,5 @@
 import type { CreateOfferPayload } from "@/shared/lib/api/offers"
+import { isInternOfferJobType } from "@/shared/lib/api/offers"
 import { buildEligibilityLinesFromForm, type OfferLetterFormFields } from "./OfferLetterGeneratorWorkspace"
 import { roleResponsibilityLinesFromHtml } from "@/shared/lib/ats/jobDescriptionHtml"
 import { letterDateStampYmd } from "./letter-date-stamp"
@@ -12,7 +13,7 @@ export function buildCreateOfferPayloadFromLetterForm(
   hra: number,
   letterForm: OfferLetterFormFields
 ): CreateOfferPayload {
-  const isIntern = letterForm.jobType === "INTERN_UNPAID"
+  const isIntern = isInternOfferJobType(letterForm.jobType)
   const roleResponsibilities = roleResponsibilityLinesFromHtml(letterForm.rolesText)
   const trainingOutcomes = roleResponsibilityLinesFromHtml(letterForm.trainingText)
   const trainingHtml = letterForm.trainingText.trim()

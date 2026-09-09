@@ -5,8 +5,10 @@ import type { AgentOption } from '@/shared/lib/api/candidates'
 import {
   COMPENSATION_TYPE_OPTIONS,
   EMPLOYMENT_STATUS_OPTIONS,
+  EMPLOYMENT_TYPE_OPTIONS,
   type EmployeeCompensationType,
   type EmployeeEmploymentStatus,
+  type EmployeeEmploymentType,
 } from '@/shared/schemas/employeeFilter.generated'
 
 interface CandidatesFilterPanelProps {
@@ -16,6 +18,7 @@ interface CandidatesFilterPanelProps {
     agentIds: string[]
     employmentStatus: EmployeeEmploymentStatus
     compensationType: '' | EmployeeCompensationType
+    employmentType: '' | EmployeeEmploymentType
   }
   setFilters: React.Dispatch<React.SetStateAction<any>>
   agentOptions: AgentOption[]
@@ -195,6 +198,34 @@ const CandidatesFilterPanel: React.FC<CandidatesFilterPanelProps> = ({
               {COMPENSATION_TYPE_OPTIONS.map((value) => (
                 <option key={value} value={value}>
                   {COMPENSATION_TYPE_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/*
+            Sits beside Compensation because the two are orthogonal and read as a pair: a
+            Freelance hire may be paid or unpaid, and "unpaid" alone no longer implies an intern.
+          */}
+          <div>
+            <label className={SECTION_LABEL} htmlFor="candidates-filter-employment-type">
+              <i className="ri-briefcase-line text-primary me-1" aria-hidden />Employment Type
+            </label>
+            <select
+              id="candidates-filter-employment-type"
+              className={COMPACT_SELECT}
+              value={filters.employmentType ?? ''}
+              onChange={(e) =>
+                setFilters((prev: any) => ({
+                  ...prev,
+                  employmentType: e.target.value as '' | EmployeeEmploymentType,
+                }))
+              }
+            >
+              <option value="">All</option>
+              {EMPLOYMENT_TYPE_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {value === 'Internship' ? 'Training / Unpaid Internship' : value}
                 </option>
               ))}
             </select>

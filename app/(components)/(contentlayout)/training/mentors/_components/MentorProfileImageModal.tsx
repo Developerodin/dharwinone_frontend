@@ -1,6 +1,15 @@
 "use client"
 
 import React from 'react'
+import { closeHsOverlay } from '../../evaluation/_components/evaluation-overlay'
+
+const ALLOWED_PROFILE_IMAGE_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp'])
+const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024
+
+function dismissProfileImageModal(onClose: () => void) {
+  closeHsOverlay('#mentor-profile-image-modal')
+  onClose()
+}
 
 export interface MentorProfileImageModalMentor {
   id: string
@@ -26,6 +35,24 @@ export default function MentorProfileImageModal({
   onClose,
   onFileChange,
 }: MentorProfileImageModalProps) {
+  const [localError, setLocalError] = React.useState<string | null>(null)
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!ALLOWED_PROFILE_IMAGE_TYPES.has(file.type)) {
+      setLocalError('Please choose a PNG, JPG, or WEBP image.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > MAX_PROFILE_IMAGE_BYTES) {
+      setLocalError('Image must be 5 MB or smaller.')
+      e.target.value = ''
+      return
+    }
+    setLocalError(null)
+    onFileChange(e)
+  }
   return (
     <div
       id="mentor-profile-image-modal"
@@ -35,7 +62,7 @@ export default function MentorProfileImageModal({
       <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out">
         <div className="ti-modal-content">
           <div className="ti-modal-header">
-            <h6 className="modal-title text-[1rem] font-semibold text-default dark:text-defaulttextcolor/70">
+            <h6 className="modal-title text-[1rem] font-semibold text-defaulttextcolor dark:text-white/90">
               {mentor
                 ? `Profile Image – ${mentor.name}`
                 : 'Profile Image'}
@@ -44,7 +71,7 @@ export default function MentorProfileImageModal({
               type="button"
               className="hs-dropdown-toggle !text-[1rem] !font-semibold"
               data-hs-overlay="#mentor-profile-image-modal"
-              onClick={onClose}
+              onClick={() => dismissProfileImageModal(onClose)}
             >
               <span className="sr-only">Close</span>
               <i className="ri-close-line"></i>
@@ -73,9 +100,9 @@ export default function MentorProfileImageModal({
               </p>
             )}
 
-            {profileImageError && (
+            {(profileImageError || localError) && (
               <div className="p-2 rounded border border-danger/20 bg-danger/5 text-danger text-xs">
-                {profileImageError}
+                {profileImageError || localError}
               </div>
             )}
 
@@ -89,14 +116,13 @@ export default function MentorProfileImageModal({
               <input
                 id="mentor-profile-image-file"
                 type="file"
-                accept="image/*"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
                 className="form-control"
-                onChange={onFileChange}
+                onChange={handleFileChange}
                 disabled={profileImageUploading || !mentor}
               />
               <p className="text-[0.75rem] text-defaulttextcolor/70 mt-1 mb-0">
-                Allowed types: PNG, JPG, JPEG. The image is uploaded securely and stored on the
-                file storage backend.
+                Allowed types: PNG, JPG, JPEG, WEBP. Maximum size 5 MB.
               </p>
               {profileImageUploading && (
                 <p className="text-[0.75rem] text-primary mt-1 mb-0">

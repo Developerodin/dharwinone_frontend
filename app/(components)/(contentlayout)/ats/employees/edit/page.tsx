@@ -1,22 +1,6 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import Seo from "@/shared/layout-components/seo/seo";
-import React, { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-
-// Lazy-load the heavy candidate wizard so this route's shell compiles fast and stays
-// warm — its large dependency graph builds as a separate on-demand chunk.
-const EmployeeForm = dynamic(
-  () => import("@/shared/data/pages/candidates/employeeform").then((m) => m.EmployeeForm),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="p-6 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
-      </div>
-    ),
-  }
-);
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { getCandidate, getMyCandidate } from "@/shared/lib/api/candidates";
 import { useAuth } from "@/shared/contexts/auth-context";
@@ -26,22 +10,34 @@ import AssignTrainingCourseSopModal from "../_components/AssignTrainingCourseSop
 import { canAssignCandidateAgent, canAssignTrainingCourseFromSop } from "@/shared/lib/candidate-permissions";
 import { dispatchSopStripRefresh } from "@/shared/lib/sop-strip-preferences";
 import { hasPermission } from "@/shared/lib/permissions";
+import {
+  EmployeeFormAlert,
+  EmployeeFormPageShell,
+  FormLoadingSpinner,
+  LazyEmployeeForm,
+} from "../_components/employee-form-page-ui";
+import EmployeeAuditPanel from "../_components/EmployeeAuditPanel";
+
+type LoadError = "network" | "not_found";
+
+function employeesListReturnUrl(returnPageRaw: string | null): string {
+  const returnPage = returnPageRaw ? Number.parseInt(returnPageRaw, 10) : NaN;
+  return Number.isInteger(returnPage) && returnPage >= 1
+    ? `/ats/employees?page=${returnPage}`
+    : "/ats/employees";
+}
 
 const EditEmployee = () => {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
   const id = searchParams.get("id");
-  const returnPageRaw = searchParams.get("returnPage");
-  const returnPage = returnPageRaw ? Number.parseInt(returnPageRaw, 10) : NaN;
-  const employeesListReturnUrl =
-    Number.isInteger(returnPage) && returnPage >= 1
-      ? `/ats/employees?page=${returnPage}`
-      : "/ats/employees";
+  const listReturnUrl = employeesListReturnUrl(searchParams.get("returnPage"));
   const { user, permissions, permissionsLoaded, isPlatformSuperUser } = useAuth();
   const { isEmployee, isLoading: rolesLoading } = useIsEmployeeForProfile();
   const [initialData, setInitialData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<LoadError | null>(null);
   const canAssignAgent = useMemo(
     () => canAssignCandidateAgent(permissions, isPlatformSuperUser),
     [permissions, isPlatformSuperUser]
@@ -56,40 +52,47 @@ const EditEmployee = () => {
   );
   const canEditThisProfile = isEmployee || canUpdateEmployee;
 
-  const stripAssignAgentParam = useCallback(() => {
-    const p = new URLSearchParams(searchParams.toString());
-    p.delete("assignAgent");
-    const q = p.toString();
-    const base = pathname || "";
-    router.replace(q ? `${base}?${q}` : base);
-  }, [pathname, router, searchParams]);
-
-  const stripAssignCourseParam = useCallback(() => {
-    const p = new URLSearchParams(searchParams.toString());
-    p.delete("assignCourse");
-    const q = p.toString();
-    const base = pathname || "";
-    router.replace(q ? `${base}?${q}` : base);
-  }, [pathname, router, searchParams]);
+  const stripSearchParam = useCallback(
+    (key: string) => {
+      const p = new URLSearchParams(searchParams.toString());
+      p.delete(key);
+      const q = p.toString();
+      const base = pathname || "";
+      router.replace(q ? `${base}?${q}` : base);
+    },
+    [pathname, router, searchParams]
+  );
 
   useEffect(() => {
-    if (!id || !user || rolesLoading) {
-      if (!id || !rolesLoading) setLoading(false);
+    if (!id) {
+      setLoading(false);
+      setInitialData(null);
+      setLoadError(null);
       return;
     }
+    if (!user || rolesLoading) return;
+
     const load = async () => {
+      setLoading(true);
+      setLoadError(null);
       try {
         if (isEmployee) {
           const data = await getMyCandidate();
           const dataId = (data as any).id ?? (data as any)._id;
-          if (dataId === id) setInitialData(data);
-          else setInitialData(null);
+          if (dataId === id) {
+            setInitialData(data);
+          } else {
+            setInitialData(null);
+            setLoadError("not_found");
+          }
         } else {
           const data = await getCandidate(id);
           setInitialData(data);
         }
-      } catch {
+      } catch (err: unknown) {
         setInitialData(null);
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        setLoadError(status === 404 ? "not_found" : "network");
       } finally {
         setLoading(false);
       }
@@ -100,16 +103,16 @@ const EditEmployee = () => {
   useEffect(() => {
     if (!permissionsLoaded || searchParams.get("assignAgent") !== "1") return;
     if (isEmployee || !canAssignAgent) {
-      stripAssignAgentParam();
+      stripSearchParam("assignAgent");
     }
-  }, [permissionsLoaded, searchParams, isEmployee, canAssignAgent, stripAssignAgentParam]);
+  }, [permissionsLoaded, searchParams, isEmployee, canAssignAgent, stripSearchParam]);
 
   useEffect(() => {
     if (!permissionsLoaded || searchParams.get("assignCourse") !== "1") return;
     if (isEmployee || !canAssignCourse) {
-      stripAssignCourseParam();
+      stripSearchParam("assignCourse");
     }
-  }, [permissionsLoaded, searchParams, isEmployee, canAssignCourse, stripAssignCourseParam]);
+  }, [permissionsLoaded, searchParams, isEmployee, canAssignCourse, stripSearchParam]);
 
   const showAssignAgentModal =
     permissionsLoaded &&
@@ -138,59 +141,75 @@ const EditEmployee = () => {
     }
   }, [id, isEmployee]);
 
-  const handleCourseAssigned = useCallback(async () => {
+  const handleCourseAssigned = useCallback(() => {
     dispatchSopStripRefresh();
   }, []);
 
-  const currentAgent = initialData?.assignedAgent ?? null;
+  const editAlert = (title: string, description: string) => (
+    <EmployeeFormAlert title={title} description={description} returnUrl={listReturnUrl} />
+  );
+
+  const renderBody = () => {
+    if (loading) {
+      return <FormLoadingSpinner label="Loading employee profile" />;
+    }
+    if (!permissionsLoaded || rolesLoading) {
+      return <FormLoadingSpinner label="Checking permissions" />;
+    }
+    if (!canEditThisProfile) {
+      return editAlert(
+        "Access denied",
+        "You do not have permission to edit employees. Contact an administrator if you believe this is a mistake."
+      );
+    }
+    if (!id) {
+      return editAlert(
+        "No employee selected",
+        "Open an employee from the employees list to edit their profile."
+      );
+    }
+    if (loadError === "network") {
+      return editAlert(
+        "Could not load employee",
+        "We couldn't reach the server. Check your connection and try again from the employees list."
+      );
+    }
+    if (loadError === "not_found" || !initialData) {
+      return editAlert(
+        "Employee not found",
+        "This employee may have been removed or you may not have access to view them."
+      );
+    }
+    return (
+      <>
+        <LazyEmployeeForm
+          initialData={initialData}
+          relaxPersonalInfoValidation={!isEmployee}
+          selfServiceEdit={isEmployee}
+          employeesListReturnUrl={listReturnUrl}
+        />
+        {!isEmployee && id ? (
+          <div className="border-t border-defaultborder/40 px-4 py-5 sm:px-6">
+            <EmployeeAuditPanel entityId={id} />
+          </div>
+        ) : null}
+      </>
+    );
+  };
 
   return (
-    <Fragment>
-      <Seo title="Edit Employee" />
-      <div className="container-fluid max-w-[100vw] px-3 pt-4 pb-6 sm:px-4 sm:pt-6 md:pb-8">
-        <div className="grid grid-cols-12 gap-6">
-          <div className="xl:col-span-12 col-span-12">
-            <div className="box custom-box overflow-hidden">
-              <div className="box-body !p-0 product-checkout">
-                {loading ? (
-                  <div className="p-6 flex items-center justify-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
-                  </div>
-                ) : !permissionsLoaded || rolesLoading ? (
-                  <div className="p-6 flex items-center justify-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
-                  </div>
-                ) : !canEditThisProfile ? (
-                  <div className="p-6 text-center text-gray-500">
-                    You do not have permission to edit employees.
-                  </div>
-                ) : initialData ? (
-                  <>
-                    <EmployeeForm
-                      initialData={initialData}
-                      relaxPersonalInfoValidation={!isEmployee}
-                      selfServiceEdit={isEmployee}
-                      employeesListReturnUrl={employeesListReturnUrl}
-                    />
-                  </>
-                ) : (
-                  <div className="p-6 text-center text-gray-500">
-                    {id ? "Employee not found." : "No employee selected."}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+    <>
+      <EmployeeFormPageShell seoTitle="Edit Employee">
+        {renderBody()}
+      </EmployeeFormPageShell>
 
       {id && showAssignAgentModal ? (
         <AssignAgentSopModal
           open
           candidateId={id}
           candidateName={initialData?.fullName}
-          currentAgent={currentAgent}
-          onClose={stripAssignAgentParam}
+          currentAgent={initialData?.assignedAgent ?? null}
+          onClose={() => stripSearchParam("assignAgent")}
           onAssigned={handleAgentAssigned}
         />
       ) : null}
@@ -199,11 +218,11 @@ const EditEmployee = () => {
           open
           candidateId={id}
           candidateName={initialData?.fullName}
-          onClose={stripAssignCourseParam}
+          onClose={() => stripSearchParam("assignCourse")}
           onAssigned={handleCourseAssigned}
         />
       ) : null}
-    </Fragment>
+    </>
   );
 };
 

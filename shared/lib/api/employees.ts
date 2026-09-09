@@ -1,6 +1,7 @@
 "use client";
 
 import { apiClient, resolveDownloadUrlForBrowser } from "@/shared/lib/api/client";
+import { getOrFetchMatchingJobs, matchingJobsCacheKey } from "@/shared/lib/ats/matching-jobs-cache";
 
 export interface CandidateListItem {
   id?: string;
@@ -50,6 +51,7 @@ export interface CandidateListItem {
   /** Denormalized title from job-application / referral flow; used when aligning HRMS position to applied role. */
   referralJobTitle?: string | null;
   compensationType?: 'paid' | 'unpaid';
+  employmentType?: 'Full-time' | 'Part-time' | 'Contract' | 'Temporary' | 'Internship' | 'Freelance' | null;
   recruiterFeedback?: string | null;
   recruiterRating?: number | null;
   recruiterNotes?: RecruiterNote[];
@@ -115,6 +117,7 @@ export interface ListCandidatesParams {
   agentIds?: string;
   employmentStatus?: "current" | "resigned" | "all" | "";
   compensationType?: "paid" | "unpaid";
+  employmentType?: "Full-time" | "Part-time" | "Contract" | "Temporary" | "Internship" | "Freelance";
   page?: number;
   limit?: number;
   sortBy?: string;
@@ -170,9 +173,35 @@ export interface MatchingJobsResponse {
   totalJobsScored: number;
 }
 
-export async function getMyMatchingJobs(params?: { limit?: number; minScore?: number }): Promise<MatchingJobsResponse> {
-  const { data } = await apiClient.get<MatchingJobsResponse>("/employees/me/matching-jobs", { params });
-  return data;
+export async function getMyMatchingJobs(
+  params?: { limit?: number; minScore?: number },
+  opts?: { bypassCache?: boolean }
+): Promise<MatchingJobsResponse> {
+  const key = matchingJobsCacheKey("me", "self", params);
+  return getOrFetchMatchingJobs(
+    key,
+    async () => {
+      const { data } = await apiClient.get<MatchingJobsResponse>("/employees/me/matching-jobs", { params });
+      return data;
+    },
+    { bypass: opts?.bypassCache }
+  );
+}
+
+export async function getCandidateMatchingJobs(
+  candidateId: string,
+  params?: { limit?: number; minScore?: number },
+  opts?: { bypassCache?: boolean }
+): Promise<MatchingJobsResponse> {
+  const key = matchingJobsCacheKey("candidate", candidateId, params);
+  return getOrFetchMatchingJobs(
+    key,
+    async () => {
+      const { data } = await apiClient.get<MatchingJobsResponse>(`/employees/${candidateId}/matching-jobs`, { params });
+      return data;
+    },
+    { bypass: opts?.bypassCache }
+  );
 }
 
 /**

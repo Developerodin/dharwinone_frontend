@@ -760,28 +760,29 @@ export default function SettingsAttendanceHolidaysPage() {
                   </p>
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-defaulttextcolor">
-                    Start Date <span className="text-danger">*</span>
-                  </label>
-                  <input
-                    type="date"
+                  <YmdFilterDateInput
+                    label="Start Date *"
+                    inputId="holiday-form-start-date"
+                    portalId="holiday-form-datepicker-start"
+                    popperClassName="!z-[10150]"
                     value={formData.date}
-                    onChange={(e) => setFormData((p) => ({ ...p, date: e.target.value }))}
-                    className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-4 py-2.5 text-sm text-defaulttextcolor focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-                    required
+                    maxDate={formData.endDate || undefined}
+                    labelClassName="mb-1.5 block text-sm font-semibold text-defaulttextcolor"
+                    inputClassName="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-4 py-2.5 text-sm text-defaulttextcolor focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    onCommit={(ymd) => setFormData((p) => ({ ...p, date: ymd }))}
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-defaulttextcolor">
-                    End Date{" "}
-                    <span className="text-defaulttextcolor/60 font-normal">(optional, for multi-day)</span>
-                  </label>
-                  <input
-                    type="date"
+                  <YmdFilterDateInput
+                    label="End Date (optional, for multi-day)"
+                    inputId="holiday-form-end-date"
+                    portalId="holiday-form-datepicker-end"
+                    popperClassName="!z-[10150]"
                     value={formData.endDate}
-                    onChange={(e) => setFormData((p) => ({ ...p, endDate: e.target.value }))}
-                    min={formData.date || undefined}
-                    className="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-4 py-2.5 text-sm text-defaulttextcolor focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    minDate={formData.date || undefined}
+                    labelClassName="mb-1.5 block text-sm font-semibold text-defaulttextcolor"
+                    inputClassName="w-full rounded-xl border border-defaultborder/80 bg-white dark:bg-white/5 px-4 py-2.5 text-sm text-defaulttextcolor focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    onCommit={(ymd) => setFormData((p) => ({ ...p, endDate: ymd }))}
                   />
                   <p className="mt-1.5 text-xs text-defaulttextcolor/60">
                     Leave empty for single-day. Set for multi-day holidays.

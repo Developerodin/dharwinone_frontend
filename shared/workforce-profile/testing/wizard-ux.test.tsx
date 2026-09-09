@@ -59,6 +59,7 @@ function makeCtx(over: Partial<WizardContextValue> = {}): WizardContextValue {
     issuesBySection: {},
     submitAttempted: false,
     validationOverlay: { status: "idle", title: "" },
+    dismissValidationOverlay: vi.fn(),
     submit: vi.fn(),
     goNext: vi.fn(),
     ...over,
@@ -146,6 +147,7 @@ describe("WorkforceWizardShell", () => {
   });
 
   it("shows validation failures in a centered overlay instead of the top banner", () => {
+    const dismissValidationOverlay = vi.fn();
     render(
       wrap(
         makeCtx({
@@ -155,6 +157,7 @@ describe("WorkforceWizardShell", () => {
             description:
               "Social link 1: URL must be a Instagram link (e.g. instagram.com/you)",
           },
+          dismissValidationOverlay,
         }),
         <WorkforceWizardShell stepRender={{ "personal-info": <p>step body</p> }} />,
       ),
@@ -167,6 +170,8 @@ describe("WorkforceWizardShell", () => {
       screen.getByText(/URL must be a Instagram link/i),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /dismiss error/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /dismiss validation message/i }));
+    expect(dismissValidationOverlay).toHaveBeenCalled();
   });
 
   it("renders no alert when the save succeeded", () => {
