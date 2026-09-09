@@ -30,6 +30,7 @@ import { buildForwardQuote, buildReplyQuote, cleanHtmlForSend } from "./_utils/c
 import { parseQuickRecipients } from "./_utils/quickRecipients";
 import { buildPrintDocument } from "./_utils/printEmail";
 import { resolveBulkTargets } from "./_utils/bulkSelection";
+import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
 
@@ -240,6 +241,13 @@ const Mailapp = () => {
   const agentSignatureRef = useRef<{ html: string; enabled: boolean } | null>(null);
   const [showComposeTemplatesMenu, setShowComposeTemplatesMenu] = useState(false);
   const composeTemplatesMenuRef = useRef<HTMLDivElement | null>(null);
+  /** The portalled list itself, so outside-click and the focus lock can see it. */
+  const composeTemplatesListRef = useRef<HTMLDivElement | null>(null);
+  const composeTemplatesBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [templatesMenuPosition, setTemplatesMenuPosition] = useState<{
+    bottom: number;
+    left: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!agentSignature) {
@@ -277,14 +285,33 @@ const Mailapp = () => {
 
   useEffect(() => {
     if (!showComposeTemplatesMenu) return;
+    const close = () => {
+      setShowComposeTemplatesMenu(false);
+      setTemplatesMenuPosition(null);
+    };
     const onDown = (e: MouseEvent) => {
-      const el = composeTemplatesMenuRef.current;
-      if (el && !el.contains(e.target as Node)) {
-        setShowComposeTemplatesMenu(false);
+      const target = e.target as Node;
+      // The list is portalled out of the trigger's subtree, so it has to be
+      // checked separately or clicking a template would dismiss the menu.
+      if (composeTemplatesMenuRef.current?.contains(target)) return;
+      if (composeTemplatesListRef.current?.contains(target)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+        composeTemplatesBtnRef.current?.focus();
       }
     };
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    // Capture phase so Escape closes this menu before the compose window's own
+    // Escape handler sees it and tries to close the whole draft.
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
   }, [showComposeTemplatesMenu]);
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
@@ -1340,6 +1367,42 @@ const Mailapp = () => {
     ]
   );
 
+  /**
+   * Snapshot of the compose fields as opened, so "has the user actually written
+   * anything" can be answered. A reply or forward starts with the quoted original
+   * already in the body, so a plain "is the body non-empty" check would prompt
+   * about unsaved work the moment the window opened.
+   */
+  const composeOpenedWithRef = useRef({ html: "", subject: "", to: "", cc: "", bcc: "" });
+
+  useEffect(() => {
+    if (!showComposeModal) return;
+    // Captures the fields as of the render that opened the window - openCompose
+    // batches its setters, so they have all landed by here. Intentionally keyed
+    // on the open flag alone: listing the fields would re-snapshot on every
+    // keystroke and nothing would ever look dirty.
+    composeOpenedWithRef.current = {
+      html: composeHtml,
+      subject: composeSubject,
+      to: composeTo,
+      cc: composeCc,
+      bcc: composeBcc,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showComposeModal]);
+
+  const isComposeDirty = useCallback(() => {
+    const start = composeOpenedWithRef.current;
+    return (
+      composeHtml !== start.html ||
+      composeSubject !== start.subject ||
+      composeTo !== start.to ||
+      composeCc !== start.cc ||
+      composeBcc !== start.bcc ||
+      composeAttachments.length > 0
+    );
+  }, [composeHtml, composeSubject, composeTo, composeCc, composeBcc, composeAttachments]);
+
   const closeCompose = useCallback(() => {
     setShowComposeModal(false);
     composeMessageRef.current = null;
@@ -1354,6 +1417,37 @@ const Mailapp = () => {
     setComposeAttachmentError(null);
     setAttachmentsBusy(false);
   }, []);
+
+  /**
+   * Every dismissal route goes through here: the X, Discard, the backdrop and
+   * Escape. Closing used to throw away the body, the subject, any AI draft and
+   * every base64-encoded attachment without a word, and a stray backdrop click
+   * was enough to do it.
+   */
+  const requestCloseCompose = useCallback(() => {
+    if (isComposeDirty() && !window.confirm("Discard this message? Your draft will be lost.")) {
+      return;
+    }
+    closeCompose();
+  }, [isComposeDirty, closeCompose]);
+
+  // Escape closes the topmost surface: the quick-add sheet if it is up, otherwise
+  // the compose window (which asks first if there is anything to lose).
+  useEffect(() => {
+    if (!showComposeModal && !showQuickAddModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (showQuickAddModal) {
+        setShowQuickAddModal(false);
+        setQuickAddEmail("");
+        setQuickAddError(null);
+        return;
+      }
+      requestCloseCompose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showComposeModal, showQuickAddModal, requestCloseCompose]);
 
   const handleAddAttachment = useCallback(() => {
     fileInputRef.current?.click();
@@ -3629,14 +3723,22 @@ const Mailapp = () => {
           <div
             className={`fixed inset-0 z-[9999] flex items-center justify-center overflow-auto p-4 ${mailStyles.modalBackdrop}`}
             onClick={(e) => e.target === e.currentTarget && closeQuickAddModal()}
+            role="presentation"
           >
+            <FocusLock returnFocus>
             <div
               className={`ti-modal-box bg-white dark:bg-stone-950 w-full max-w-sm overflow-hidden flex flex-col ${mailStyles.modalPanel}`}
               onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal
+              aria-labelledby="quick-add-modal-title"
             >
               <form onSubmit={handleQuickAddSubmit} className="ti-modal-content flex flex-col">
                 <div className="ti-modal-header flex-shrink-0 !p-5 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between bg-gradient-to-r from-stone-50 to-white dark:from-stone-900 dark:to-stone-950">
-                  <h6 className={`modal-title text-base font-semibold text-stone-900 dark:text-stone-100 ${mailDisplay.className}`}>
+                  <h6
+                    id="quick-add-modal-title"
+                    className={`modal-title text-base font-semibold text-stone-900 dark:text-stone-100 ${mailDisplay.className}`}
+                  >
                     Add quick contact
                   </h6>
                   <button
@@ -3691,21 +3793,33 @@ const Mailapp = () => {
                 </div>
               </form>
             </div>
+            </FocusLock>
           </div>
         )}
 
         {showComposeModal && (
           <div
             className={`fixed inset-0 z-[9999] flex items-center justify-center overflow-auto p-4 ${mailStyles.modalBackdrop}`}
-            onClick={(e) => e.target === e.currentTarget && closeCompose()}
+            onClick={(e) => e.target === e.currentTarget && requestCloseCompose()}
+            role="presentation"
           >
+            {/* Focus stays inside while this is open and returns to whatever
+                opened it on close. Before, Tab walked straight out into the mail
+                list behind the overlay. The templates list is portalled to body,
+                so it is declared as a shard or the lock would bounce focus away
+                from it. */}
+            <FocusLock returnFocus shards={[composeTemplatesListRef]}>
             <div
               className={`ti-modal-box bg-white dark:bg-stone-950 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col ${mailStyles.modalPanel}`}
               onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal
+              aria-labelledby="compose-modal-title"
             >
               <div className="ti-modal-content flex flex-col flex-1 min-h-0">
                 <div className="ti-modal-header flex-shrink-0 !p-5 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between bg-gradient-to-r from-stone-50 to-white dark:from-stone-900 dark:to-stone-950">
                   <h6
+                    id="compose-modal-title"
                     className={`modal-title text-xl font-semibold text-stone-900 dark:text-stone-100 ${mailDisplay.className}`}
                   >
                     {composeMode === "new"
@@ -3718,9 +3832,9 @@ const Mailapp = () => {
                   </h6>
                   <button
                     type="button"
-                    onClick={closeCompose}
+                    onClick={requestCloseCompose}
                     className="ti-btn ti-btn-icon ti-btn-ghost hover:bg-black/5 dark:hover:bg-white/5"
-                    aria-label="Close"
+                    aria-label="Close compose window"
                   >
                     <i className="ri-close-line text-lg"></i>
                   </button>
@@ -3848,15 +3962,41 @@ const Mailapp = () => {
                           <div className="relative" ref={composeTemplatesMenuRef}>
                             <button
                               type="button"
-                              onClick={() => setShowComposeTemplatesMenu((v) => !v)}
+                              ref={composeTemplatesBtnRef}
+                              aria-haspopup="true"
+                              aria-expanded={showComposeTemplatesMenu}
+                              onClick={() => {
+                                const next = !showComposeTemplatesMenu;
+                                const rect = composeTemplatesBtnRef.current?.getBoundingClientRect();
+                                setTemplatesMenuPosition(
+                                  next && rect
+                                    ? { bottom: window.innerHeight - rect.top + 4, left: rect.left }
+                                    : null
+                                );
+                                setShowComposeTemplatesMenu(next);
+                              }}
                               className={`ti-btn ti-btn-light !mb-0 text-[0.8125rem] ${mailStyles.composeUtilityBtn}`}
                               title="Insert a saved template"
                             >
-                              <i className="ri-layout-line me-1" />
+                              <i className="ri-layout-line me-1" aria-hidden />
                               Templates
                             </button>
-                            {showComposeTemplatesMenu ? (
-                              <div className="absolute left-0 bottom-full mb-1 z-[200] min-w-[240px] max-w-[min(100vw-2rem,360px)] max-h-72 overflow-y-auto rounded-md border border-defaultborder bg-bodybg shadow-lg py-1">
+                            {/* Portalled and fixed, like the other two menus on this
+                                page. As a plain absolutely-positioned child it was
+                                clipped by the modal body's own scroll container, so
+                                on a short window the template list was cut off or
+                                entirely invisible. */}
+                            {showComposeTemplatesMenu && templatesMenuPosition && typeof document !== "undefined" ? (
+                              createPortal(
+                              <div
+                                ref={composeTemplatesListRef}
+                                role="menu"
+                                aria-label="Insert a saved template"
+                                style={{
+                                  bottom: templatesMenuPosition.bottom,
+                                  left: templatesMenuPosition.left,
+                                }}
+                                className="fixed z-[10001] min-w-[240px] max-w-[min(100vw-2rem,360px)] max-h-72 overflow-y-auto rounded-md border border-defaultborder bg-bodybg shadow-lg py-1">
                                 {agentTemplatesOwn.length === 0 && agentTemplatesShared.length === 0 ? (
                                   <div className="px-3 py-2 text-[0.8125rem] text-[#8c9097]">
                                     No templates yet. Add them under{" "}
@@ -3905,7 +4045,9 @@ const Mailapp = () => {
                                     ))}
                                   </>
                                 ) : null}
-                              </div>
+                              </div>,
+                              document.body
+                              )
                             ) : null}
                           </div>
                         ) : null}
@@ -4072,7 +4214,7 @@ const Mailapp = () => {
                 <div className="ti-modal-footer flex-shrink-0 !p-5 border-t border-stone-200 dark:border-stone-800 flex justify-end gap-3 bg-stone-50/80 dark:bg-stone-900/80">
                   <button
                     type="button"
-                    onClick={closeCompose}
+                    onClick={requestCloseCompose}
                     className="ti-btn px-5 py-2.5 rounded-xl border border-stone-300 dark:border-stone-600 text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800"
                   >
                     Discard
@@ -4088,6 +4230,7 @@ const Mailapp = () => {
                 </div>
               </div>
             </div>
+            </FocusLock>
           </div>
         )}
       </div>
