@@ -445,14 +445,7 @@ const Mailapp = () => {
     }
   }, []);
 
-  const Toggle2 = useCallback(() => {
-    if (typeof window !== "undefined" && window.innerWidth <= 992) {
-      setTotalMailsVisible(true);
-      setMailNavigationVisible(false);
-      setTotalMailsHidden(false);
-    }
-  }, []);
-
+  /** Opening a thread on a narrow screen: hand the width to the reading pane. */
   const Medium = useCallback(() => {
     if (typeof window !== "undefined" && window.innerWidth <= 1399) {
       setMailsInformationVisible(true);
@@ -461,6 +454,7 @@ const Mailapp = () => {
     }
   }, []);
 
+  /** The exact inverse of Medium(): give the width back to the thread list. */
   const restoreMobileListLayout = useCallback(() => {
     if (typeof window !== "undefined" && window.innerWidth <= 1399) {
       setMailsInformationVisible(false);
@@ -468,6 +462,20 @@ const Mailapp = () => {
       setTotalMailsHidden(false);
     }
   }, []);
+
+  /**
+   * Chose a folder: show its thread list.
+   *
+   * This used to act only at 992px and under, while Medium() hides the list all
+   * the way up to 1399px. Between those two widths - every tablet - opening a
+   * thread hid the list and nothing brought it back, so picking another folder
+   * left the reading pane on screen showing the previous thread.
+   */
+  const Toggle2 = useCallback(() => {
+    if (typeof window === "undefined") return;
+    restoreMobileListLayout();
+    if (window.innerWidth <= 992) setMailNavigationVisible(false);
+  }, [restoreMobileListLayout]);
 
   /**
    * Single entry point for choosing a folder.
@@ -2273,7 +2281,9 @@ const Mailapp = () => {
         ) : (
           <div className={`main-mail-container !p-2 gap-x-2 flex min-h-0 ${mailStyles.shell} ${mailStyles.fadeIn}`}>
             <div
-              className={`mail-navigation ${isMailNavigationVisible ? "!block" : ""} border dark:border-defaultborder/10`}
+              // !flex, not !block: the SCSS lays this column out with flex, and
+              // display:block !important silently disabled that.
+              className={`mail-navigation ${isMailNavigationVisible ? "!flex" : ""} border dark:border-defaultborder/10`}
             >
               <div className="!p-4 border-b border-stone-200/80 dark:border-white/10">
                 <button
@@ -2313,9 +2323,17 @@ const Mailapp = () => {
                       )}
                     </div>
                   </div>
-                  <div>
+                  {/* Fills whatever height is left instead of relying on the list's
+                      own calc(100vh - 19rem), which clamps to zero on a short
+                      window or at high browser zoom and made the folders
+                      unreachable. */}
+                  <div className="flex-1 min-h-0">
                     <PerfectScrollbar>
-                      <ul className="list-none mail-main-nav !text-[0.813rem]">
+                      {/* !max-h-none overrides the stylesheet's
+                          max-height: calc(100vh - 19rem) on this list, which clamps
+                          to zero on a short window or at high browser zoom and hid
+                          every folder. Height now comes from the flex parent above. */}
+                      <ul className="list-none mail-main-nav !max-h-none !text-[0.813rem]">
                         {navMailboxAccounts.length > 1 && (
                           <>
                             <li className="!px-4 !pt-3 !pb-1">
@@ -2680,13 +2698,16 @@ const Mailapp = () => {
                       document.body
                     )}
                 </div>
+                {/* Closes the list and reveals the folder nav behind it. Labelled
+                    just "Close" before, which said nothing about where it lands. */}
                 <button
                   onClick={Toggle1}
-                  aria-label="Close"
+                  aria-label="Close the list and show folders"
+                  title="Show folders"
                   type="button"
                   className="ti-btn ti-btn-icon ti-btn-light lg:hidden total-mails-close !mb-0"
                 >
-                  <i className="ri-close-line"></i>
+                  <i className="ri-close-line" aria-hidden></i>
                 </button>
               </div>
               <div className="px-4 pb-3 pt-1">
@@ -2834,7 +2855,12 @@ const Mailapp = () => {
             </div>
 
             <div
-              className={`mails-information ${isMailsInformationVisible ? "!block" : ""} border dark:border-defaultborder/10 text-defaulttextcolor text-defaultsize ${mailStyles.readingPane}`}
+              // !flex, not !block. This pane is a flex column with a fixed height
+              // and overflow:hidden; its body scrolls via flex:1 + min-height:0.
+              // display:block !important made those inert, so on every screen
+              // under 1400px the message body was clipped with no scrollbar and
+              // the reply composer and footer actions could not be reached.
+              className={`mails-information ${isMailsInformationVisible ? "!flex" : ""} border dark:border-defaultborder/10 text-defaulttextcolor text-defaultsize ${mailStyles.readingPane}`}
             >
               {!selectedThreadId ? (
                 <div
