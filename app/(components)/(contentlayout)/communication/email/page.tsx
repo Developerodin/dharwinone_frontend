@@ -29,10 +29,22 @@ import { escapeHtmlForTextNode, sanitizeRichHtml } from "@/shared/lib/sanitize-h
 import { buildForwardQuote, buildReplyQuote, cleanHtmlForSend } from "./_utils/composeHtml";
 import { parseQuickRecipients } from "./_utils/quickRecipients";
 import { buildPrintDocument } from "./_utils/printEmail";
+import { resolveBulkTargets } from "./_utils/bulkSelection";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward";
+
+/**
+ * Feedback for an action the user just took. Replaces alert(), which stole focus,
+ * was announced as a system dialog rather than as page content, and left the user
+ * with no way to retry the thing that failed.
+ */
+type MailNotice = {
+  tone: "error" | "success";
+  message: string;
+  action?: { label: string; onClick: () => void };
+};
 type ComposeAttachment = {
   id: string;
   filename: string;
@@ -289,6 +301,13 @@ const Mailapp = () => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<MailNotice | null>(null);
+  /**
+   * Set when the thread list could not be loaded. Without it a failed fetch and a
+   * genuinely empty folder both rendered "Nothing here yet", so an outage or an
+   * expired mailbox looked exactly like an empty inbox.
+   */
+  const [listError, setListError] = useState<string | null>(null);
   const [oauthSuccess, setOauthSuccess] = useState(false);
   const [mailboxPolicy, setMailboxPolicy] = useState<EmailConnectionPolicy | null>(null);
   const [policyTick, setPolicyTick] = useState(0);
@@ -390,6 +409,21 @@ const Mailapp = () => {
       return [];
     }
   });
+
+  const showError = useCallback((message: string, action?: MailNotice["action"]) => {
+    setNotice({ tone: "error", message, action });
+  }, []);
+  const showSuccess = useCallback((message: string) => {
+    setNotice({ tone: "success", message });
+  }, []);
+
+  // Success is transient; an error stays until the user dismisses it or acts on
+  // it, so a failed send is never scrolled past unnoticed.
+  useEffect(() => {
+    if (notice?.tone !== "success") return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const Toggle1 = useCallback(() => {
     if (typeof window !== "undefined" && window.innerWidth <= 992) {
@@ -667,6 +701,7 @@ const Mailapp = () => {
     setLoadingMessages(true);
     setThreads([]);
     setNextPageToken(null);
+    setListError(null);
     async function load() {
       try {
         const p =
@@ -686,7 +721,11 @@ const Mailapp = () => {
           setResultSizeEstimate(res.resultSizeEstimate ?? 0);
         }
       } catch {
-        if (!cancelled) setThreads([]);
+        if (!cancelled) {
+          setThreads([]);
+          // Distinguish "this folder is empty" from "we could not read it".
+          setListError("We couldn't load this folder.");
+        }
       } finally {
         if (!cancelled) setLoadingMessages(false);
       }
@@ -1193,17 +1232,55 @@ const Mailapp = () => {
     setInlineReplyAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
+  // Declared above the send handler so it can be a dependency of it; a const
+  // referenced in a deps array must already be initialised at render time.
+  const refetchMessages = useCallback(async () => {
+    if (!selectedAccountId) return;
+    setLoadingMessages(true);
+    setThreads([]);
+    setNextPageToken(null);
+    setListError(null);
+    try {
+      const res = await emailApi.getThreads(
+        {
+          accountId: selectedAccountId,
+          labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
+          pageSize: 20,
+          q: searchQuery || undefined,
+        },
+        mailProvider
+      );
+      setThreads(res.threads);
+      setNextPageToken(res.nextPageToken);
+      setResultSizeEstimate(res.resultSizeEstimate ?? 0);
+    } catch {
+      setThreads([]);
+      setListError("We couldn't load this folder.");
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
+
   const handleSendCompose = useCallback(async () => {
     if (!selectedAccountId) return;
+
+    // Validate before entering the sending state, so a missing recipient never
+    // looks like a failed send.
+    const explicitTo = composeTo.split(/[,;]/).map((e) => e.trim()).filter(Boolean);
+    if ((composeMode === "new" || composeMode === "forward") && explicitTo.length === 0) {
+      showError("Enter at least one recipient before sending.");
+      return;
+    }
+    if (composeMode !== "new" && composeMode !== "forward" && !composeMessageRef.current) {
+      showError("The message being replied to is no longer loaded. Close and reopen the thread.");
+      return;
+    }
+
     setSending(true);
+    let sent = false;
     try {
       if (composeMode === "new" || composeMode === "forward") {
-        const to = composeTo.split(/[,;]/).map((e) => e.trim()).filter(Boolean);
-        if (!to.length) {
-          alert("Please enter at least one recipient.");
-          setSending(false);
-          return;
-        }
+        const to = explicitTo;
         await emailApi.sendMessage(
           {
             accountId: selectedAccountId,
@@ -1262,26 +1339,23 @@ const Mailapp = () => {
           mailProvider
         );
       }
-      closeCompose();
-      setThreads([]);
-      if (selectedAccountId) {
-        const res = await emailApi.getThreads(
-          {
-            accountId: selectedAccountId,
-            labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
-            pageSize: 20,
-            q: searchQuery || undefined,
-          },
-          mailProvider
-        );
-        setThreads(res.threads);
-        setNextPageToken(res.nextPageToken);
-      }
-    } catch (err) {
-      alert("Failed to send message. Please try again.");
+      sent = true;
+    } catch {
+      showError("Could not send the message. Your draft is still open - try again.");
     } finally {
       setSending(false);
     }
+
+    if (!sent) return;
+
+    // The message is gone the moment the send resolves. Refreshing the list is a
+    // separate, failable step: it used to sit inside the same try, so a hiccup on
+    // the refresh reported "Failed to send" for a message that had already been
+    // delivered - and users resent it. It also cleared the list first, so that
+    // failure left the inbox looking empty as well.
+    closeCompose();
+    showSuccess("Message sent.");
+    await refetchMessages();
   }, [
     selectedAccountId,
     composeTo,
@@ -1291,10 +1365,11 @@ const Mailapp = () => {
     composeHtml,
     composeAttachments,
     composeMode,
-    selectedLabelId,
-    searchQuery,
     closeCompose,
     mailProvider,
+    refetchMessages,
+    showError,
+    showSuccess,
   ]);
 
   const handleTrash = useCallback(async () => {
@@ -1315,31 +1390,6 @@ const Mailapp = () => {
       alert("Could not delete this thread. Check your connection and try again.");
     }
   }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider]);
-
-  const refetchMessages = useCallback(async () => {
-    if (!selectedAccountId) return;
-    setLoadingMessages(true);
-    setThreads([]);
-    setNextPageToken(null);
-    try {
-      const res = await emailApi.getThreads(
-        {
-          accountId: selectedAccountId,
-          labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
-          pageSize: 20,
-          q: searchQuery || undefined,
-        },
-        mailProvider
-      );
-      setThreads(res.threads);
-      setNextPageToken(res.nextPageToken);
-      setResultSizeEstimate(res.resultSizeEstimate ?? 0);
-    } catch {
-      setThreads([]);
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
 
   const handleToggleStar = useCallback(
     async (thread: EmailThreadListItem, e?: React.MouseEvent) => {
@@ -1534,71 +1584,108 @@ const Mailapp = () => {
     [selectedAccountId, selectedLabelId, mailProvider]
   );
 
-  const idsToUse = selectedThreadIds.size > 0 ? Array.from(selectedThreadIds) : threads.map((t) => t.id);
+  const visibleThreadIds = useMemo(() => threads.map((t) => t.id), [threads]);
+  /**
+   * Which threads a bulk action hits. Ticked rows win; with none ticked it falls
+   * back to everything currently loaded. Ticks left over from another folder are
+   * discarded rather than silently targeted - see resolveBulkTargets.
+   */
+  const bulkTargets = useMemo(
+    () => resolveBulkTargets(selectedThreadIds, visibleThreadIds),
+    [selectedThreadIds, visibleThreadIds]
+  );
+  /** Ticks that still refer to a visible row, for the header checkbox and labels. */
+  const liveSelectedCount = bulkTargets.scope === "selected" ? bulkTargets.ids.length : 0;
+
+  /**
+   * "Delete all 43 conversations" and "delete the 2 you ticked" are very
+   * different acts, and the menu used to word both as "Delete All". Say which one
+   * is about to happen, and how many, before doing it.
+   */
+  const confirmBulk = useCallback(
+    (verb: string) => {
+      const n = bulkTargets.ids.length;
+      const noun = n === 1 ? "conversation" : "conversations";
+      const what =
+        bulkTargets.scope === "selected"
+          ? `${verb} ${n} selected ${noun}?`
+          : `${verb} all ${n} ${noun} loaded in this view?`;
+      return window.confirm(what);
+    },
+    [bulkTargets]
+  );
 
   const handleMarkAllRead = useCallback(async () => {
-    if (!selectedAccountId || threads.length === 0) return;
+    const ids = bulkTargets.ids;
+    if (!selectedAccountId || ids.length === 0) return;
     setShowMailMenu(false);
-    const unreadCount = idsToUse.filter((id) => threads.find((t) => t.id === id)?.isUnread).length;
+    const target = new Set(ids);
+    const unreadCount = threads.filter((t) => target.has(t.id) && t.isUnread).length;
     try {
       await emailApi.batchModifyThreads(
-        {
-          accountId: selectedAccountId,
-          threadIds: idsToUse,
-          addLabelIds: [],
-          removeLabelIds: ["UNREAD"],
-        },
+        { accountId: selectedAccountId, threadIds: ids, addLabelIds: [], removeLabelIds: ["UNREAD"] },
         mailProvider
       );
-      setThreads((prev) => prev.map((t) => ({ ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") })));
+      // Only the rows we actually asked the server to change. This used to mark
+      // every loaded row read locally even when the call targeted two of them.
+      setThreads((prev) =>
+        prev.map((t) =>
+          target.has(t.id)
+            ? { ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") }
+            : t
+        )
+      );
       setSelectedThreadIds(new Set());
       if (unreadCount > 0 && selectedLabelId === "INBOX") {
         setResultSizeEstimate((prev) => Math.max(0, prev - unreadCount));
       }
     } catch {
-      // ignore
+      showError("Could not mark those conversations as read. Check your connection and try again.");
     }
-  }, [selectedAccountId, threads, idsToUse, selectedLabelId, mailProvider]);
+  }, [selectedAccountId, threads, bulkTargets, selectedLabelId, mailProvider, showError]);
 
   const handleMoveToSpam = useCallback(async () => {
-    if (!selectedAccountId || idsToUse.length === 0) return;
+    const ids = bulkTargets.ids;
+    if (!selectedAccountId || ids.length === 0) return;
     setShowMailMenu(false);
+    if (!confirmBulk("Report as spam and move")) return;
+    const target = new Set(ids);
     try {
       await emailApi.batchModifyThreads(
-        {
-          accountId: selectedAccountId,
-          threadIds: idsToUse,
-          addLabelIds: ["SPAM"],
-          removeLabelIds: ["INBOX"],
-        },
+        { accountId: selectedAccountId, threadIds: ids, addLabelIds: ["SPAM"], removeLabelIds: ["INBOX"] },
         mailProvider
       );
-      setThreads((prev) => prev.filter((t) => !idsToUse.includes(t.id)));
-      if (selectedThreadId && idsToUse.includes(selectedThreadId)) {
+      setThreads((prev) => prev.filter((t) => !target.has(t.id)));
+      if (selectedThreadId && target.has(selectedThreadId)) {
         setSelectedThreadId(null);
         setThreadMessages([]);
       }
       setSelectedThreadIds(new Set());
+      showSuccess(`Moved ${ids.length} to spam.`);
     } catch {
-      // ignore
+      showError("Could not move those conversations to spam. Nothing was changed.");
     }
-  }, [selectedAccountId, idsToUse, selectedThreadId, mailProvider]);
+  }, [selectedAccountId, bulkTargets, selectedThreadId, mailProvider, confirmBulk, showError, showSuccess]);
 
   const handleDeleteAll = useCallback(async () => {
-    if (!selectedAccountId || idsToUse.length === 0) return;
+    const ids = bulkTargets.ids;
+    if (!selectedAccountId || ids.length === 0) return;
     setShowMailMenu(false);
+    if (!confirmBulk("Move to trash")) return;
+    const target = new Set(ids);
     try {
-      await emailApi.trashThreads(selectedAccountId, idsToUse, mailProvider);
-      setThreads((prev) => prev.filter((t) => !idsToUse.includes(t.id)));
-      if (selectedThreadId && idsToUse.includes(selectedThreadId)) {
+      await emailApi.trashThreads(selectedAccountId, ids, mailProvider);
+      setThreads((prev) => prev.filter((t) => !target.has(t.id)));
+      if (selectedThreadId && target.has(selectedThreadId)) {
         setSelectedThreadId(null);
         setThreadMessages([]);
       }
       setSelectedThreadIds(new Set());
+      showSuccess(`Moved ${ids.length} to trash. Recover them from the Trash folder.`);
     } catch {
-      // ignore
+      showError("Could not move those conversations to trash. Nothing was deleted.");
     }
-  }, [selectedAccountId, idsToUse, selectedThreadId, mailProvider]);
+  }, [selectedAccountId, bulkTargets, selectedThreadId, mailProvider, confirmBulk, showError, showSuccess]);
 
   const handleMailMenuRecent = useCallback(() => {
     setShowMailMenu(false);
@@ -2216,8 +2303,17 @@ const Mailapp = () => {
                   type="checkbox"
                   className="form-check-input"
                   id="checkAllMails"
-                  aria-label="Select all"
-                  checked={threads.length > 0 && selectedThreadIds.size === threads.length}
+                  aria-label={
+                    liveSelectedCount > 0
+                      ? `${liveSelectedCount} of ${threads.length} selected. Clear selection`
+                      : "Select all conversations in this view"
+                  }
+                  // Counts only ticks that still match a visible row, so leftovers
+                  // from a previous folder cannot leave this stuck on "all selected".
+                  checked={threads.length > 0 && liveSelectedCount === threads.length}
+                  ref={(el) => {
+                    if (el) el.indeterminate = liveSelectedCount > 0 && liveSelectedCount < threads.length;
+                  }}
                   onChange={(e) => handleSelectAll(e.target.checked)}
                 />
                 <div className="flex-grow min-w-0">
@@ -2300,10 +2396,14 @@ const Mailapp = () => {
                               }}
                               className="ti-dropdown-item !py-2 !px-4 w-full text-left"
                             >
-                              Mark All Read
+                              {liveSelectedCount > 0
+                                ? `Mark ${liveSelectedCount} read`
+                                : "Mark all read"}
                             </button>
                           </li>
-                          <li>
+                          {/* Destructive pair, separated and coloured so they are not
+                              one careless click away from "Mark all read". */}
+                          <li className="border-t dark:border-defaultborder/10 mt-1 pt-1">
                             <button
                               type="button"
                               onClick={() => {
@@ -2311,9 +2411,11 @@ const Mailapp = () => {
                                 setShowMailMenu(false);
                                 setMailMenuPosition(null);
                               }}
-                              className="ti-dropdown-item !py-2 !px-4 w-full text-left"
+                              className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
                             >
-                              Spam
+                              {liveSelectedCount > 0
+                                ? `Report ${liveSelectedCount} as spam`
+                                : "Report all as spam"}
                             </button>
                           </li>
                           <li>
@@ -2324,9 +2426,11 @@ const Mailapp = () => {
                                 setShowMailMenu(false);
                                 setMailMenuPosition(null);
                               }}
-                              className="ti-dropdown-item !py-2 !px-4 w-full text-left"
+                              className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
                             >
-                              Delete All
+                              {liveSelectedCount > 0
+                                ? `Move ${liveSelectedCount} to trash`
+                                : "Move all to trash"}
                             </button>
                           </li>
                         </ul>
@@ -2372,6 +2476,22 @@ const Mailapp = () => {
                         {[1, 2, 3, 4].map((i) => (
                           <div key={i} className={`h-16 ${mailStyles.skeleton}`} />
                         ))}
+                      </li>
+                    ) : listError ? (
+                      <li className="!p-10 text-center text-sm" role="alert">
+                        <i className="ri-wifi-off-line text-3xl mb-2 block text-danger/60" aria-hidden></i>
+                        <p className="text-stone-700 dark:text-stone-200 mb-1">{listError}</p>
+                        <p className="text-stone-500 dark:text-stone-400 text-[0.75rem] mb-3">
+                          This is a loading problem, not an empty folder.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={refetchMessages}
+                          className="ti-btn ti-btn-sm ti-btn-light !mb-0"
+                        >
+                          <i className="ri-refresh-line me-1 align-middle" aria-hidden></i>
+                          Try again
+                        </button>
                       </li>
                     ) : threads.length === 0 ? (
                       <li className="!p-10 text-center text-stone-500 dark:text-stone-400 text-sm">
@@ -3079,6 +3199,52 @@ const Mailapp = () => {
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {notice && (
+          <div
+            className={`${mailStyles.mailNotice} ${
+              notice.tone === "error" ? mailStyles.mailNoticeError : mailStyles.mailNoticeSuccess
+            }`}
+            // role=alert for failures so it is announced immediately; polite status
+            // for success so it never interrupts what the user is reading. Neither
+            // moves focus - the user stays wherever they were.
+            role={notice.tone === "error" ? "alert" : "status"}
+            aria-live={notice.tone === "error" ? "assertive" : "polite"}
+          >
+            <i
+              className={`${
+                notice.tone === "error" ? "ri-error-warning-line" : "ri-check-line"
+              } ${mailStyles.mailNoticeIcon}`}
+              aria-hidden
+            />
+            <div className={mailStyles.mailNoticeBody}>
+              {notice.message}
+              {notice.action && (
+                <div>
+                  <button
+                    type="button"
+                    className={mailStyles.mailNoticeAction}
+                    onClick={() => {
+                      const run = notice.action?.onClick;
+                      setNotice(null);
+                      run?.();
+                    }}
+                  >
+                    {notice.action.label}
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className={mailStyles.mailNoticeDismiss}
+              onClick={() => setNotice(null)}
+              aria-label="Dismiss message"
+            >
+              <i className="ri-close-line" aria-hidden />
+            </button>
           </div>
         )}
 

@@ -1256,3 +1256,118 @@
 .mailboxAvatarBtn:not(.mailboxAvatarBtnActive):hover .mailboxProviderBadge {
   transform: scale(1.08);
 }
+
+/* ── Inline notice ─────────────────────────────────────────────────────────
+   Replaces alert() for action feedback. alert() steals focus, is announced as a
+   system dialog rather than page content, and gave the user no way to retry.
+   Anchored bottom-right so it never covers the reading pane's action bar. */
+.mailNotice {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  width: min(26rem, calc(100vw - 2.5rem));
+  padding: 0.875rem 0.875rem 0.875rem 1rem;
+  border-radius: var(--mail-radius-sm);
+  background: var(--mail-paper-elevated);
+  color: var(--mail-ink);
+  border: 1px solid rgba(28, 25, 23, 0.08);
+  border-left: 3px solid var(--mail-notice-tone, var(--mail-ink-faint));
+  box-shadow: var(--mail-shadow-hover);
+  animation: mailFadeUp 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+:global(.dark) .mailNotice {
+  border-color: rgba(255, 255, 255, 0.08);
+  border-left-color: var(--mail-notice-tone, var(--mail-ink-faint));
+}
+
+.mailNoticeError {
+  --mail-notice-tone: #b91c1c;
+}
+
+.mailNoticeSuccess {
+  --mail-notice-tone: var(--mail-success);
+}
+
+:global(.dark) .mailNoticeError {
+  --mail-notice-tone: #f87171;
+}
+
+.mailNoticeIcon {
+  flex-shrink: 0;
+  font-size: 1.05rem;
+  line-height: 1.35;
+  color: var(--mail-notice-tone);
+}
+
+.mailNoticeBody {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--mail-ink);
+}
+
+.mailNoticeAction {
+  margin-top: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--mail-accent);
+  background: var(--mail-accent-mist);
+  border: 0;
+  cursor: pointer;
+}
+
+.mailNoticeAction:hover {
+  color: var(--mail-accent-hover);
+}
+
+/* Visual glyph is small, but the hit area meets the 44px minimum. */
+.mailNoticeDismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: -0.625rem -0.5rem -0.625rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--mail-ink-faint);
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.mailNoticeDismiss:hover {
+  color: var(--mail-ink);
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────
+   The empty stage runs an 80s mesh drift and a 120s orbit, the mailbox rail
+   pulses a halo forever, and the list shimmer never stops. All of that is
+   decorative; none of it should run for someone who asked the OS for less. */
+@media (prefers-reduced-motion: reduce) {
+  .mailRoot *,
+  .mailRoot *::before,
+  .mailRoot *::after,
+  .mailNotice {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .mailEmptyMesh,
+  .mailEmptyOrbit {
+    display: none;
+  }
+}
