@@ -30,6 +30,7 @@ import { buildForwardQuote, buildReplyQuote, cleanHtmlForSend } from "./_utils/c
 import { parseQuickRecipients } from "./_utils/quickRecipients";
 import { buildPrintDocument } from "./_utils/printEmail";
 import { resolveBulkTargets } from "./_utils/bulkSelection";
+import { htmlHasRemoteImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody";
 import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
@@ -123,6 +124,10 @@ const MAILS_ORDER = [
   "ARCHIVE",
   "OUTBOX",
   "CATEGORY_PERSONAL",
+  "CATEGORY_SOCIAL",
+  "CATEGORY_PROMOTIONS",
+  "CATEGORY_UPDATES",
+  "CATEGORY_FORUMS",
   "STARRED",
   "conversationhistory",
   "notes",
@@ -337,6 +342,8 @@ const Mailapp = () => {
    */
   const [listError, setListError] = useState<string | null>(null);
   const [oauthSuccess, setOauthSuccess] = useState(false);
+  /** Per-thread: remote images stay blocked until the user opts in. */
+  const [loadRemoteImages, setLoadRemoteImages] = useState(false);
   const [mailboxPolicy, setMailboxPolicy] = useState<EmailConnectionPolicy | null>(null);
   const [policyTick, setPolicyTick] = useState(0);
 
@@ -457,6 +464,18 @@ const Mailapp = () => {
   const showSuccess = useCallback((message: string) => {
     setNotice({ tone: "success", message });
   }, []);
+
+  // OAuth failures on return only rendered on the connect stage; with mailboxes
+  // already linked the main shell hid them entirely.
+  useEffect(() => {
+    if (!oauthError || showMailEmptyStage) return;
+    showError(oauthError);
+    setOauthError(null);
+  }, [oauthError, showMailEmptyStage, showError]);
+
+  useEffect(() => {
+    setLoadRemoteImages(false);
+  }, [selectedThreadId]);
 
   // Success is transient; an error stays until the user dismisses it or acts on
   // it, so a failed send is never scrolled past unnoticed.
@@ -1048,9 +1067,7 @@ const Mailapp = () => {
               t.id === thread.id ? { ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") } : t
             )
           );
-          if (selectedLabelId === "INBOX") {
-            setResultSizeEstimate((prev) => Math.max(0, prev - 1));
-          }
+
         } catch {
           // ignore
         }
@@ -1059,7 +1076,6 @@ const Mailapp = () => {
     [
       Medium,
       selectedAccountId,
-      selectedLabelId,
       selectedThreadId,
       inlineReplyHtml,
       mailProvider,
@@ -1265,6 +1281,10 @@ const Mailapp = () => {
 
   const openCompose = useCallback(
     (mode: ComposeMode, msg?: EmailMessage) => {
+      if (!canManageEmail) {
+        showError("You do not have permission to send email.");
+        return;
+      }
       composeMessageRef.current = msg ?? null;
       setComposeMode(mode);
       setShowComposeTemplatesMenu(false);
@@ -1315,7 +1335,7 @@ const Mailapp = () => {
       setComposeAttachments([]);
       setShowComposeModal(true);
     },
-    [accounts, selectedAccountId]
+    [accounts, selectedAccountId, canManageEmail, showError]
   );
 
   /** Reply / reply-all / forward when thread body fetch failed but list row has message ids */
@@ -1599,6 +1619,10 @@ const Mailapp = () => {
 
   const handleSendCompose = useCallback(async () => {
     if (!selectedAccountId) return;
+    if (!canManageEmail) {
+      showError("You do not have permission to send email.");
+      return;
+    }
 
     // Validate before entering the sending state, so a missing recipient never
     // looks like a failed send.
@@ -1706,6 +1730,7 @@ const Mailapp = () => {
     refetchMessages,
     showError,
     showSuccess,
+    canManageEmail,
   ]);
 
   const handleTrash = useCallback(async () => {
@@ -1788,6 +1813,43 @@ const Mailapp = () => {
       showError("Could not archive this conversation. Nothing was moved.");
     }
   }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider, showError]);
+
+  /**
+   * Where "Mailbox settings" points.
+   *
+   * Both links were hardcoded to the consumer hosts, so a Workspace user landed
+   * in whichever Google account their browser happened to have first, and a
+   * Microsoft 365 work account was sent to outlook.live.com, which does not host
+   * it. Gmail's /u/<address>/ form selects the right account for personal and
+   * Workspace alike; for Microsoft the consumer hosts are a known short list, so
+   * anything else is treated as a work or school tenant.
+   */
+  const mailboxSettingsUrl = useMemo(() => {
+    const email = (accounts.find((a) => a.id === selectedAccountId)?.email || "").trim();
+    if (mailProvider === "outlook") {
+      const domain = email.split("@")[1]?.toLowerCase() ?? "";
+      const consumer = ["outlook.com", "hotmail.com", "live.com", "msn.com"].includes(domain);
+      return consumer
+        ? "https://outlook.live.com/mail/0/options/general"
+        : "https://outlook.office.com/mail/options/general";
+    }
+    return email
+      ? `https://mail.google.com/mail/u/${encodeURIComponent(email)}/#settings/general`
+      : "https://mail.google.com/mail/#settings";
+  }, [accounts, selectedAccountId, mailProvider]);
+
+  /**
+   * Whether the folder count badge means anything.
+   *
+   * It was showing three different things at once. Gmail returns an estimate of
+   * all matching conversations; Outlook's listThreads returns the number of
+   * conversations on the page just fetched, so the badge read "20" for a mailbox
+   * of any size; and the page decremented it whenever a conversation was marked
+   * read, as though it were an unread count, which neither provider sends. The
+   * read/unread arithmetic is gone, and the badge is only drawn where the number
+   * is a real total.
+   */
+  const showResultCount = mailProvider === "gmail" && resultSizeEstimate > 0;
 
   const selectedThread = threads.find((t) => t.id === selectedThreadId);
 
@@ -1881,7 +1943,6 @@ const Mailapp = () => {
 
   const handleMarkRead = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
-    const wasUnread = selectedThread?.isUnread;
     try {
       await emailApi.batchModifyThreads(
         {
@@ -1897,13 +1958,11 @@ const Mailapp = () => {
           t.id === selectedThreadId ? { ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") } : t
         )
       );
-      if (wasUnread && selectedLabelId === "INBOX") {
-        setResultSizeEstimate((prev) => Math.max(0, prev - 1));
-      }
+
     } catch {
-      // ignore
+      showError("Could not mark this conversation as read.");
     }
-  }, [selectedAccountId, selectedThreadId, selectedThread?.isUnread, selectedLabelId, mailProvider]);
+  }, [selectedAccountId, selectedThreadId, mailProvider, showError]);
 
   const handleMarkUnread = useCallback(
     async (thread: EmailThreadListItem, e?: React.MouseEvent) => {
@@ -1930,14 +1989,12 @@ const Mailapp = () => {
               : t
           )
         );
-        if (selectedLabelId === "INBOX") {
-          setResultSizeEstimate((prev) => prev + 1);
-        }
+
       } catch {
-        // ignore
+        showError("Could not mark this conversation as unread.");
       }
     },
-    [selectedAccountId, selectedLabelId, mailProvider]
+    [selectedAccountId, mailProvider, showError]
   );
 
   const visibleThreadIds = useMemo(() => threads.map((t) => t.id), [threads]);
@@ -1976,7 +2033,6 @@ const Mailapp = () => {
     if (!selectedAccountId || ids.length === 0) return;
     setShowMailMenu(false);
     const target = new Set(ids);
-    const unreadCount = threads.filter((t) => target.has(t.id) && t.isUnread).length;
     try {
       await emailApi.batchModifyThreads(
         { accountId: selectedAccountId, threadIds: ids, addLabelIds: [], removeLabelIds: ["UNREAD"] },
@@ -1992,13 +2048,11 @@ const Mailapp = () => {
         )
       );
       setSelectedThreadIds(new Set());
-      if (unreadCount > 0 && selectedLabelId === "INBOX") {
-        setResultSizeEstimate((prev) => Math.max(0, prev - unreadCount));
-      }
+
     } catch {
       showError("Could not mark those conversations as read. Check your connection and try again.");
     }
-  }, [selectedAccountId, threads, bulkTargets, selectedLabelId, mailProvider, showError]);
+  }, [selectedAccountId, bulkTargets, mailProvider, showError]);
 
   const handleMoveToSpam = useCallback(async () => {
     const ids = bulkTargets.ids;
@@ -2149,17 +2203,13 @@ const Mailapp = () => {
 
   const handleQuickCompose = useCallback(
     (email: string) => {
+      // Goes through openCompose rather than setting the fields by hand, which
+      // skipped the signature that a new message from the sidebar gets - the same
+      // action produced two different drafts depending on where it was started.
+      openCompose("new");
       setComposeTo(email);
-      setComposeCc("");
-      setComposeBcc("");
-      setComposeSubject("");
-      setComposeHtml("");
-      setComposeAttachments([]);
-      setComposeMode("new");
-      composeMessageRef.current = null;
-      setShowComposeModal(true);
     },
-    []
+    [openCompose]
   );
 
   const handleRemoveQuickRecipient = useCallback((email: string) => {
@@ -2227,13 +2277,7 @@ const Mailapp = () => {
     return (a.type === "user" ? 1 : 0) - (b.type === "user" ? 1 : 0);
   });
 
-  const mailLabelsForNav = mailLabelsOrdered.filter((l) => {
-    if (currentProvider === "outlook") {
-      // All Outlook folders shown in nav (INBOX excluded via filteredLabels)
-      return true;
-    }
-    return !["CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"].includes(l.id || "");
-  });
+  const mailLabelsForNav = mailLabelsOrdered;
 
   // For Outlook, user folders are already included in mailLabelsForNav; no separate "Labels" section
   const userLabelsForNav = currentProvider === "outlook"
@@ -2387,16 +2431,18 @@ const Mailapp = () => {
               // display:block !important silently disabled that.
               className={`mail-navigation ${isMailNavigationVisible ? "!flex" : ""} border dark:border-defaultborder/10`}
             >
-              <div className="!p-4 border-b border-stone-200/80 dark:border-white/10">
-                <button
-                  type="button"
-                  onClick={() => openCompose("new")}
-                  className={`ti-btn w-full py-3 flex items-center justify-center gap-2 ${mailStyles.composeCta}`}
-                >
-                  <i className="ri-quill-pen-line text-lg"></i>
-                  New message
-                </button>
-              </div>
+              {canManageEmail ? (
+                <div className="!p-4 border-b border-stone-200/80 dark:border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => openCompose("new")}
+                    className={`ti-btn w-full py-3 flex items-center justify-center gap-2 ${mailStyles.composeCta}`}
+                  >
+                    <i className="ri-quill-pen-line text-lg"></i>
+                    New message
+                  </button>
+                </div>
+              ) : null}
               {selectedAccountId && accounts.length > 0 && (
                 <>
                   <div className={`flex items-start gap-3 ${mailStyles.navProfile}`}>
@@ -2492,8 +2538,11 @@ const Mailapp = () => {
                               <i className="ri-mail-line align-middle text-[.875rem] me-2"></i>
                               <span className="whitespace-nowrap">All Mails</span>
                             </div>
-                            {selectedLabelId === "ALL" && resultSizeEstimate > 0 && (
-                              <span className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0">
+                            {selectedLabelId === "ALL" && showResultCount && (
+                              <span
+                                className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0"
+                                title="Approximate number of conversations in this view"
+                              >
                                 {resultSizeEstimate > 999 ? `${(resultSizeEstimate / 1000).toFixed(1)}k` : resultSizeEstimate}
                               </span>
                             )}
@@ -2514,8 +2563,11 @@ const Mailapp = () => {
                               <i className="ri-inbox-line align-middle text-[.875rem] me-2"></i>
                               <span className="whitespace-nowrap">Inbox</span>
                             </div>
-                            {selectedLabelId === "INBOX" && resultSizeEstimate > 0 && (
-                              <span className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0">
+                            {selectedLabelId === "INBOX" && showResultCount && (
+                              <span
+                                className="badge !rounded-full !bg-success/20 !text-success !text-[.65rem] !px-1.5 !py-0"
+                                title="Approximate number of conversations in this view"
+                              >
                                 {resultSizeEstimate > 999 ? `${(resultSizeEstimate / 1000).toFixed(1)}k` : resultSizeEstimate}
                               </span>
                             )}
@@ -2551,37 +2603,19 @@ const Mailapp = () => {
                           </span>
                         </li>
                         <li>
-                          {(() => {
-                            const provider = accounts.find((a) => a.id === selectedAccountId)?.provider;
-                            if (provider === "outlook") {
-                              return (
-                                <a
-                                  href="https://outlook.live.com/mail/options/general"
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block !px-4 !py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
-                                >
-                                  <div className="flex items-center">
-                                    <i className="ri-settings-3-line align-middle text-[.875rem] me-2"></i>
-                                    <span className="whitespace-nowrap">Outlook Settings</span>
-                                  </div>
-                                </a>
-                              );
-                            }
-                            return (
-                              <a
-                                href="https://mail.google.com/mail/#settings"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block !px-4 !py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
-                              >
-                                <div className="flex items-center">
-                                  <i className="ri-settings-3-line align-middle text-[.875rem] me-2"></i>
-                                  <span className="whitespace-nowrap">Gmail Settings</span>
-                                </div>
-                              </a>
-                            );
-                          })()}
+                          <a
+                            href={mailboxSettingsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block !px-4 !py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
+                          >
+                            <div className="flex items-center">
+                              <i className="ri-settings-3-line align-middle text-[.875rem] me-2" aria-hidden></i>
+                              <span className="whitespace-nowrap">
+                                {mailProvider === "outlook" ? "Outlook Settings" : "Gmail Settings"}
+                              </span>
+                            </div>
+                          </a>
                         </li>
                         {!workLock &&
                           (canAddMoreGmail ||
@@ -2898,6 +2932,14 @@ const Mailapp = () => {
                     <i className="ri-search-line text-lg"></i>
                   </button>
                 </div>
+                {/* Graph rejects $orderby alongside $search, so Outlook hands back
+                    relevance order. Saying so beats letting the date column look
+                    shuffled. */}
+                {mailProvider === "outlook" && searchQuery ? (
+                  <p className="mt-1.5 text-[0.7rem] text-stone-500 dark:text-stone-400">
+                    Outlook returns search results by relevance, not by date.
+                  </p>
+                ) : null}
               </div>
               <div className={mailStyles.threadListScroll}>
                 <div className={`mail-messages ${mailStyles.threadListMessages}`}>
@@ -3264,36 +3306,40 @@ const Mailapp = () => {
                           <i className="ri-delete-bin-line" aria-hidden></i>
                         </button>
                       </div>
-                      <span className={mailStyles.toolbarDivider} aria-hidden />
-                      <div className={mailStyles.mailToolbarGroup}>
-                        <button
-                          type="button"
-                          onClick={() => void openComposeForReadingPane("reply")}
-                          className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Reply"
-                          aria-label="Reply to sender"
-                        >
-                          <i className="ri-reply-line" aria-hidden></i>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void openComposeForReadingPane("replyAll")}
-                          className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Reply all"
-                          aria-label="Reply all"
-                        >
-                          <i className="ri-reply-all-line" aria-hidden></i>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void openComposeForReadingPane("forward")}
-                          className="ti-btn ti-btn-icon ti-btn-light"
-                          title="Forward"
-                          aria-label="Forward message"
-                        >
-                          <i className="ri-share-forward-line" aria-hidden></i>
-                        </button>
-                      </div>
+                      {canManageEmail ? (
+                        <>
+                          <span className={mailStyles.toolbarDivider} aria-hidden />
+                          <div className={mailStyles.mailToolbarGroup}>
+                            <button
+                              type="button"
+                              onClick={() => void openComposeForReadingPane("reply")}
+                              className="ti-btn ti-btn-icon ti-btn-light"
+                              title="Reply"
+                              aria-label="Reply to sender"
+                            >
+                              <i className="ri-reply-line" aria-hidden></i>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void openComposeForReadingPane("replyAll")}
+                              className="ti-btn ti-btn-icon ti-btn-light"
+                              title="Reply all"
+                              aria-label="Reply all"
+                            >
+                              <i className="ri-reply-all-line" aria-hidden></i>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void openComposeForReadingPane("forward")}
+                              className="ti-btn ti-btn-icon ti-btn-light"
+                              title="Forward"
+                              aria-label="Forward message"
+                            >
+                              <i className="ri-share-forward-line" aria-hidden></i>
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                   <div
@@ -3369,12 +3415,31 @@ const Mailapp = () => {
                               </div>
                             </div>
                           </div>
+                          {msg.htmlBody?.trim() &&
+                          !loadRemoteImages &&
+                          htmlHasRemoteImages(sanitizeRichHtml(msg.htmlBody)) ? (
+                            <div
+                              className={`mb-3 flex flex-wrap items-center justify-between gap-2 ${mailStyles.remoteImagesBanner}`}
+                              role="status"
+                            >
+                              <span className="text-[0.8125rem] text-stone-600 dark:text-stone-300">
+                                Remote images are hidden to protect your privacy.
+                              </span>
+                              <button
+                                type="button"
+                                className="ti-btn ti-btn-sm ti-btn-light !mb-0"
+                                onClick={() => setLoadRemoteImages(true)}
+                              >
+                                Show images
+                              </button>
+                            </div>
+                          ) : null}
                           <div
                             className="main-mail-content prose dark:prose-invert max-w-none mail-html-body text-sm text-stone-800 dark:text-stone-100"
                             dangerouslySetInnerHTML={{
                               __html:
                                 (msg.htmlBody && msg.htmlBody.trim()
-                                  ? sanitizeRichHtml(msg.htmlBody)
+                                  ? prepareMailBodyHtml(msg.htmlBody, { loadRemoteImages })
                                   : null) ||
                                 (msg.textBody
                                   ? `<pre class="whitespace-pre-wrap">${escapeHtmlForTextNode(msg.textBody)}</pre>`
@@ -3407,6 +3472,7 @@ const Mailapp = () => {
                         </article>
                       ))}
                     </div>
+                    {canManageEmail ? (
                     <div className="mt-8 pt-8 border-t border-stone-200/80 dark:border-white/10">
                       <span className="text-xs font-semibold uppercase tracking-wider text-stone-500 dark:text-stone-400 block mb-1">
                         <i className="ri-reply-line me-1.5 align-middle text-amber-700 dark:text-amber-500"></i>
@@ -3482,6 +3548,7 @@ const Mailapp = () => {
                         />
                       </div>
                     </div>
+                    ) : null}
                   </div>
                   <div className={`mail-info-footer border-t dark:border-defaultborder/10 !p-4 flex flex-wrap gap-2 items-center justify-between bg-light/30 dark:bg-white/5 ${mailStyles.readingPaneFooter}`}>
                     <div
@@ -3529,33 +3596,35 @@ const Mailapp = () => {
                         <i className="ri-refresh-line" aria-hidden></i>
                       </button>
                     </div>
-                    <div
-                      className={`flex gap-2 flex-wrap relative z-20 pointer-events-auto ${mailStyles.readingToolbar}`}
-                      role="group"
-                      aria-label="Compose actions"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => void openComposeForReadingPane("forward")}
-                        className="ti-btn ti-btn-primary-full"
+                    {canManageEmail ? (
+                      <div
+                        className={`flex gap-2 flex-wrap relative z-20 pointer-events-auto ${mailStyles.readingToolbar}`}
+                        role="group"
+                        aria-label="Compose actions"
                       >
-                        <i className="ri-share-forward-line me-1 align-middle"></i>
-                        Forward
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void openComposeForReadingPane("replyAll")}
-                        className="ti-btn ti-btn-light border border-stone-200 dark:border-white/10"
-                      >
-                        <i className="ri-reply-all-line me-1 align-middle"></i>
-                        Reply all
-                      </button>
-                      {/* Replying to the sender is the "Send reply" button under the
-                          composer above. The button that used to sit here opened the
-                          compose window instead, while labelling itself "Sending..."
-                          off a flag it never set - two Reply affordances, neither of
-                          which sent what the user had just typed. */}
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => void openComposeForReadingPane("forward")}
+                          className="ti-btn ti-btn-primary-full"
+                        >
+                          <i className="ri-share-forward-line me-1 align-middle"></i>
+                          Forward
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void openComposeForReadingPane("replyAll")}
+                          className="ti-btn ti-btn-light border border-stone-200 dark:border-white/10"
+                        >
+                          <i className="ri-reply-all-line me-1 align-middle"></i>
+                          Reply all
+                        </button>
+                        {/* Replying to the sender is the "Send reply" button under the
+                            composer above. The button that used to sit here opened the
+                            compose window instead, while labelling itself "Sending..."
+                            off a flag it never set - two Reply affordances, neither of
+                            which sent what the user had just typed. */}
+                      </div>
+                    ) : null}
                   </div>
                 </>
               )}
@@ -3626,7 +3695,7 @@ const Mailapp = () => {
               </div>
               {quickRecipientList.length > 0 && (
                 <div className="px-1 py-1.5 border-b border-stone-200/60 dark:border-white/5 text-center">
-                  <span className="text-[0.55rem] uppercase tracking-widest text-stone-400 dark:text-stone-500 font-semibold">
+                  <span className="text-[0.75rem] uppercase tracking-widest text-stone-400 dark:text-stone-500 font-semibold">
                     Quick
                   </span>
                 </div>
@@ -3639,9 +3708,10 @@ const Mailapp = () => {
                   >
                     <button
                       type="button"
-                      onClick={() => handleQuickCompose(r.email)}
-                      className="cursor-pointer block"
-                      title={r.email}
+                      onClick={() => canManageEmail && handleQuickCompose(r.email)}
+                      className={canManageEmail ? "cursor-pointer block" : "cursor-default block opacity-80"}
+                      title={canManageEmail ? r.email : `${r.email} (view only)`}
+                      disabled={!canManageEmail}
                     >
                       <span className="avatar avatar-sm online avatar-rounded flex items-center justify-center !bg-primary/20 !text-primary font-semibold hover:!bg-primary/30 transition-colors">
                         {(() => {

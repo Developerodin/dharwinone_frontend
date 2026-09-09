@@ -152,8 +152,32 @@
   margin-top: 0.75rem;
   margin-bottom: 0;
   color: var(--mail-ink-soft);
-  font-size: 0.77rem;
+  font-size: 0.8125rem;
   line-height: 1.45;
+}
+
+.remoteImagesBanner {
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--mail-radius-sm);
+  background: rgb(254 252 232 / 0.9);
+  border: 1px solid rgb(250 204 21 / 0.35);
+}
+
+:global(.dark) .remoteImagesBanner {
+  background: rgb(66 32 6 / 0.45);
+  border-color: rgb(180 83 9 / 0.35);
+}
+
+:global(.mail-html-body) img[data-remote-image="blocked"] {
+  display: inline-block;
+  min-width: 3rem;
+  min-height: 2rem;
+  background: rgb(231 229 228 / 0.65);
+  border-radius: 0.25rem;
+}
+
+:global(.dark .mail-html-body) img[data-remote-image="blocked"] {
+  background: rgb(68 64 60 / 0.65);
 }
 
 .composeError {
