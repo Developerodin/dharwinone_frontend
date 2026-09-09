@@ -382,6 +382,9 @@ const Mailapp = () => {
   const [composeAttachmentError, setComposeAttachmentError] = useState<string | null>(null);
   const [attachmentsBusy, setAttachmentsBusy] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendingReply, setSendingReply] = useState(false);
+  /** Reply and reply-all derive their recipients server-side; only these two modes. */
+  const isReplyMode = composeMode === "reply" || composeMode === "replyAll";
   const composeMessageRef = useRef<EmailMessage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inlineReplyFileInputRef = useRef<HTMLInputElement>(null);
@@ -862,6 +865,15 @@ const Mailapp = () => {
 
   const handleSelectThread = useCallback(
     async (thread: EmailThreadListItem) => {
+      if (thread.id === selectedThreadId) return;
+      // Opening another thread wipes the reply composer. It used to do that
+      // silently, so a half-written reply vanished on a stray click.
+      if (
+        hasMeaningfulComposeBody(inlineReplyHtml) &&
+        !window.confirm("Discard the reply you started on this thread?")
+      ) {
+        return;
+      }
       setSelectedThreadId(thread.id);
       setInlineReplyHtml("");
       setInlineReplyAttachments([]);
@@ -893,7 +905,17 @@ const Mailapp = () => {
         }
       }
     },
-    [Medium, selectedAccountId, selectedLabelId, mailProvider, router, pathname, searchParams]
+    [
+      Medium,
+      selectedAccountId,
+      selectedLabelId,
+      selectedThreadId,
+      inlineReplyHtml,
+      mailProvider,
+      router,
+      pathname,
+      searchParams,
+    ]
   );
 
   useEffect(() => {
@@ -909,21 +931,29 @@ const Mailapp = () => {
 
   const handleSendInlineReply = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
+    if (!hasMeaningfulComposeBody(inlineReplyHtml)) {
+      showError("Write something before sending the reply.");
+      return;
+    }
     let targetMsg: EmailMessage | null = lastMessageInThread;
     const thread = threads.find((t) => t.id === selectedThreadId);
     if (!targetMsg && thread?.lastMessageId) {
       try {
         targetMsg = await emailApi.getMessage(selectedAccountId, thread.lastMessageId, mailProvider);
       } catch {
-        alert("Could not load the message to reply to.");
+        showError("Could not load the message you are replying to. Reopen the thread and try again.");
         return;
       }
     }
     if (!targetMsg) {
-      alert("No message loaded yet. Try the toolbar Reply or refresh.");
+      showError("This thread has not finished loading yet. Give it a moment, then try again.");
       return;
     }
-    setSending(true);
+
+    // Its own flag, not the compose modal's: sharing one made the footer button
+    // read "Sending..." for a send it was not performing.
+    setSendingReply(true);
+    let sent = false;
     try {
       await emailApi.replyMessage(
         targetMsg.id,
@@ -941,16 +971,25 @@ const Mailapp = () => {
         },
         mailProvider
       );
-      setInlineReplyHtml("");
-      setInlineReplyAttachments([]);
-      if (selectedThreadId) {
-        const data = await emailApi.getThread(selectedAccountId, selectedThreadId, mailProvider);
-        setThreadMessages(data.messages);
-      }
+      sent = true;
     } catch {
-      alert("Failed to send reply.");
+      showError("Could not send the reply. Your text is still here - try again.");
     } finally {
-      setSending(false);
+      setSendingReply(false);
+    }
+
+    if (!sent) return;
+    // Only clear the draft once the send has actually resolved, and refresh the
+    // thread as a separate failable step so a refresh hiccup cannot read as a
+    // failed reply.
+    setInlineReplyHtml("");
+    setInlineReplyAttachments([]);
+    showSuccess("Reply sent.");
+    try {
+      const data = await emailApi.getThread(selectedAccountId, selectedThreadId, mailProvider);
+      setThreadMessages(data.messages);
+    } catch {
+      showError("Reply sent, but this thread could not be refreshed.");
     }
   }, [
     selectedAccountId,
@@ -960,6 +999,8 @@ const Mailapp = () => {
     selectedThreadId,
     threads,
     mailProvider,
+    showError,
+    showSuccess,
   ]);
 
   const insertComposeTemplate = useCallback((t: AgentEmailTemplate | AgentEmailTemplateShared) => {
@@ -982,6 +1023,91 @@ const Mailapp = () => {
     });
     setShowComposeTemplatesMenu(false);
   }, []);
+
+  /**
+   * Carry the original's attachments into a forward.
+   *
+   * Forward was built on sendMessage with a quoted body, so it sent only files
+   * the user added by hand - forwarding a contract silently delivered the note
+   * without the contract. The backend forward endpoint does not carry them
+   * either, so the bytes are pulled here and re-attached through the normal
+   * compose path, which needs no API change.
+   */
+  // Declared near the top so every handler below can list it as a dependency;
+  // a const referenced in a deps array must already be initialised at render time.
+  const refetchMessages = useCallback(async () => {
+    if (!selectedAccountId) return;
+    setLoadingMessages(true);
+    setThreads([]);
+    setNextPageToken(null);
+    setListError(null);
+    try {
+      const res = await emailApi.getThreads(
+        {
+          accountId: selectedAccountId,
+          labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
+          pageSize: 20,
+          q: searchQuery || undefined,
+        },
+        mailProvider
+      );
+      setThreads(res.threads);
+      setNextPageToken(res.nextPageToken);
+      setResultSizeEstimate(res.resultSizeEstimate ?? 0);
+    } catch {
+      setThreads([]);
+      setListError("We couldn't load this folder.");
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
+
+  const attachOriginalAttachments = useCallback(
+    async (msg: EmailMessage) => {
+      const source = (msg.attachments || []).filter((a) => a.attachmentId);
+      if (!selectedAccountId || source.length === 0) return;
+      setAttachmentsBusy(true);
+      const loaded: ComposeAttachment[] = [];
+      const failed: string[] = [];
+      let budget = composeAttachmentLimitBytes;
+      for (const att of source) {
+        if (att.size > budget) {
+          failed.push(`${att.filename} (too large to include)`);
+          continue;
+        }
+        try {
+          const content = await emailApi.fetchAttachmentContent(
+            selectedAccountId,
+            att.messageId || msg.id,
+            att.attachmentId as string,
+            mailProvider
+          );
+          loaded.push({
+            id: `fwd-${att.attachmentId}`,
+            filename: att.filename,
+            content,
+            mimeType: att.mimeType || "application/octet-stream",
+            size: att.size,
+          });
+          budget -= att.size;
+        } catch {
+          failed.push(att.filename);
+        }
+      }
+      // Only add to the compose still on screen; the user may have closed it.
+      setComposeAttachments((prev) => {
+        const have = new Set(prev.map((a) => a.id));
+        return [...prev, ...loaded.filter((a) => !have.has(a.id))];
+      });
+      setAttachmentsBusy(false);
+      if (failed.length) {
+        setComposeAttachmentError(
+          `Could not attach ${failed.join(", ")}. Send anyway, or download and attach by hand.`
+        );
+      }
+    },
+    [selectedAccountId, mailProvider, composeAttachmentLimitBytes]
+  );
 
   const openCompose = useCallback(
     (mode: ComposeMode, msg?: EmailMessage) => {
@@ -1054,17 +1180,24 @@ const Mailapp = () => {
       if (!msg && fallbackId) {
         try {
           msg = await emailApi.getMessage(selectedAccountId, fallbackId, mailProvider);
-        } catch (err) {
-          console.error("[Email] getMessage for compose:", err);
-          alert("Could not load this message. Refresh the page or re-open the thread.");
+        } catch {
+          showError("Could not load this message.", {
+            label: "Reload inbox",
+            onClick: () => void refetchMessages(),
+          });
           return;
         }
       }
       if (!msg) {
-        alert("No message is available yet. Wait a moment, or refresh the inbox.");
+        showError("This thread has not finished loading yet. Give it a moment, then try again.");
         return;
       }
       openCompose(mode, msg);
+      if (mode === "forward") {
+        // Fire and forget: the modal is already open and shows a busy state on the
+        // attach control while the original's files are pulled in.
+        void attachOriginalAttachments(msg);
+      }
     },
     [
       selectedAccountId,
@@ -1074,6 +1207,9 @@ const Mailapp = () => {
       threadMessages,
       mailProvider,
       openCompose,
+      attachOriginalAttachments,
+      refetchMessages,
+      showError,
     ]
   );
 
@@ -1211,8 +1347,15 @@ const Mailapp = () => {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files?.length) return;
+      const skipped: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        // The compose modal enforced this and the inline reply did not, so an
+        // oversized file was accepted here and only rejected by the provider.
+        if (file.size > composeAttachmentLimitBytes) {
+          skipped.push(`${file.name} is too large. Keep files under ${composeAttachmentLimitLabel}.`);
+          continue;
+        }
         try {
           const content = await fileToBase64(file);
           setInlineReplyAttachments((prev) => [
@@ -1220,46 +1363,18 @@ const Mailapp = () => {
             { filename: file.name, content, mimeType: file.type || "application/octet-stream" },
           ]);
         } catch {
-          // skip
+          skipped.push(`Could not read ${file.name}.`);
         }
       }
+      if (skipped.length) showError(skipped.join(" "));
       e.target.value = "";
     },
-    []
+    [composeAttachmentLimitBytes, composeAttachmentLimitLabel, showError]
   );
 
   const removeInlineReplyAttachment = useCallback((idx: number) => {
     setInlineReplyAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
-
-  // Declared above the send handler so it can be a dependency of it; a const
-  // referenced in a deps array must already be initialised at render time.
-  const refetchMessages = useCallback(async () => {
-    if (!selectedAccountId) return;
-    setLoadingMessages(true);
-    setThreads([]);
-    setNextPageToken(null);
-    setListError(null);
-    try {
-      const res = await emailApi.getThreads(
-        {
-          accountId: selectedAccountId,
-          labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
-          pageSize: 20,
-          q: searchQuery || undefined,
-        },
-        mailProvider
-      );
-      setThreads(res.threads);
-      setNextPageToken(res.nextPageToken);
-      setResultSizeEstimate(res.resultSizeEstimate ?? 0);
-    } catch {
-      setThreads([]);
-      setListError("We couldn't load this folder.");
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, [selectedAccountId, selectedLabelId, searchQuery, mailProvider]);
 
   const handleSendCompose = useCallback(async () => {
     if (!selectedAccountId) return;
@@ -2982,14 +3097,48 @@ const Mailapp = () => {
                               <button
                                 type="button"
                                 onClick={() => removeInlineReplyAttachment(idx)}
-                                className="ti-btn ti-btn-icon ti-btn-ghost !p-0 !w-5 !h-5"
+                                className="ti-btn ti-btn-icon ti-btn-ghost !p-0 !w-6 !h-6"
+                                aria-label={`Remove attachment ${att.filename}`}
                               >
-                                <i className="ri-close-line text-xs"></i>
+                                <i className="ri-close-line text-xs" aria-hidden></i>
                               </button>
                             </span>
                           ))}
                         </div>
                       )}
+                      {/* The composer above had no send path at all: its handler was
+                          never wired to anything, so a typed reply was discarded on
+                          the next thread click. Attaching lives here too, beside the
+                          chips it produces, rather than in the footer. */}
+                      <div className="mt-3 flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => void handleSendInlineReply()}
+                          disabled={sendingReply || !hasMeaningfulComposeBody(inlineReplyHtml)}
+                          className={`ti-btn !mb-0 px-5 py-2.5 rounded-xl text-white font-semibold shadow-lg disabled:opacity-50 ${mailStyles.composeCta}`}
+                        >
+                          <i
+                            className={`${sendingReply ? "ri-loader-4-line animate-spin" : "ri-send-plane-line"} me-1 align-middle`}
+                            aria-hidden
+                          />
+                          {sendingReply ? "Sending…" : "Send reply"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleAddInlineReplyAttachment}
+                          className="ti-btn ti-btn-light border border-stone-200 dark:border-white/10 !mb-0"
+                        >
+                          <i className="ri-attachment-2 me-1 align-middle" aria-hidden />
+                          Attach
+                        </button>
+                        <input
+                          ref={inlineReplyFileInputRef}
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={handleInlineReplyFileChange}
+                        />
+                      </div>
                     </div>
                   </div>
                   <div className={`mail-info-footer border-t dark:border-defaultborder/10 !p-4 flex flex-wrap gap-2 items-center justify-between bg-light/30 dark:bg-white/5 ${mailStyles.readingPaneFooter}`}>
@@ -3007,22 +3156,6 @@ const Mailapp = () => {
                       >
                         <i className="ri-printer-line" aria-hidden></i>
                       </button>
-                      <button
-                        type="button"
-                        onClick={handleAddInlineReplyAttachment}
-                        className="ti-btn ti-btn-icon ti-btn-light"
-                        title="Add attachment"
-                        aria-label="Add attachment to reply"
-                      >
-                        <i className="ri-attachment-2" aria-hidden></i>
-                      </button>
-                      <input
-                        ref={inlineReplyFileInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={handleInlineReplyFileChange}
-                      />
                       {selectedThread?.isUnread ? (
                         <button
                           type="button"
@@ -3070,21 +3203,16 @@ const Mailapp = () => {
                       <button
                         type="button"
                         onClick={() => void openComposeForReadingPane("replyAll")}
-                        disabled={sending}
                         className="ti-btn ti-btn-light border border-stone-200 dark:border-white/10"
                       >
                         <i className="ri-reply-all-line me-1 align-middle"></i>
                         Reply all
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void openComposeForReadingPane("reply")}
-                        disabled={sending}
-                        className="ti-btn ti-btn-danger-full"
-                      >
-                        <i className="ri-reply-line me-1 align-middle"></i>
-                        {sending ? "Sending..." : "Reply"}
-                      </button>
+                      {/* Replying to the sender is the "Send reply" button under the
+                          composer above. The button that used to sit here opened the
+                          compose window instead, while labelling itself "Sending..."
+                          off a flag it never set - two Reply affordances, neither of
+                          which sent what the user had just typed. */}
                     </div>
                   </div>
                 </>
@@ -3350,23 +3478,47 @@ const Mailapp = () => {
                 </div>
                 <div className="ti-modal-body flex-1 overflow-y-auto px-4 py-4 bg-white dark:bg-bodydark">
                   <div className="grid grid-cols-1 gap-4">
-                    {(composeMode === "new" ||
-                      composeMode === "forward" ||
-                      composeMode === "reply" ||
-                      composeMode === "replyAll") && (
-                      <>
-                        {composeMode === "replyAll" && mailProvider === "outlook" && (
-                          <p className="text-xs text-stone-500 dark:text-stone-400 -mt-1 mb-1">
-                            Recipients are taken from the original message when you send (Outlook). To/Cc below are
-                            for reference.
+                    {isReplyMode ? (
+                      /* The reply and reply-all endpoints accept only accountId, html
+                         and attachments - they derive recipients from the original
+                         message server-side. These fields used to be editable here and
+                         whatever the user typed, a Cc or a Bcc included, was dropped on
+                         send with no indication. Show who it is going to instead of
+                         pretending it can be changed. Upgrade path: add cc/bcc to
+                         replyMessage in email.validation.js, and the backend must ship
+                         before this UI does, because validate() rejects unknown keys
+                         outright rather than ignoring them. */
+                      <div className="rounded-lg border border-stone-200 dark:border-white/10 bg-stone-50/70 dark:bg-white/5 px-3 py-2.5">
+                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-[0.8125rem]">
+                          <p className="mb-0 min-w-0">
+                            <span className="text-stone-500 dark:text-stone-400">To:</span>{" "}
+                            <span className="text-stone-800 dark:text-stone-100 break-words">
+                              {composeTo || "the original sender"}
+                            </span>
                           </p>
-                        )}
+                          {composeCc ? (
+                            <p className="mb-0 min-w-0">
+                              <span className="text-stone-500 dark:text-stone-400">Cc:</span>{" "}
+                              <span className="text-stone-800 dark:text-stone-100 break-words">{composeCc}</span>
+                            </p>
+                          ) : null}
+                        </div>
+                        <p className="mb-0 mt-1.5 text-[0.7rem] text-stone-500 dark:text-stone-400">
+                          Taken from the original message. To choose different recipients, use Forward or start a
+                          new message.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
                         <div>
-                          <label className="form-label block mb-1">
+                          <label className="form-label block mb-1" htmlFor="compose-to">
                             To<sup className="text-danger">*</sup>
                           </label>
                           <input
-                            type="text"
+                            id="compose-to"
+                            type="email"
+                            multiple
+                            autoComplete="email"
                             className="form-control w-full"
                             placeholder="recipient@example.com"
                             value={composeTo}
@@ -3375,9 +3527,14 @@ const Mailapp = () => {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="form-label block mb-1">Cc</label>
+                            <label className="form-label block mb-1" htmlFor="compose-cc">
+                              Cc
+                            </label>
                             <input
-                              type="text"
+                              id="compose-cc"
+                              type="email"
+                              multiple
+                              autoComplete="email"
                               className="form-control w-full"
                               placeholder="cc@example.com"
                               value={composeCc}
@@ -3385,9 +3542,14 @@ const Mailapp = () => {
                             />
                           </div>
                           <div>
-                            <label className="form-label block mb-1">Bcc</label>
+                            <label className="form-label block mb-1" htmlFor="compose-bcc">
+                              Bcc
+                            </label>
                             <input
-                              type="text"
+                              id="compose-bcc"
+                              type="email"
+                              multiple
+                              autoComplete="email"
                               className="form-control w-full"
                               placeholder="bcc@example.com"
                               value={composeBcc}

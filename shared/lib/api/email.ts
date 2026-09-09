@@ -200,6 +200,35 @@ export function getAttachmentUrl(
   return `${base}${b}/messages/${messageId}/attachments/${attachmentId}?accountId=${accountId}`;
 }
 
+/** Chunked so a large attachment cannot blow the argument limit of String.fromCharCode. */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Attachment bytes as base64, for re-attaching an original when forwarding.
+ * The endpoint streams application/octet-stream; getAttachmentUrl is the same
+ * route expressed as a plain href for download links.
+ */
+export async function fetchAttachmentContent(
+  accountId: string,
+  messageId: string,
+  attachmentId: string,
+  provider: MailProvider = "gmail"
+): Promise<string> {
+  const { data } = await apiClient.get<ArrayBuffer>(
+    `${mailBase(provider)}/messages/${messageId}/attachments/${attachmentId}`,
+    { params: { accountId }, responseType: "arraybuffer" }
+  );
+  return arrayBufferToBase64(data);
+}
+
 export async function sendMessage(
   body: {
     accountId: string;
