@@ -30,7 +30,7 @@ import { buildForwardQuote, buildReplyQuote, cleanHtmlForSend } from "./_utils/c
 import { parseQuickRecipients } from "./_utils/quickRecipients";
 import { buildPrintDocument } from "./_utils/printEmail";
 import { resolveBulkTargets } from "./_utils/bulkSelection";
-import { htmlHasRemoteImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody";
+import { htmlHasBlockedImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody";
 import { isPermanentDeleteFolderId, isSpamFolderId } from "./_utils/deleteScope";
 import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
@@ -374,7 +374,6 @@ const Mailapp = () => {
   const [selectedLabelId, setSelectedLabelId] = useState<string>("ALL");
   const [threads, setThreads] = useState<EmailThreadListItem[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
-  const [resultSizeEstimate, setResultSizeEstimate] = useState<number>(0);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -523,6 +522,23 @@ const Mailapp = () => {
   const isPermanentDeleteFolder = isPermanentDeleteFolderId(selectedLabelId);
   const isSpamFolder = isSpamFolderId(selectedLabelId);
 
+  /** The list row for the open thread, when it is in the loaded page. */
+  const selectedThread = threads.find((t) => t.id === selectedThreadId);
+
+  /**
+   * Labels for the open conversation.
+   *
+   * Falls back to the union across its fetched messages when there is no list
+   * row. A link to a conversation beyond the loaded page has no row, and reading
+   * labels from the row alone left the star showing unstarred, every label
+   * showing unapplied and only ever addable, and archive believing the mail was
+   * not in the inbox.
+   */
+  const openThreadLabelIds = useMemo(() => {
+    if (selectedThread) return selectedThread.labelIds || [];
+    return [...new Set(threadMessages.flatMap((m) => m.labelIds || []))];
+  }, [selectedThread, threadMessages]);
+
   /**
    * Which conversation the reader has agreed to load remote media for.
    *
@@ -533,14 +549,28 @@ const Mailapp = () => {
   const [remoteImagesAllowedFor, setRemoteImagesAllowedFor] = useState<string | null>(null);
   const remoteImagesAllowed =
     remoteImagesAllowedFor !== null && remoteImagesAllowedFor === selectedThreadId;
-  /** Only offer the banner when there is actually something being held back. */
+  /**
+   * Each message body, sanitized once, with remote media withheld unless the
+   * reader has opted in for this conversation.
+   */
+  const preparedBodies = useMemo(
+    () =>
+      threadMessages.map((m) =>
+        prepareMailBodyHtml(m.htmlBody, { loadRemoteImages: remoteImagesAllowed })
+      ),
+    [threadMessages, remoteImagesAllowed]
+  );
+  /** Only offer the banner when something was actually held back. */
   const threadHasRemoteImages = useMemo(
-    () => threadMessages.some((m) => m.htmlBody && htmlHasRemoteImages(m.htmlBody)),
-    [threadMessages]
+    () => preparedBodies.some(htmlHasBlockedImages),
+    [preparedBodies]
   );
 
   const requestMailConfirm = useCallback((options: MailConfirmRequest): Promise<boolean> => {
     return new Promise((resolve) => {
+      // Settle any dialog still waiting before replacing its resolver, or the
+      // caller awaiting it would hang for the life of the page.
+      mailConfirmResolverRef.current?.(false);
       mailConfirmResolverRef.current = resolve;
       setMailConfirm(options);
     });
@@ -1025,7 +1055,6 @@ const Mailapp = () => {
         if (!cancelled) {
           setThreads(res.threads);
           setNextPageToken(res.nextPageToken);
-          setResultSizeEstimate(res.resultSizeEstimate ?? 0);
         }
       } catch {
         if (!cancelled) {
@@ -1061,7 +1090,12 @@ const Mailapp = () => {
    */
   const listScopeRef = useRef<string | null>(null);
   useEffect(() => {
-    const scope = `${selectedAccountId ?? ""}|${selectedLabelId}|${searchQuery}`;
+    // Nothing is scoped until a mailbox is selected. Tracking from mount recorded
+    // a baseline with an empty account id, so the account arriving a moment later
+    // looked like a folder change: it cleared the open thread and stripped
+    // ?thread= from the URL before the deep link could ever resolve.
+    if (!selectedAccountId) return;
+    const scope = `${selectedAccountId}|${selectedLabelId}|${searchQuery}`;
     if (listScopeRef.current === null || listScopeRef.current === scope) {
       listScopeRef.current = scope;
       return;
@@ -1251,7 +1285,13 @@ const Mailapp = () => {
 
   const handleSelectThread = useCallback(
     async (thread: EmailThreadListItem) => {
-      if (thread.id === selectedThreadId) return;
+      if (thread.id === selectedThreadId) {
+        // Already open, but on a narrow screen the list may be what is on screen
+        // right now - re-tapping the current row has to bring the reading pane
+        // back, or the row looks dead.
+        Medium();
+        return;
+      }
       // Returning to the thread the draft belongs to keeps it; only moving to a
       // different one discards it, and then only after asking. This used to wipe
       // the composer silently, so a half-written reply vanished on a stray click.
@@ -1459,7 +1499,6 @@ const Mailapp = () => {
       );
       setThreads(res.threads);
       setNextPageToken(res.nextPageToken);
-      setResultSizeEstimate(res.resultSizeEstimate ?? 0);
     } catch {
       setThreads([]);
       setListError("We couldn't load this folder.");
@@ -2061,28 +2100,52 @@ const Mailapp = () => {
           },
           mailProvider
         );
-        setThreads((prev) =>
-          prev.map((t) =>
-            t.id === thread.id
-              ? {
-                  ...t,
-                  labelIds: isStarred
-                    ? (t.labelIds || []).filter((l) => l !== "STARRED")
-                    : [...(t.labelIds || []), "STARRED"],
-                }
-              : t
-          )
-        );
-      } catch (err) {
-        console.error("[Email] Star toggle failed:", err);
+        // Un-starring inside Starred takes the conversation out of that view, so
+        // the row goes; everywhere else it stays and just changes state.
+        if (isStarred && selectedLabelId === "STARRED") {
+          setThreads((prev) => prev.filter((t) => t.id !== thread.id));
+          if (selectedThreadId === thread.id) {
+            setSelectedThreadId(null);
+            setThreadMessages([]);
+          }
+        } else {
+          setThreads((prev) =>
+            prev.map((t) =>
+              t.id === thread.id
+                ? {
+                    ...t,
+                    labelIds: isStarred
+                      ? (t.labelIds || []).filter((l) => l !== "STARRED")
+                      : [...new Set([...(t.labelIds || []), "STARRED"])],
+                  }
+                : t
+            )
+          );
+        }
+      } catch {
         showError("Could not update the star.");
       }
     },
-    [selectedAccountId, mailProvider, showError]
+    [selectedAccountId, mailProvider, selectedLabelId, selectedThreadId, showError]
   );
 
   const handleArchive = useCallback(async () => {
     if (!selectedAccountId || !selectedThreadId) return;
+    // Archiving takes mail out of the inbox, so for mail that is not in the
+    // inbox there is nothing to do - both providers accept the request and
+    // ignore it, which reads as a successful archive.
+    //
+    // Gmail only: its thread rows carry INBOX, so the no-op is detectable. The
+    // Outlook provider synthesizes just UNREAD, STARRED and IMPORTANT, so its
+    // rows never carry INBOX and this check would refuse every archive there.
+    if (
+      mailProvider === "gmail" &&
+      selectedThread &&
+      !openThreadLabelIds.includes("INBOX")
+    ) {
+      showError("This conversation is already out of the inbox.");
+      return;
+    }
     try {
       await emailApi.batchModifyThreads(
         {
@@ -2093,7 +2156,22 @@ const Mailapp = () => {
         },
         mailProvider
       );
-      setThreads((prev) => prev.filter((t) => t.id !== selectedThreadId));
+      // Archived mail leaves the inbox, but it is still in All Mail, still under
+      // its labels and still in Starred. Dropping the row from every one of
+      // those views was why archiving looked broken: the conversation vanished
+      // and then came back on the next load, because it had never left that
+      // view in the first place.
+      if (selectedLabelId === "INBOX") {
+        setThreads((prev) => prev.filter((t) => t.id !== selectedThreadId));
+      } else {
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.id === selectedThreadId
+              ? { ...t, labelIds: (t.labelIds || []).filter((l) => l !== "INBOX") }
+              : t
+          )
+        );
+      }
       setSelectedThreadId(null);
       setThreadMessages([]);
       setSelectedThreadIds((prev) => {
@@ -2102,11 +2180,23 @@ const Mailapp = () => {
         return next;
       });
       restoreMobileListLayout();
-    } catch (err) {
-      console.error("[Email] Archive failed:", err);
+      void refreshMailboxLabels();
+      showSuccess("Moved to Archive.");
+    } catch {
       showError("Could not archive this conversation. Nothing was moved.");
     }
-  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider, showError]);
+  }, [
+    selectedAccountId,
+    selectedThreadId,
+    selectedThread,
+    openThreadLabelIds,
+    selectedLabelId,
+    restoreMobileListLayout,
+    mailProvider,
+    refreshMailboxLabels,
+    showError,
+    showSuccess,
+  ]);
 
   /**
    * Where "Mailbox settings" points.
@@ -2144,7 +2234,6 @@ const Mailapp = () => {
     return labels.reduce((sum, l) => sum + (l.unread ?? 0), 0);
   }, [mailProvider, gmailFolderCounts, labels, unreadForLabel]);
 
-  const selectedThread = threads.find((t) => t.id === selectedThreadId);
 
   /**
    * What the reading-pane header shows.
@@ -2167,8 +2256,11 @@ const Mailapp = () => {
      * from the sidebar is just housekeeping and must not silently label whatever
      * happens to be open.
      */
-    async (name: string, { applyToOpenThread = true }: { applyToOpenThread?: boolean } = {}) => {
-      if (!selectedAccountId || !name?.trim()) return;
+    async (
+      name: string,
+      { applyToOpenThread = true }: { applyToOpenThread?: boolean } = {}
+    ): Promise<boolean> => {
+      if (!selectedAccountId || !name?.trim()) return false;
       setCreatingLabel(true);
       try {
         const created = await emailApi.createLabel(
@@ -2197,9 +2289,10 @@ const Mailapp = () => {
             )
           );
         }
-      } catch (err) {
-        console.error("Failed to create label:", err);
+        return true;
+      } catch {
         showError("Could not create that label.");
+        return false;
       } finally {
         setCreatingLabel(false);
       }
@@ -2210,7 +2303,7 @@ const Mailapp = () => {
   const handleApplyLabel = useCallback(
     async (labelId: string) => {
       if (!selectedAccountId || !selectedThreadId) return;
-      const currentIds = selectedThread?.labelIds || [];
+      const currentIds = openThreadLabelIds;
       const hasLabel = currentIds.includes(labelId);
       try {
         await emailApi.batchModifyThreads(
@@ -2231,7 +2324,7 @@ const Mailapp = () => {
         showError("Could not update the labels on this conversation.");
       }
     },
-    [selectedAccountId, selectedThreadId, selectedThread, mailProvider, showError]
+    [selectedAccountId, selectedThreadId, openThreadLabelIds, mailProvider, showError]
   );
 
   const handleMarkRead = useCallback(async () => {
@@ -2252,11 +2345,15 @@ const Mailapp = () => {
           t.id === selectedThreadId ? { ...t, isUnread: false, labelIds: (t.labelIds || []).filter((l) => l !== "UNREAD") } : t
         )
       );
-      if (wasUnread) bumpNavUnreadCounts(-1, ["INBOX"]);
+      // Only the Inbox badge, and only when reading Inbox mail: marking a Sent,
+      // Spam or search result read used to move the Inbox count for a thread
+      // that was never in the Inbox. refreshMailboxLabels reconciles either way.
+      if (wasUnread && selectedLabelId === "INBOX") bumpNavUnreadCounts(-1, ["INBOX"]);
+      void refreshMailboxLabels();
     } catch {
       showError("Could not mark this conversation as read.");
     }
-  }, [selectedAccountId, selectedThreadId, selectedThread, mailProvider, showError, bumpNavUnreadCounts]);
+  }, [selectedAccountId, selectedThreadId, selectedThread, selectedLabelId, mailProvider, showError, bumpNavUnreadCounts, refreshMailboxLabels]);
 
   const handleMarkUnread = useCallback(
     async (thread: EmailThreadListItem, e?: React.MouseEvent) => {
@@ -2283,12 +2380,13 @@ const Mailapp = () => {
               : t
           )
         );
-        bumpNavUnreadCounts(1, ["INBOX"]);
+        if (selectedLabelId === "INBOX") bumpNavUnreadCounts(1, ["INBOX"]);
+        void refreshMailboxLabels();
       } catch {
         showError("Could not mark this conversation as unread.");
       }
     },
-    [selectedAccountId, mailProvider, showError, bumpNavUnreadCounts]
+    [selectedAccountId, selectedLabelId, mailProvider, showError, bumpNavUnreadCounts, refreshMailboxLabels]
   );
 
   const visibleThreadIds = useMemo(() => threads.map((t) => t.id), [threads]);
@@ -3089,7 +3187,10 @@ const Mailapp = () => {
                                     e.preventDefault();
                                     void handleCreateLabel(navLabelName, {
                                       applyToOpenThread: false,
-                                    }).then(() => {
+                                    }).then((created) => {
+                                      // Keep what was typed when the create failed,
+                                      // so the message is not the only thing left.
+                                      if (!created) return;
                                       setNavLabelName("");
                                       setNavCreateLabelOpen(false);
                                     });
@@ -3641,7 +3742,17 @@ const Mailapp = () => {
                       <div className={mailStyles.mailToolbarGroup}>
                         <button
                           type="button"
-                          onClick={(e) => selectedThread && handleToggleStar(selectedThread, e)}
+                          // Falls back to a minimal row built from the open thread.
+                          // Guarded on selectedThread alone, the button did nothing
+                          // at all for a conversation opened from a link that is not
+                          // in the loaded page - no action, no message.
+                          onClick={(e) =>
+                            void handleToggleStar(
+                              selectedThread ?? ({ id: selectedThreadId, labelIds: [] } as unknown as EmailThreadListItem),
+                              e
+                            )
+                          }
+                          disabled={!selectedThreadId}
                           className="ti-btn ti-btn-icon ti-btn-light"
                           title="Star"
                           aria-label={
@@ -3942,11 +4053,7 @@ const Mailapp = () => {
                             className={`main-mail-content prose max-w-none mail-html-body text-sm text-stone-800 ${mailStyles.mailHtmlCanvas}`}
                             dangerouslySetInnerHTML={{
                               __html:
-                                (msg.htmlBody && msg.htmlBody.trim()
-                                  ? prepareMailBodyHtml(msg.htmlBody, {
-                                      loadRemoteImages: remoteImagesAllowed,
-                                    })
-                                  : null) ||
+                                preparedBodies[idx] ||
                                 (msg.textBody
                                   ? `<pre class="whitespace-pre-wrap">${escapeHtmlForTextNode(msg.textBody)}</pre>`
                                   : "<p>No content</p>"),

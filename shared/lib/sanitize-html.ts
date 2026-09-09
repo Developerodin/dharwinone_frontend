@@ -80,10 +80,53 @@ const RICH_HTML_CONFIG: Parameters<typeof DOMPurify.sanitize>[1] = {
   ALLOWED_ATTR: ["href", "target", "rel", "class", "style", "src", "alt", "width", "height", "colspan", "rowspan", "type"],
 };
 
-/** Sanitize untrusted HTML before dangerouslySetInnerHTML (blog, job descriptions, mail bodies). */
-export function sanitizeRichHtml(html: string): string {
+/** Media that can pull something off the network once rendered. */
+const REMOTE_MEDIA_TAGS = new Set(["img", "video", "source"]);
+
+/** data: is inline bytes and cid: is an attachment already in the message; neither hits the network. */
+function isRemoteMediaSrc(value: string): boolean {
+  return /^\s*(?:https?:)?\/\//i.test(value);
+}
+
+/**
+ * Drop remote sources during sanitization.
+ *
+ * Runs as a DOMPurify hook rather than over the output string: attribute values
+ * are not escaped for spaces, "=" or ">", so a sender who controls `alt` can
+ * hide `src=` inside it and walk straight past any regex. Here the value is read
+ * off a parsed node, so there is nothing to smuggle.
+ */
+function blockRemoteMedia(node: Element): void {
+  const tag = node.tagName?.toLowerCase?.();
+  if (!tag || !REMOTE_MEDIA_TAGS.has(tag)) return;
+  const src = node.getAttribute?.("src");
+  if (!src || !isRemoteMediaSrc(src)) return;
+  node.removeAttribute("src");
+  node.setAttribute("data-remote-image", "blocked");
+}
+
+/**
+ * Sanitize untrusted HTML before dangerouslySetInnerHTML (blog, job
+ * descriptions, mail bodies).
+ *
+ * `blockRemoteMedia` additionally strips remote image, video and source
+ * sources, so opening the content does not announce itself to whoever wrote it.
+ * Off by default: only mail needs it.
+ */
+export function sanitizeRichHtml(
+  html: string,
+  options: { blockRemoteMedia?: boolean } = {}
+): string {
   if (!html || typeof html !== "string") return "";
-  return DOMPurify.sanitize(html, RICH_HTML_CONFIG);
+  if (!options.blockRemoteMedia) return DOMPurify.sanitize(html, RICH_HTML_CONFIG);
+  // Hooks are global, so it is added and removed around this one call. It is a
+  // different entry point from the style hook above, which is left in place.
+  DOMPurify.addHook("afterSanitizeAttributes", blockRemoteMedia);
+  try {
+    return DOMPurify.sanitize(html, RICH_HTML_CONFIG);
+  } finally {
+    DOMPurify.removeHook("afterSanitizeAttributes");
+  }
 }
 
 export function escapeHtmlForTextNode(s: string): string {
