@@ -408,6 +408,8 @@ const Mailapp = () => {
   const [newLabelName, setNewLabelName] = useState("");
   const [creatingLabel, setCreatingLabel] = useState(false);
   const [createLabelExpanded, setCreateLabelExpanded] = useState(false);
+  const [navCreateLabelOpen, setNavCreateLabelOpen] = useState(false);
+  const [navLabelName, setNavLabelName] = useState("");
   const [selectedThreadIds, setSelectedThreadIds] = useState<Set<string>>(new Set());
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [quickAddEmail, setQuickAddEmail] = useState("");
@@ -1627,9 +1629,9 @@ const Mailapp = () => {
       restoreMobileListLayout();
     } catch (err) {
       console.error("[Email] Trash failed:", err);
-      alert("Could not delete this thread. Check your connection and try again.");
+      showError("Could not move this conversation to trash. Nothing was deleted.");
     }
-  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider]);
+  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider, showError]);
 
   const handleToggleStar = useCallback(
     async (thread: EmailThreadListItem, e?: React.MouseEvent) => {
@@ -1660,10 +1662,10 @@ const Mailapp = () => {
         );
       } catch (err) {
         console.error("[Email] Star toggle failed:", err);
-        alert("Could not update the star. Check your connection and try again.");
+        showError("Could not update the star.");
       }
     },
-    [selectedAccountId, mailProvider]
+    [selectedAccountId, mailProvider, showError]
   );
 
   const handleArchive = useCallback(async () => {
@@ -1689,9 +1691,9 @@ const Mailapp = () => {
       restoreMobileListLayout();
     } catch (err) {
       console.error("[Email] Archive failed:", err);
-      alert("Could not archive this thread. Check your connection and try again.");
+      showError("Could not archive this conversation. Nothing was moved.");
     }
-  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider]);
+  }, [selectedAccountId, selectedThreadId, restoreMobileListLayout, mailProvider, showError]);
 
   const selectedThread = threads.find((t) => t.id === selectedThreadId);
 
@@ -1710,7 +1712,13 @@ const Mailapp = () => {
   const headerMessageCount = selectedThread?.messageCount ?? threadMessages.length;
 
   const handleCreateLabel = useCallback(
-    async (name: string) => {
+    /**
+     * `applyToOpenThread` defaults to the reading-pane behaviour, where creating a
+     * label from the thread's own menu is meant to tag that thread. Creating one
+     * from the sidebar is just housekeeping and must not silently label whatever
+     * happens to be open.
+     */
+    async (name: string, { applyToOpenThread = true }: { applyToOpenThread?: boolean } = {}) => {
       if (!selectedAccountId || !name?.trim()) return;
       setCreatingLabel(true);
       try {
@@ -1722,7 +1730,7 @@ const Mailapp = () => {
         setLabels((prev) => [...prev, { ...created, type: "user" }]);
         setNewLabelName("");
         setCreateLabelExpanded(false);
-        if (selectedThreadId) {
+        if (applyToOpenThread && selectedThreadId) {
           await emailApi.batchModifyThreads(
             {
               accountId: selectedAccountId,
@@ -1742,12 +1750,12 @@ const Mailapp = () => {
         }
       } catch (err) {
         console.error("Failed to create label:", err);
-        alert("Failed to create label. Please try again.");
+        showError("Could not create that label.");
       } finally {
         setCreatingLabel(false);
       }
     },
-    [selectedAccountId, selectedThreadId, mailProvider]
+    [selectedAccountId, selectedThreadId, mailProvider, showError]
   );
 
   const handleApplyLabel = useCallback(
@@ -1771,10 +1779,10 @@ const Mailapp = () => {
         );
       } catch (err) {
         console.error("Failed to apply label:", err);
-        alert("Failed to apply label. Please try again.");
+        showError("Could not update the labels on this conversation.");
       }
     },
-    [selectedAccountId, selectedThreadId, selectedThread, mailProvider]
+    [selectedAccountId, selectedThreadId, selectedThread, mailProvider, showError]
   );
 
   const handleMarkRead = useCallback(async () => {
@@ -2377,11 +2385,14 @@ const Mailapp = () => {
                           </span>
                         </li>
                         <li
-                          className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === "ALL" ? mailStyles.navItemActive : ""}`}
-                          onClick={() => {
-                            selectFolder("ALL");
-                          }}
+                          className={`mail-type ${mailStyles.navItem} ${selectedLabelId === "ALL" ? mailStyles.navItemActive : ""}`}
                         >
+                          <button
+                            type="button"
+                            onClick={() => selectFolder("ALL")}
+                            aria-current={selectedLabelId === "ALL" ? "true" : undefined}
+                            className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
+                          >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center min-w-0">
                               <i className="ri-mail-line align-middle text-[.875rem] me-2"></i>
@@ -2393,13 +2404,17 @@ const Mailapp = () => {
                               </span>
                             )}
                           </div>
+                          </button>
                         </li>
                         <li
-                          className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === "INBOX" ? mailStyles.navItemActive : ""}`}
-                          onClick={() => {
-                            selectFolder("INBOX");
-                          }}
+                          className={`mail-type ${mailStyles.navItem} ${selectedLabelId === "INBOX" ? mailStyles.navItemActive : ""}`}
                         >
+                          <button
+                            type="button"
+                            onClick={() => selectFolder("INBOX")}
+                            aria-current={selectedLabelId === "INBOX" ? "true" : undefined}
+                            className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
+                          >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center min-w-0">
                               <i className="ri-inbox-line align-middle text-[.875rem] me-2"></i>
@@ -2411,23 +2426,29 @@ const Mailapp = () => {
                               </span>
                             )}
                           </div>
+                          </button>
                         </li>
                         {mailLabelsForNav.map((label) => (
                             <li
                               key={label.id}
-                              className={`mail-type cursor-pointer ${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
-                              onClick={() => {
-                                selectFolder(label.id);
-                              }}
+                              className={`mail-type ${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
                             >
-                              <div className="flex items-center">
-                                <i
-                                  className={`${getLabelIcon(label.id)} align-middle text-[.875rem] me-2`}
-                                ></i>
-                                <span className="flex-grow whitespace-nowrap">
-                                  {label.id === "CATEGORY_PERSONAL" ? "Archive" : label.id === "conversationhistory" ? "Conversation History" : label.name}
-                                </span>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => selectFolder(label.id)}
+                                aria-current={selectedLabelId === label.id ? "true" : undefined}
+                                className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
+                              >
+                                <div className="flex items-center">
+                                  <i
+                                    className={`${getLabelIcon(label.id)} align-middle text-[.875rem] me-2`}
+                                    aria-hidden
+                                  ></i>
+                                  <span className="flex-grow whitespace-nowrap">
+                                    {label.id === "CATEGORY_PERSONAL" ? "Archive" : label.id === "conversationhistory" ? "Conversation History" : label.name}
+                                  </span>
+                                </div>
+                              </button>
                             </li>
                           ))}
                         <li className="!px-4 !pt-4 !pb-1">
@@ -2524,26 +2545,79 @@ const Mailapp = () => {
                                 LABELS
                               </span>
                             </li>
-                            <li
-                              className="cursor-pointer !px-4 !py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-2"
-                              onClick={() => {
-                                const name = window.prompt("New label name:");
-                                if (name?.trim()) handleCreateLabel(name);
-                              }}
-                            >
-                              <i className="ri-add-line align-middle text-[.875rem] text-primary"></i>
-                              <span className="text-[0.75rem] text-primary">Create label</span>
+                            {/* window.prompt() before: unstyled, outside the page for
+                                a screen reader, and with nowhere to report a failure.
+                                This is the same inline form the reading-pane label
+                                menu already used - one create-label UI, not two. */}
+                            <li className="!px-4 !py-2">
+                              {navCreateLabelOpen ? (
+                                <form
+                                  className="flex gap-1.5"
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    void handleCreateLabel(navLabelName, {
+                                      applyToOpenThread: false,
+                                    }).then(() => {
+                                      setNavLabelName("");
+                                      setNavCreateLabelOpen(false);
+                                    });
+                                  }}
+                                >
+                                  <label htmlFor="nav-new-label" className="sr-only">
+                                    New label name
+                                  </label>
+                                  <input
+                                    id="nav-new-label"
+                                    autoFocus
+                                    value={navLabelName}
+                                    onChange={(e) => setNavLabelName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Escape") setNavCreateLabelOpen(false);
+                                    }}
+                                    placeholder="Label name"
+                                    className="form-control form-control-sm flex-1 min-w-0 !py-1.5 !px-2 !text-[0.75rem]"
+                                  />
+                                  <button
+                                    type="submit"
+                                    disabled={!navLabelName.trim() || creatingLabel}
+                                    className="ti-btn ti-btn-sm ti-btn-primary !py-1.5 !px-2.5 !mb-0 shrink-0"
+                                  >
+                                    {creatingLabel ? "..." : "Add"}
+                                  </button>
+                                </form>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setNavLabelName("");
+                                    setNavCreateLabelOpen(true);
+                                  }}
+                                  className="flex items-center gap-2 w-full text-left rounded-md"
+                                >
+                                  <i className="ri-add-line align-middle text-[.875rem] text-primary" aria-hidden />
+                                  <span className="text-[0.75rem] text-primary">Create label</span>
+                                </button>
+                              )}
                             </li>
                             {userLabelsForNav.map((label) => (
                               <li
                                 key={label.id}
-                                className={`cursor-pointer ${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
-                                onClick={() => selectFolder(label.id)}
+                                className={`${mailStyles.navItem} ${selectedLabelId === label.id ? mailStyles.navItemActive : ""}`}
                               >
-                                <div className="flex items-center">
-                                  <i className="ri-price-tag-line align-middle text-[.875rem] me-2 text-secondary"></i>
-                                  <span className="whitespace-nowrap">{label.name}</span>
-                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => selectFolder(label.id)}
+                                  aria-current={selectedLabelId === label.id ? "true" : undefined}
+                                  className="w-full text-left bg-transparent border-0 -m-2 p-2 rounded-md"
+                                >
+                                  <div className="flex items-center">
+                                    <i
+                                      className="ri-price-tag-line align-middle text-[.875rem] me-2 text-secondary"
+                                      aria-hidden
+                                    ></i>
+                                    <span className="whitespace-nowrap">{label.name}</span>
+                                  </div>
+                                </button>
                               </li>
                             ))}
                           </>
@@ -2763,10 +2837,28 @@ const Mailapp = () => {
                       </li>
                     ) : (
                       threads.map((thread) => (
+                        /* role=button rather than a real <button>: the row already
+                           contains a checkbox and two icon buttons, and nesting
+                           interactive elements inside a button is invalid. This
+                           makes the row focusable and operable by keyboard, which
+                           it was not - it was a plain <li> with an onClick. */
                         <li
                           key={thread.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-current={selectedThreadId === thread.id ? "true" : undefined}
+                          aria-label={`${thread.isUnread ? "Unread. " : ""}${thread.from || "Unknown sender"}: ${
+                            thread.subject || "(No subject)"
+                          }`}
                           className={`cursor-pointer ${mailStyles.threadRow} ${selectedThreadId === thread.id ? mailStyles.threadRowActive : ""} ${thread.isUnread ? mailStyles.threadUnread : ""}`}
                           onClick={() => handleSelectThread(thread)}
+                          onKeyDown={(e) => {
+                            if (e.target !== e.currentTarget) return; // let the inner controls handle their own keys
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              void handleSelectThread(thread);
+                            }
+                          }}
                         >
                           <div className="flex items-start !p-3.5">
                             <div className="me-2 mt-0.5" onClick={(e) => e.stopPropagation()}>
@@ -2813,7 +2905,7 @@ const Mailapp = () => {
                               <button
                                 type="button"
                                 onClick={(e) => void handleMarkUnread(thread, e)}
-                                className="ti-btn ti-btn-icon ti-btn-ghost !p-1 ms-1 self-center opacity-50 hover:opacity-100"
+                                className={`ti-btn ti-btn-icon ti-btn-ghost !p-1 ms-1 self-center opacity-50 hover:opacity-100 ${mailStyles.rowIconBtn}`}
                                 title="Mark as unread"
                                 aria-label="Mark thread as unread"
                               >
@@ -2823,7 +2915,7 @@ const Mailapp = () => {
                             <button
                               type="button"
                               onClick={(e) => handleToggleStar(thread, e)}
-                              className="ti-btn ti-btn-icon ti-btn-ghost !p-1 ms-1 self-center opacity-50 hover:opacity-100"
+                              className={`ti-btn ti-btn-icon ti-btn-ghost !p-1 ms-1 self-center opacity-50 hover:opacity-100 ${mailStyles.rowIconBtn}`}
                               title="Star"
                               aria-label={
                                 thread.labelIds?.includes("STARRED") ? "Remove star" : "Star thread"
@@ -3474,10 +3566,11 @@ const Mailapp = () => {
                           e.stopPropagation();
                           handleRemoveQuickRecipient(r.email);
                         }}
-                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-danger text-white flex items-center justify-center !p-0 opacity-0 group-hover:opacity-100 transition-opacity text-[10px]"
+                        className={`absolute -top-1 -right-1 w-4 h-4 rounded-full bg-danger text-white flex items-center justify-center !p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-[10px] ${mailStyles.quickRemoveBtn}`}
                         title="Remove"
+                        aria-label={`Remove ${r.email} from quick contacts`}
                       >
-                        <i className="ri-close-line"></i>
+                        <i className="ri-close-line" aria-hidden></i>
                       </button>
                   </div>
                 ))}

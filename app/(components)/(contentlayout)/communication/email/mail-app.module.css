@@ -1371,3 +1371,42 @@
     display: none;
   }
 }
+
+/* ── Keyboard focus ────────────────────────────────────────────────────────
+   Folder rows and thread rows are operable by keyboard now, so focus has to be
+   visible. Uses the accent colour rather than the UA default, which is close to
+   invisible on the dark paper. */
+.threadRow:focus-visible,
+.navItem button:focus-visible,
+.mailboxAvatarBtn:focus-visible,
+.mailNoticeAction:focus-visible,
+.mailNoticeDismiss:focus-visible {
+  outline: 2px solid var(--mail-accent);
+  outline-offset: -2px;
+  border-radius: var(--mail-radius-sm);
+}
+
+:global(.dark) .threadRow:focus-visible,
+:global(.dark) .navItem button:focus-visible,
+:global(.dark) .mailboxAvatarBtn:focus-visible {
+  outline-color: #fb923c;
+}
+
+/* ── Touch targets ─────────────────────────────────────────────────────────
+   The per-row star and mark-unread controls sit at roughly 24px, well under the
+   44px minimum, and the quick-contact remove button is 16px and only appears on
+   hover - unreachable on a touch screen. Grow them for coarse pointers only, so
+   the desktop layout is unchanged. */
+@media (pointer: coarse) {
+  .rowIconBtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .quickRemoveBtn {
+    width: 28px;
+    height: 28px;
+    /* Hover cannot reveal anything on touch, so it is always visible there. */
+    opacity: 1;
+  }
+}
