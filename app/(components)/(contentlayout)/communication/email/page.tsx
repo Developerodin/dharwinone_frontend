@@ -2219,7 +2219,7 @@ const Mailapp = () => {
   const handleMarkAllRead = useCallback(async () => {
     const ids = bulkTargets.ids;
     if (!selectedAccountId || ids.length === 0) return;
-    setShowMailMenu(false);
+    closeMailMenu();
     const target = new Set(ids);
     const unreadMarked = threads.filter((t) => target.has(t.id) && t.isUnread).length;
     try {
@@ -2242,7 +2242,7 @@ const Mailapp = () => {
     } catch {
       showError("Could not mark those conversations as read. Check your connection and try again.");
     }
-  }, [selectedAccountId, bulkTargets, threads, mailProvider, showError, bumpNavUnreadCounts, refreshMailboxLabels]);
+  }, [selectedAccountId, bulkTargets, threads, mailProvider, showError, bumpNavUnreadCounts, refreshMailboxLabels, closeMailMenu]);
 
   const trashThreadIds = useCallback(
     async (ids: string[]) => {
@@ -3125,34 +3125,60 @@ const Mailapp = () => {
                           {/* Destructive pair, separated and coloured so they are not
                               one careless click away from "Mark all read". */}
                           <li className="border-t dark:border-defaultborder/10 mt-1 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleMoveToSpam();
-                                setShowMailMenu(false);
-                                setMailMenuPosition(null);
-                              }}
-                              className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
-                            >
-                              {liveSelectedCount > 0
-                                ? `Report ${liveSelectedCount} as spam`
-                                : "Report all as spam"}
-                            </button>
+                            {liveSelectedCount > 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleMoveSelectedToSpam()}
+                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                >
+                                  Report {liveSelectedCount} selected as spam
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleMoveAllLoadedToSpam()}
+                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                >
+                                  Report all {threads.length} loaded as spam
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void handleMoveAllLoadedToSpam()}
+                                className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                              >
+                                Report all as spam
+                              </button>
+                            )}
                           </li>
                           <li>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleDeleteAll();
-                                setShowMailMenu(false);
-                                setMailMenuPosition(null);
-                              }}
-                              className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
-                            >
-                              {liveSelectedCount > 0
-                                ? `Move ${liveSelectedCount} to trash`
-                                : "Move all to trash"}
-                            </button>
+                            {liveSelectedCount > 0 ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteSelected()}
+                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                >
+                                  Delete selected ({liveSelectedCount})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteAllLoaded()}
+                                  className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                                >
+                                  Delete all loaded ({threads.length})
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteAllLoaded()}
+                                className="ti-dropdown-item !py-2 !px-4 w-full text-left !text-danger"
+                              >
+                                Delete all loaded
+                              </button>
+                            )}
                           </li>
                         </ul>
                       </>,
@@ -3171,6 +3197,39 @@ const Mailapp = () => {
                   <i className="ri-close-line" aria-hidden></i>
                 </button>
               </div>
+              {liveSelectedCount > 0 && (
+                <div
+                  className={mailStyles.threadListSelectionBar}
+                  role="region"
+                  aria-label="Selected conversations"
+                >
+                  <span className={mailStyles.threadListSelectionCount}>
+                    {liveSelectedCount} selected
+                  </span>
+                  <button
+                    type="button"
+                    className="ti-btn ti-btn-sm ti-btn-danger !mb-0"
+                    onClick={() => void handleDeleteSelected()}
+                  >
+                    <i className="ri-delete-bin-line me-1 align-middle" aria-hidden />
+                    Delete selected
+                  </button>
+                  <button
+                    type="button"
+                    className="ti-btn ti-btn-sm ti-btn-light !mb-0"
+                    onClick={() => void handleMarkAllRead()}
+                  >
+                    Mark read
+                  </button>
+                  <button
+                    type="button"
+                    className={`ti-btn ti-btn-sm ti-btn-light !mb-0 ${mailStyles.threadListSelectionClear}`}
+                    onClick={handleClearSelection}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
               <div className="px-4 pb-3 pt-1">
                 <div className={`flex items-stretch ${mailStyles.searchWrap}`}>
                   <input
