@@ -9,6 +9,8 @@ import { AxiosError } from 'axios'
 import * as mentorsApi from '@/shared/lib/api/mentors'
 import * as usersApi from '@/shared/lib/api/users'
 import type { Mentor, MentorExpertise, MentorExperience, MentorAddress, MentorCertification } from '@/shared/lib/api/mentors'
+
+type CertificationFormEntry = MentorCertification & { noExpiry?: boolean }
 import { PhoneCountrySelect } from '@/shared/components/PhoneCountrySelect'
 import { YmdFilterDateInput } from '@/shared/components/filters/YmdFilterDateInput'
 import {
@@ -67,7 +69,7 @@ const EditMentorClient = () => {
   })
   const [expertise, setExpertise] = useState<MentorExpertise[]>([])
   const [experience, setExperience] = useState<MentorExperience[]>([])
-  const [certifications, setCertifications] = useState<MentorCertification[]>([])
+  const [certifications, setCertifications] = useState<CertificationFormEntry[]>([])
   const [skills, setSkills] = useState<string[]>([])
   const [currentSkill, setCurrentSkill] = useState('')
   const [skillError, setSkillError] = useState('')
@@ -108,15 +110,20 @@ const EditMentorClient = () => {
         (mentor.experience ?? []).map((exp) => ({
           ...exp,
           startDate: toYmd(exp.startDate),
-          endDate: exp.endDate ? toYmd(exp.endDate) : null,
+          isCurrent: exp.isCurrent || false,
+          endDate: exp.isCurrent ? null : exp.endDate ? toYmd(exp.endDate) : null,
         }))
       )
       setCertifications(
-        (mentor.certifications ?? []).map((cert) => ({
-          ...cert,
-          issueDate: toYmd(cert.issueDate),
-          expiryDate: toYmd(cert.expiryDate),
-        }))
+        (mentor.certifications ?? []).map((cert) => {
+          const expiryDate = toYmd(cert.expiryDate)
+          return {
+            ...cert,
+            issueDate: toYmd(cert.issueDate),
+            expiryDate,
+            noExpiry: !expiryDate,
+          }
+        })
       )
       setSkills(mentor.skills ?? [])
       setBio(mentor.bio ?? '')
@@ -183,6 +190,16 @@ const EditMentorClient = () => {
     setExperience(updated)
   }
 
+  const setExperienceCurrent = (index: number, isCurrent: boolean) => {
+    const updated = [...experience]
+    updated[index] = {
+      ...updated[index],
+      isCurrent,
+      ...(isCurrent ? { endDate: null } : {}),
+    }
+    setExperience(updated)
+  }
+
   const addCertification = () => {
     setCertifications([
       ...certifications,
@@ -191,6 +208,7 @@ const EditMentorClient = () => {
         issuer: '',
         issueDate: '',
         expiryDate: '',
+        noExpiry: false,
         credentialId: '',
         credentialUrl: '',
       },
@@ -201,9 +219,19 @@ const EditMentorClient = () => {
     setCertifications(certifications.filter((_, i) => i !== index))
   }
 
-  const updateCertification = (index: number, field: keyof MentorCertification, value: any) => {
+  const updateCertification = (index: number, field: keyof CertificationFormEntry, value: any) => {
     const updated = [...certifications]
     updated[index] = { ...updated[index], [field]: value }
+    setCertifications(updated)
+  }
+
+  const setCertificationNoExpiry = (index: number, noExpiry: boolean) => {
+    const updated = [...certifications]
+    updated[index] = {
+      ...updated[index],
+      noExpiry,
+      ...(noExpiry ? { expiryDate: '' } : {}),
+    }
     setCertifications(updated)
   }
 
@@ -254,6 +282,21 @@ const EditMentorClient = () => {
       return
     }
 
+    const invalidExpiryCert = certifications.find((c) => {
+      if (!c.name.trim() || !c.issuer.trim() || c.noExpiry) return false
+      if (!c.expiryDate?.trim()) return true
+      if (c.issueDate && c.expiryDate < c.issueDate) return true
+      return false
+    })
+    if (invalidExpiryCert) {
+      setError(
+        !invalidExpiryCert.expiryDate?.trim()
+          ? 'Each certification needs an expiry date, or select No expiry.'
+          : 'Certification expiry date must be on or after the issue date.'
+      )
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -264,15 +307,20 @@ const EditMentorClient = () => {
       }
 
       const expertiseArray = expertise.map((exp) => ({
-        ...exp,
+        area: exp.area || undefined,
+        level: exp.level || undefined,
         yearsOfExperience: exp.yearsOfExperience || undefined,
+        description: exp.description || undefined,
       }))
 
       const experienceArray = experience.map((exp) => ({
-        ...exp,
+        title: exp.title || undefined,
+        company: exp.company || undefined,
+        location: exp.location || undefined,
         startDate: exp.startDate || undefined,
         endDate: exp.isCurrent ? null : exp.endDate || undefined,
         isCurrent: exp.isCurrent || false,
+        description: exp.description || undefined,
       }))
 
       const certificationsArray = certifications
@@ -281,7 +329,7 @@ const EditMentorClient = () => {
           name: cert.name.trim(),
           issuer: cert.issuer.trim(),
           ...(cert.issueDate && { issueDate: cert.issueDate }),
-          ...(cert.expiryDate && { expiryDate: cert.expiryDate }),
+          expiryDate: cert.noExpiry ? null : cert.expiryDate || null,
           ...(cert.credentialId && { credentialId: cert.credentialId }),
           ...(cert.credentialUrl && { credentialUrl: cert.credentialUrl }),
         }))
@@ -761,12 +809,7 @@ const EditMentorClient = () => {
                                   <input
                                     type="checkbox"
                                     checked={exp.isCurrent || false}
-                                    onChange={(e) => {
-                                      updateExperience(index, 'isCurrent', e.target.checked)
-                                      if (e.target.checked) {
-                                        updateExperience(index, 'endDate', null)
-                                      }
-                                    }}
+                                    onChange={(e) => setExperienceCurrent(index, e.target.checked)}
                                     className="form-check-input"
                                   />
                                   <span className="text-sm text-defaulttextcolor">Current</span>
@@ -859,7 +902,23 @@ const EditMentorClient = () => {
                                   variant="form"
                                   labelClassName="form-label block"
                                   inputId={`cert-expiry-${index}`}
+                                  minDate={cert.noExpiry ? undefined : cert.issueDate || undefined}
+                                  disabled={!!cert.noExpiry}
                                 />
+                                <label
+                                  className="flex items-center gap-2 cursor-pointer mt-2"
+                                  htmlFor={`cert-no-expiry-${index}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    id={`cert-no-expiry-${index}`}
+                                    checked={cert.noExpiry || false}
+                                    onChange={(e) => setCertificationNoExpiry(index, e.target.checked)}
+                                    className="form-check-input"
+                                    aria-checked={cert.noExpiry || false}
+                                  />
+                                  <span className="text-sm text-defaulttextcolor">No expiry</span>
+                                </label>
                               </div>
                               <div>
                                 <label className="form-label block" htmlFor={`cert-id-${index}`}>Credential ID</label>

@@ -10,8 +10,11 @@ import * as authApi from '@/shared/lib/api/auth'
 import { useAuth } from '@/shared/contexts/auth-context'
 import { hasPermission } from '@/shared/lib/permissions'
 import type { RegisterMentorPayload } from '@/shared/lib/api/auth'
+import type { MentorExperience } from '@/shared/lib/api/mentors'
+import { YmdFilterDateInput } from '@/shared/components/filters/YmdFilterDateInput'
 
 const PASSWORD_MIN_LENGTH = 8
+const TEXTAREA_CLASS = 'form-control min-h-[5.5rem] resize-y'
 
 function getErrorMessage(err: any): string {
   if (err instanceof AxiosError) {
@@ -33,8 +36,44 @@ const AddMentor = () => {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [experience, setExperience] = useState<MentorExperience[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  const addExperience = () => {
+    setExperience([
+      ...experience,
+      {
+        title: '',
+        company: '',
+        location: '',
+        startDate: '',
+        endDate: null,
+        isCurrent: false,
+        description: '',
+      },
+    ])
+  }
+
+  const removeExperience = (index: number) => {
+    setExperience(experience.filter((_, i) => i !== index))
+  }
+
+  const updateExperience = (index: number, field: keyof MentorExperience, value: unknown) => {
+    const updated = [...experience]
+    updated[index] = { ...updated[index], [field]: value }
+    setExperience(updated)
+  }
+
+  const setExperienceCurrent = (index: number, isCurrent: boolean) => {
+    const updated = [...experience]
+    updated[index] = {
+      ...updated[index],
+      isCurrent,
+      ...(isCurrent ? { endDate: null } : {}),
+    }
+    setExperience(updated)
+  }
 
   const validateForm = (): string | null => {
     const trimmedName = name.trim()
@@ -73,18 +112,29 @@ const AddMentor = () => {
     const trimmedName = name.trim()
     const trimmedEmail = email.trim().toLowerCase()
 
+    const experienceArray = experience.map((exp) => ({
+      title: exp.title || undefined,
+      company: exp.company || undefined,
+      location: exp.location || undefined,
+      startDate: exp.startDate || undefined,
+      endDate: exp.isCurrent ? null : exp.endDate || undefined,
+      isCurrent: exp.isCurrent || false,
+      description: exp.description || undefined,
+    }))
+
     setLoading(true)
 
     try {
-      // Use registerMentor API which creates User + Mentor profile automatically
-      // Mentor role is automatically assigned by the backend
-      await authApi.registerMentor({
+      const payload: RegisterMentorPayload = {
         name: trimmedName,
         email: trimmedEmail,
         password,
-        // Admin registration: isEmailVerified will be true (handled by backend when auth token is present)
-        // No need to pass roleIds - Mentor role is automatically assigned
-      })
+      }
+      if (experienceArray.length > 0) {
+        payload.experience = experienceArray
+      }
+
+      await authApi.registerMentor(payload)
 
       await Swal.fire({
         icon: 'success',
@@ -243,6 +293,112 @@ const AddMentor = () => {
                     <p className="text-[0.75rem] text-defaulttextcolor/70 mt-1 mb-0">
                       Must match the password above.
                     </p>
+                  </div>
+
+                  <div className="mb-8">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-defaulttextcolor">Work Experience</h3>
+                      <button type="button" onClick={addExperience} className="ti-btn ti-btn-primary">
+                        <i className="ri-add-line me-1"></i>Add Experience
+                      </button>
+                    </div>
+
+                    {experience.length === 0 ? (
+                      <p className="text-defaulttextcolor/70 text-sm mb-4">No experience entries added.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {experience.map((exp, index) => (
+                          <div key={index} className="border rounded-lg p-4 bg-gray-50 dark:bg-gray-800/50">
+                            <div className="flex items-center justify-between mb-4">
+                              <h4 className="font-medium text-defaulttextcolor">Experience Entry {index + 1}</h4>
+                              <button
+                                type="button"
+                                onClick={() => removeExperience(index)}
+                                className="ti-btn ti-btn-sm ti-btn-danger"
+                              >
+                                <i className="ri-delete-bin-line"></i>
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                              <div>
+                                <label className="form-label block" htmlFor={`exp-title-${index}`}>Job Title</label>
+                                <input
+                                  id={`exp-title-${index}`}
+                                  type="text"
+                                  className="form-control"
+                                  placeholder="e.g. Senior Engineer"
+                                  value={exp.title || ''}
+                                  onChange={(e) => updateExperience(index, 'title', e.target.value)}
+                                />
+                              </div>
+                              <div>
+                                <label className="form-label block" htmlFor={`exp-company-${index}`}>Company</label>
+                                <input
+                                  id={`exp-company-${index}`}
+                                  type="text"
+                                  className="form-control"
+                                  placeholder="e.g. Acme Corp"
+                                  value={exp.company || ''}
+                                  onChange={(e) => updateExperience(index, 'company', e.target.value)}
+                                />
+                              </div>
+                              <div className="lg:col-span-2">
+                                <label className="form-label block" htmlFor={`exp-location-${index}`}>Location</label>
+                                <input
+                                  id={`exp-location-${index}`}
+                                  type="text"
+                                  className="form-control"
+                                  placeholder="e.g. Bengaluru, India"
+                                  value={exp.location || ''}
+                                  onChange={(e) => updateExperience(index, 'location', e.target.value)}
+                                />
+                              </div>
+                              <div>
+                                <YmdFilterDateInput
+                                  label="Start Date"
+                                  value={exp.startDate || ''}
+                                  onCommit={(v) => updateExperience(index, 'startDate', v)}
+                                  variant="form"
+                                  labelClassName="form-label block"
+                                  inputId={`exp-start-${index}`}
+                                />
+                              </div>
+                              <div>
+                                <YmdFilterDateInput
+                                  label="End Date"
+                                  value={exp.endDate || ''}
+                                  onCommit={(v) => updateExperience(index, 'endDate', v || null)}
+                                  variant="form"
+                                  labelClassName="form-label block"
+                                  inputId={`exp-end-${index}`}
+                                  disabled={!!exp.isCurrent}
+                                />
+                                <label className="flex items-center gap-2 cursor-pointer mt-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={exp.isCurrent || false}
+                                    onChange={(e) => setExperienceCurrent(index, e.target.checked)}
+                                    className="form-check-input"
+                                  />
+                                  <span className="text-sm text-defaulttextcolor">Current</span>
+                                </label>
+                              </div>
+                              <div className="lg:col-span-2">
+                                <label className="form-label block" htmlFor={`exp-desc-${index}`}>Description</label>
+                                <textarea
+                                  id={`exp-desc-${index}`}
+                                  className={TEXTAREA_CLASS}
+                                  placeholder="Describe responsibilities and impact"
+                                  rows={3}
+                                  value={exp.description || ''}
+                                  onChange={(e) => updateExperience(index, 'description', e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Form Actions */}

@@ -41,7 +41,7 @@ export interface MentorCertification {
   name: string;
   issuer: string;
   issueDate?: string;
-  expiryDate?: string;
+  expiryDate?: string | null;
   credentialId?: string;
   credentialUrl?: string;
 }
