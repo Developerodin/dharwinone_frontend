@@ -32,6 +32,7 @@ import { buildPrintDocument } from "./_utils/printEmail";
 import { resolveBulkTargets } from "./_utils/bulkSelection";
 import { htmlHasBlockedImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody";
 import { isPermanentDeleteFolderId, isSpamFolderId } from "./_utils/deleteScope";
+import { ARCHIVE_LABEL_ID, resolveListScope } from "./_utils/listScope";
 import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
 import "react-perfect-scrollbar/dist/css/styles.css";
@@ -1046,9 +1047,8 @@ const Mailapp = () => {
         const res = await emailApi.getThreads(
           {
             accountId: id,
-            labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
+            ...resolveListScope(mailProvider, selectedLabelId, searchQuery),
             pageSize: 20,
-            q: searchQuery || undefined,
           },
           mailProvider
         );
@@ -1130,10 +1130,9 @@ const Mailapp = () => {
       const res = await emailApi.getThreads(
         {
           accountId: selectedAccountId,
-          labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
+          ...resolveListScope(mailProvider, selectedLabelId, searchQuery),
           pageToken: nextPageToken,
           pageSize: 20,
-          q: searchQuery || undefined,
         },
         mailProvider
       );
@@ -1491,9 +1490,8 @@ const Mailapp = () => {
       const res = await emailApi.getThreads(
         {
           accountId: selectedAccountId,
-          labelId: selectedLabelId === "ALL" ? undefined : selectedLabelId,
+          ...resolveListScope(mailProvider, selectedLabelId, searchQuery),
           pageSize: 20,
-          q: searchQuery || undefined,
         },
         mailProvider
       );
@@ -2762,13 +2760,20 @@ const Mailapp = () => {
       return true;
     }
     const isSystem = ["SENT", "DRAFT", "TRASH", "SPAM", "STARRED", "IMPORTANT"].includes(l.id);
-    const isArchive = l.id === "CATEGORY_PERSONAL";
     const isUser = l.type === "user";
-    const showInSidebar = l.labelListVisibility !== "labelHide" || isSystem || isArchive;
-    return showInSidebar && (isSystem || isArchive || isUser);
+    const showInSidebar = l.labelListVisibility !== "labelHide" || isSystem;
+    return showInSidebar && (isSystem || isUser);
   });
 
-  const mailLabelsOrdered = [...filteredLabels].sort((a, b) => {
+  // Gmail has no archive folder, so it returns no label to hang this entry off.
+  // Selecting it asks for All Mail minus the inbox instead - see resolveListScope.
+  // Outlook has a real Archive folder and already lists it among its own.
+  const navLabels =
+    currentProvider === "gmail"
+      ? [...filteredLabels, { id: ARCHIVE_LABEL_ID, name: "Archive", type: "system" as const }]
+      : filteredLabels;
+
+  const mailLabelsOrdered = [...navLabels].sort((a, b) => {
     const ai = MAILS_ORDER.indexOf(a.id);
     const bi = MAILS_ORDER.indexOf(b.id);
     if (ai >= 0 && bi >= 0) return ai - bi;
@@ -3091,7 +3096,7 @@ const Mailapp = () => {
                                       aria-hidden
                                     ></i>
                                     <span className="whitespace-nowrap">
-                                      {label.id === "CATEGORY_PERSONAL" ? "Archive" : label.id === "conversationhistory" ? "Conversation History" : label.name}
+                                      {label.id === "conversationhistory" ? "Conversation History" : label.name}
                                     </span>
                                   </div>
                                   <MailNavUnreadBadge count={unreadForLabel(label.id)} />
@@ -3294,7 +3299,8 @@ const Mailapp = () => {
                       ? "All mail"
                       : selectedLabelId === "INBOX"
                         ? "Inbox"
-                        : labels.find((l) => l.id === selectedLabelId)?.name ?? selectedLabelId}
+                        : mailLabelsForNav.find((l) => l.id === selectedLabelId)?.name ??
+                          selectedLabelId}
                   </h6>
                 </div>
                 <div className="hs-dropdown ti-dropdown relative">
