@@ -30,7 +30,7 @@ import { buildForwardQuote, buildReplyQuote, cleanHtmlForSend } from "./_utils/c
 import { parseQuickRecipients } from "./_utils/quickRecipients";
 import { buildPrintDocument } from "./_utils/printEmail";
 import { resolveBulkTargets } from "./_utils/bulkSelection";
-import { prepareMailBodyHtml } from "./_utils/mailHtmlBody";
+import { htmlHasRemoteImages, prepareMailBodyHtml } from "./_utils/mailHtmlBody";
 import { isPermanentDeleteFolderId } from "./_utils/deleteScope";
 import FocusLock from "react-focus-lock";
 import PerfectScrollbar from "react-perfect-scrollbar";
@@ -521,6 +521,22 @@ const Mailapp = () => {
   }, []);
 
   const isPermanentDeleteFolder = isPermanentDeleteFolderId(selectedLabelId);
+
+  /**
+   * Which conversation the reader has agreed to load remote media for.
+   *
+   * Held as a thread id rather than a boolean so it expires by itself when
+   * another conversation is opened - consenting once must not quietly consent
+   * for everything opened afterwards.
+   */
+  const [remoteImagesAllowedFor, setRemoteImagesAllowedFor] = useState<string | null>(null);
+  const remoteImagesAllowed =
+    remoteImagesAllowedFor !== null && remoteImagesAllowedFor === selectedThreadId;
+  /** Only offer the banner when there is actually something being held back. */
+  const threadHasRemoteImages = useMemo(
+    () => threadMessages.some((m) => m.htmlBody && htmlHasRemoteImages(m.htmlBody)),
+    [threadMessages]
+  );
 
   const requestMailConfirm = useCallback((options: MailConfirmRequest): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -3813,6 +3829,26 @@ const Mailapp = () => {
                         ) : null}
                       </div>
                     </div>
+                    {/* Remote media is held back until the reader asks for it: a
+                        tracking pixel reports the read time and the reader's IP
+                        back to whoever sent the message. Inline data: and cid:
+                        images are unaffected, so signatures still render. */}
+                    {threadHasRemoteImages && !remoteImagesAllowed ? (
+                      <div className={mailStyles.remoteImageNotice} role="status">
+                        <i className="ri-image-line" aria-hidden />
+                        <span className={mailStyles.remoteImageNoticeText}>
+                          Images in this conversation are not shown, so the sender is not told you
+                          opened it.
+                        </span>
+                        <button
+                          type="button"
+                          className={mailStyles.remoteImageNoticeAction}
+                          onClick={() => setRemoteImagesAllowedFor(selectedThreadId)}
+                        >
+                          Show images
+                        </button>
+                      </div>
+                    ) : null}
                     <div
                       className={threadMessages.length > 0 ? mailStyles.threadConversation : undefined}
                       role="region"
@@ -3874,7 +3910,9 @@ const Mailapp = () => {
                             dangerouslySetInnerHTML={{
                               __html:
                                 (msg.htmlBody && msg.htmlBody.trim()
-                                  ? prepareMailBodyHtml(msg.htmlBody)
+                                  ? prepareMailBodyHtml(msg.htmlBody, {
+                                      loadRemoteImages: remoteImagesAllowed,
+                                    })
                                   : null) ||
                                 (msg.textBody
                                   ? `<pre class="whitespace-pre-wrap">${escapeHtmlForTextNode(msg.textBody)}</pre>`

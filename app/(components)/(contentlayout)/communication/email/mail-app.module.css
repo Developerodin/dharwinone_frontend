@@ -1694,3 +1694,69 @@
     opacity: 1;
   }
 }
+
+/* ── Remote media notice ───────────────────────────────────────────────────
+   Shown when a conversation's remote images are held back. Deliberately quiet:
+   it is a standing condition of the message, not an error. */
+.remoteImageNotice {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: var(--mail-radius-sm);
+  background: var(--mail-accent-mist);
+  border: 1px solid rgba(194, 65, 12, 0.16);
+  color: var(--mail-ink-soft);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+:global(.dark) .remoteImageNotice {
+  border-color: rgba(251, 146, 60, 0.22);
+}
+
+.remoteImageNoticeText {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.remoteImageNoticeAction {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.875rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mail-accent);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.remoteImageNoticeAction:hover {
+  background: var(--mail-accent-hover);
+}
+
+.remoteImageNoticeAction:focus-visible {
+  outline: 2px solid var(--mail-accent);
+  outline-offset: 2px;
+}
+
+/* An image whose source was withheld still occupies layout; give it a visible
+   placeholder instead of a broken-image glyph. */
+.mailHtmlCanvas img[data-remote-image="blocked"] {
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  border: 1px dashed rgba(28, 25, 23, 0.22);
+  border-radius: 6px;
+  background: rgba(28, 25, 23, 0.03);
+}
+
+:global(.dark) .mailHtmlCanvas img[data-remote-image="blocked"] {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+}
