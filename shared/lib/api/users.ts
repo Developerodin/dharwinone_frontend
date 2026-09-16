@@ -289,6 +289,8 @@ export interface NotificationPreferences {
   assignmentUpdatesInApp?: boolean;
   projectUpdatesInApp?: boolean;
   sopAssignmentsInApp?: boolean;
+  smartNudges?: boolean;
+  smartNudgesInApp?: boolean;
 }
 
 export interface ProfilePicturePayload {
