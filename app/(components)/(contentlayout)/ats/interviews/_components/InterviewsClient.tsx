@@ -27,6 +27,7 @@ import {
 } from '@/shared/lib/ats/applicationPipeline'
 import { wallClockToUtc, formatDualZone, getViewerTimezone, utcInstantToWallClock, listTimezones, normalizeTimezone, localDateKey, wallClockDateKey, formatDateInZone } from '@/shared/lib/timezone'
 import CreateInterviewModal, { type SchedulePrefill } from './CreateInterviewModal'
+import InterviewBiasPanel from './InterviewBiasPanel'
 import RecordingsModal from './RecordingsModal'
 import InterviewsFilterPanel from './InterviewsFilterPanel'
 import { detectOverlap } from './interviewOverlap'
@@ -2846,6 +2847,8 @@ export default function InterviewsClient() {
                       </p>
                     )}
                   </div>
+
+                  <InterviewBiasPanel meetingId={resultModalInterview.id} canRerun={canEdit} />
                 </>
               )}
             </div>
