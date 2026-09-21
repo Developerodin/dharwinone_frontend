@@ -7,7 +7,7 @@ import { useAuth } from '@/shared/contexts/auth-context'
 import { useFeaturePermissions } from '@/shared/hooks/use-feature-permissions'
 import { appendJoinIdentityToUrl } from '@/shared/lib/join-room-url'
 import { useTable, useSortBy } from 'react-table'
-import { createMeeting, listMeetings, getMeeting, getMeetingRecordings, updateMeeting, deleteMeeting, exportInterviewsExcel, internalTransferEmployee, type Meeting, type CreateMeetingPayload, type MeetingRecording, type UpdateMeetingPayload, type InterviewScorecard, type RubricCriterionId } from '@/shared/lib/api/meetings'
+import { createMeeting, listMeetings, getMeeting, getMeetingRecordings, updateMeeting, deleteMeeting, exportInterviewsExcel, internalTransferEmployee, type Meeting, type CreateMeetingPayload, type MeetingRecording, type UpdateMeetingPayload, type InterviewScorecard, type RubricCriterionId, type InterviewBiasSummary } from '@/shared/lib/api/meetings'
 import { buildInterviewExportParams, buildInterviewListParams } from '@/shared/lib/ats/interview-list-query'
 import ListPagination from '@/shared/components/ListPagination'
 import Swal from 'sweetalert2'
@@ -27,7 +27,8 @@ import {
 } from '@/shared/lib/ats/applicationPipeline'
 import { wallClockToUtc, formatDualZone, getViewerTimezone, utcInstantToWallClock, listTimezones, normalizeTimezone, localDateKey, wallClockDateKey, formatDateInZone } from '@/shared/lib/timezone'
 import CreateInterviewModal, { type SchedulePrefill } from './CreateInterviewModal'
-import InterviewBiasPanel from './InterviewBiasPanel'
+import InterviewBiasBadge from './InterviewBiasBadge'
+import InterviewBiasDrawer from './InterviewBiasDrawer'
 import RecordingsModal from './RecordingsModal'
 import InterviewsFilterPanel from './InterviewsFilterPanel'
 import { detectOverlap } from './interviewOverlap'
@@ -89,6 +90,8 @@ interface InterviewTableRow {
   interviewResult: 'pending' | 'selected' | 'rejected'
   /** Saved rubric scores, so the result modal reads them back for whoever opens it next. */
   interviewScorecard?: InterviewScorecard
+  /** Quote-free bias chip. Full review loads in the drawer. */
+  biasSummary?: InterviewBiasSummary
   /** Public join URL for the interview (copy link) */
   publicMeetingUrl: string
   meetingId: string
@@ -252,6 +255,7 @@ function meetingToTableRow(m: Meeting, viewerTz?: string): InterviewTableRow {
     status: m.status || 'Scheduled',
     interviewResult: (m.interviewResult || 'pending') as 'pending' | 'selected' | 'rejected',
     interviewScorecard: m.interviewScorecard,
+    biasSummary: m.biasSummary,
     publicMeetingUrl: m.publicMeetingUrl || (typeof window !== 'undefined' ? `${window.location.origin}/join/room?room=${encodeURIComponent(m.meetingId || '')}` : ''),
     meetingId: m.meetingId || '',
   }
@@ -396,6 +400,7 @@ export default function InterviewsClient() {
   const [resultModalRatings, setResultModalRatings] = useState<RubricRatingMap>({})
   const [resultModalComment, setResultModalComment] = useState('')
   const [resultUpdating, setResultUpdating] = useState(false)
+  const [biasDrawer, setBiasDrawer] = useState<{ id: string; title: string } | null>(null)
 
   // Copy interview link feedback
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null)
@@ -853,6 +858,14 @@ export default function InterviewsClient() {
     setResultModalRatings({})
     setResultModalComment('')
     ;(window as any).HSOverlay?.close(document.querySelector('#interview-result-modal'))
+  }, [])
+
+  /**
+   * Open the bias review drawer for one interview. Does not change pass/fail.
+   * @param row table/card/view interview
+   */
+  const openBiasDrawer = useCallback((row: { id: string; position?: string; title?: string }) => {
+    setBiasDrawer({ id: row.id, title: row.position || row.title || 'Interview' })
   }, [])
 
   /** Click the rating you already gave to clear it — a skipped criterion is absent, not a 0. */
@@ -1679,10 +1692,11 @@ export default function InterviewsClient() {
           }
           const config = resultConfig[interview.interviewResult] || resultConfig.pending
           return (
-            <div className="flex justify-center items-center min-w-0 max-w-full px-0.5">
+            <div className="flex flex-col items-center justify-center gap-1 min-w-0 max-w-full px-0.5">
               <span className={`${INTERVIEW_BADGE_BASE_CLASS} text-xs max-w-full truncate ${config.className}`}>
                 {config.label}
               </span>
+              <InterviewBiasBadge summary={interview.biasSummary} onOpen={() => openBiasDrawer(interview)} />
             </div>
           )
         },
@@ -1809,6 +1823,7 @@ export default function InterviewsClient() {
     [
       selectedRows,
       openResultModal,
+      openBiasDrawer,
       copyInterviewLink,
       copiedLinkId,
       openEditModal,
@@ -2296,6 +2311,9 @@ export default function InterviewsClient() {
                             }`}>
                               {interview.status || 'Scheduled'}
                             </span>
+                            <div className="mt-1">
+                              <InterviewBiasBadge summary={interview.biasSummary} onOpen={() => openBiasDrawer(interview)} />
+                            </div>
                             <div className="flex flex-wrap gap-1 mt-2">
                               <button
                                 type="button"
@@ -2487,6 +2505,7 @@ export default function InterviewsClient() {
                         <span className={`${INTERVIEW_BADGE_BASE_CLASS} text-[0.65rem] ${result.className}`}>
                           {result.label}
                         </span>
+                        <InterviewBiasBadge summary={interview.biasSummary} onOpen={() => openBiasDrawer(interview)} />
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         <button
@@ -2707,9 +2726,15 @@ export default function InterviewsClient() {
         <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out transition-all sm:max-w-lg">
           <div className="ti-modal-content border border-defaultborder dark:border-defaultborder/10 rounded-xl shadow-xl overflow-hidden">
             <div className="ti-modal-header bg-gray-50 dark:bg-black/20 border-b border-defaultborder dark:border-defaultborder/10 px-6 py-4">
-              <h3 id="interview-result-modal-label" className="ti-modal-title text-lg font-semibold text-defaulttextcolor dark:text-white flex items-center gap-2">
-                <i className="ri-checkbox-circle-line text-primary"></i>
-                Interview result
+              <h3 id="interview-result-modal-label" className="ti-modal-title text-lg font-semibold text-defaulttextcolor dark:text-white flex items-center gap-2 min-w-0">
+                <i className="ri-checkbox-circle-line text-primary shrink-0"></i>
+                <span className="truncate">Interview result</span>
+                {resultModalInterview ? (
+                  <InterviewBiasBadge
+                    summary={resultModalInterview.biasSummary}
+                    onOpen={() => openBiasDrawer(resultModalInterview)}
+                  />
+                ) : null}
               </h3>
               <button
                 type="button"
@@ -2847,8 +2872,6 @@ export default function InterviewsClient() {
                       </p>
                     )}
                   </div>
-
-                  <InterviewBiasPanel meetingId={resultModalInterview.id} canRerun={canEdit} />
                 </>
               )}
             </div>
@@ -2894,9 +2917,20 @@ export default function InterviewsClient() {
         <div className="hs-overlay-open:mt-7 ti-modal-box mt-0 ease-out transition-all sm:max-w-2xl">
           <div className="ti-modal-content border border-defaultborder dark:border-defaultborder/10 rounded-xl shadow-xl overflow-hidden">
             <div className="ti-modal-header bg-gray-50 dark:bg-black/20 border-b border-defaultborder dark:border-defaultborder/10 px-6 py-4">
-              <h3 id="edit-interview-modal-label" className="ti-modal-title text-lg font-semibold text-defaulttextcolor dark:text-white flex items-center gap-2">
-                <i className="ri-pencil-line text-info"></i>
-                Edit Interview
+              <h3 id="edit-interview-modal-label" className="ti-modal-title text-lg font-semibold text-defaulttextcolor dark:text-white flex items-center gap-2 min-w-0">
+                <i className={editReadOnly ? 'ri-eye-line text-info shrink-0' : 'ri-pencil-line text-info shrink-0'}></i>
+                <span className="truncate">{editReadOnly ? 'View interview' : 'Edit Interview'}</span>
+                {editMeeting ? (
+                  <InterviewBiasBadge
+                    summary={editMeeting.biasSummary}
+                    onOpen={() =>
+                      openBiasDrawer({
+                        id: String(editMeeting.id ?? editMeeting._id ?? ''),
+                        title: editMeeting.title,
+                      })
+                    }
+                  />
+                ) : null}
               </h3>
               <button
                 type="button"
@@ -2936,6 +2970,15 @@ export default function InterviewsClient() {
                     invites={editEmailInvites}
                     notes={editMeeting.notes}
                   />
+                  <div className="pt-1">
+                    <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-textmuted dark:text-white/50 mb-1.5">
+                      Bias review
+                    </p>
+                    <InterviewBiasBadge
+                      summary={editMeeting.biasSummary}
+                      onOpen={() => openBiasDrawer({ id: String(editMeeting.id ?? editMeeting._id ?? ''), title: editMeeting.title })}
+                    />
+                  </div>
                   <div className="flex justify-end pt-4 border-t border-defaultborder dark:border-defaultborder/10">
                     <button type="button" className="ti-btn ti-btn-light !py-2 !px-4 !text-sm font-medium" onClick={closeEditModal}>Close</button>
                   </div>
@@ -3134,6 +3177,14 @@ export default function InterviewsClient() {
           </div>
         </div>
       )}
+
+      <InterviewBiasDrawer
+        open={Boolean(biasDrawer)}
+        meetingId={biasDrawer?.id || ''}
+        title={biasDrawer?.title}
+        canRerun={canEdit}
+        onClose={() => setBiasDrawer(null)}
+      />
 
       <InterviewsFilterPanel
         filters={filters}
