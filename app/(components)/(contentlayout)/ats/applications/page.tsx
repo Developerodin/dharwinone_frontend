@@ -27,6 +27,16 @@ import {
 import { YmdFilterDateInput } from "@/shared/components/filters/YmdFilterDateInput";
 import { getReferralLeadsDateRangeError, getYmdDateRangeIncompleteError } from "@/shared/lib/ymd-filter-date-input.util";
 import { alertYmdDateRangeIncomplete } from "@/shared/lib/ymd-filter-date-range-alert";
+import {
+  ApplicantFitChips,
+  CulturalFitCell,
+  SuccessProbabilityCell,
+  applicantFitNeedsWarm,
+} from "./_components/ApplicantFitCells";
+import {
+  ApplicantFitColumnHeader,
+  ApplicantFitInfoDrawer,
+} from "./_components/ApplicantFitInfoDrawer";
 
 const APPLIED_TO_INPUT_ID = "applications-applied-to";
 
@@ -319,6 +329,7 @@ export default function ApplicationsPage() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const fetchGenerationRef = useRef(0);
   const prevDebouncedSearchRef = useRef(debouncedSearch);
+  const didFitRefetchRef = useRef(false);
 
   const [jobOptions, setJobOptions] = useState<JobFilterOptionItem[]>([]);
   const [jobOptionsLoading, setJobOptionsLoading] = useState(false);
@@ -365,14 +376,14 @@ export default function ApplicationsPage() {
     }
   }, []);
 
-  const fetchApplications = useCallback(() => {
+  const fetchApplications = useCallback((opts?: { silent?: boolean }) => {
     const generation = ++fetchGenerationRef.current;
     const incompleteMsg = getYmdDateRangeIncompleteError("Applied from", "Applied to", dateFrom, dateTo);
     if (incompleteMsg) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
     const params: Parameters<typeof listJobApplications>[0] = {
       limit: LIST_PAGE_SIZE,
       page,
@@ -414,7 +425,7 @@ export default function ApplicationsPage() {
         setTotalPages(0);
       })
       .finally(() => {
-        if (generation === fetchGenerationRef.current) setLoading(false);
+        if (generation === fetchGenerationRef.current && !opts?.silent) setLoading(false);
       });
   }, [page, sortBy, debouncedSearch, statusFilters, jobFilter, departmentFilter, dateFrom, dateTo]);
 
@@ -425,6 +436,21 @@ export default function ApplicationsPage() {
     }
     fetchApplications();
   }, [user, fetchApplications]);
+
+  useEffect(() => {
+    didFitRefetchRef.current = false;
+  }, [page, sortBy, debouncedSearch, statusFilters, jobFilter, departmentFilter, dateFrom, dateTo]);
+
+  useEffect(() => {
+    if (loading || didFitRefetchRef.current) return;
+    const needsWarm = rows.some((row) => applicantFitNeedsWarm(row.applicantFit));
+    if (!needsWarm) return;
+    const timer = window.setTimeout(() => {
+      didFitRefetchRef.current = true;
+      fetchApplications({ silent: true });
+    }, 10000);
+    return () => window.clearTimeout(timer);
+  }, [loading, rows, fetchApplications]);
 
   const handleStatusChange = async (app: ApplicationWithDocs, next: JobApplicationStatus) => {
     const id = String(app._id ?? app.id ?? "");
@@ -860,6 +886,7 @@ export default function ApplicationsPage() {
                             fullWidth
                           />
                         </div>
+                        <ApplicantFitChips fit={app.applicantFit} />
                         <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-defaultborder/40 dark:border-white/10">
                           {meta.resumeUrl ? (
                             <a
@@ -887,13 +914,19 @@ export default function ApplicationsPage() {
                 </div>
 
                 <div className="hidden xl:block table-responsive overflow-x-auto">
-                  <table className="table table-hover table-bordered min-w-[72rem] w-full text-sm">
+                  <table className="table table-hover table-bordered min-w-[80rem] w-full text-sm">
                     <thead>
                       <tr>
                         <th scope="col" className="!text-start min-w-[14rem]">Applicant</th>
                         <th scope="col" className="!text-start min-w-[14rem] max-w-[20rem]">Applied Job</th>
                         <th scope="col" className="!text-start min-w-[8rem]">Department</th>
                         <th scope="col" className="!text-start min-w-[11rem]">Status</th>
+                        <th scope="col" className="!text-start whitespace-nowrap">
+                          <ApplicantFitColumnHeader kind="success" />
+                        </th>
+                        <th scope="col" className="!text-start whitespace-nowrap">
+                          <ApplicantFitColumnHeader kind="culture" />
+                        </th>
                         <th scope="col" className="!text-start whitespace-nowrap">Applied Date</th>
                         <th scope="col" className="!text-start whitespace-nowrap">Resume</th>
                         <th scope="col" className="!text-start min-w-[11rem]">Actions</th>
@@ -950,6 +983,12 @@ export default function ApplicationsPage() {
                                 disabled={isUpdating}
                                 onChange={(next) => handleStatusChange(app, next)}
                               />
+                            </td>
+                            <td className="align-middle whitespace-nowrap">
+                              <SuccessProbabilityCell fit={app.applicantFit} />
+                            </td>
+                            <td className="align-middle whitespace-nowrap">
+                              <CulturalFitCell fit={app.applicantFit} />
                             </td>
                             <td className="align-middle whitespace-nowrap">
                               <span title={meta.appliedAt ?? ""}>{formatDate(meta.appliedAt)}</span>
@@ -1049,6 +1088,7 @@ export default function ApplicationsPage() {
           </div>
         </div>
       )}
+      <ApplicantFitInfoDrawer />
     </Fragment>
   );
 }
